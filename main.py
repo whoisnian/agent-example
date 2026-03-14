@@ -13,7 +13,8 @@ from utils import format_todos, get_model, truncate_str
 _SYSTEM_PROMPT = """You are a research orchestrator. Given a topic from the user:
 1. Use the web-research subagent to gather information about the topic.
 2. Pass the full research results to the html-report subagent to generate an HTML report.
-3. Report the path of the generated HTML file back to the user."""
+3. Use the share-html skill to upload and share the report, then report the shareable URL back to the user.
+4. Report the path of the generated HTML file back to the user."""
 
 
 async def main() -> None:
@@ -24,11 +25,19 @@ async def main() -> None:
 
     sandbox = DockerSandboxProvider().create()
     try:
+        skills_dir = Path(__file__).parent / "skills"
+        sandbox.upload_files([
+            (str(f.relative_to(skills_dir.parent)), f.read_bytes())
+            for f in skills_dir.rglob("*")
+            if f.is_file()
+        ])
+
         agent = create_deep_agent(
             name="main-agent",
             model=model,
             system_prompt=_SYSTEM_PROMPT,
             backend=sandbox,
+            skills=["/workspace/skills/"],
             subagents=[
                 build_web_research_subagent(),
                 build_html_report_subagent(sandbox),

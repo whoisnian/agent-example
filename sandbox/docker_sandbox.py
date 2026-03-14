@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import tarfile
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 import docker
@@ -61,17 +62,24 @@ class DockerSandbox(BaseSandbox):
     def upload_files(
         self, files: list[tuple[str, bytes]]
     ) -> list[FileUploadResponse]:
-        """Upload files into the container under ``/workspace``."""
+        """Upload files into the container."""
         results: list[FileUploadResponse] = []
         for path, data in files:
+            posix = (
+                PurePosixPath(path)
+                if path.startswith("/")
+                else PurePosixPath(_WORKING_DIR) / path
+            )
+            container_dir = str(posix.parent)
+            self.execute(f"mkdir -p {container_dir}")
             archive = io.BytesIO()
             with tarfile.open(fileobj=archive, mode="w") as tar:
-                info = tarfile.TarInfo(name=path.lstrip("/"))
+                info = tarfile.TarInfo(name=posix.name)
                 info.size = len(data)
                 tar.addfile(info, io.BytesIO(data))
             archive.seek(0)
             try:
-                self._container.put_archive(_WORKING_DIR, archive)
+                self._container.put_archive(container_dir, archive)
                 results.append(FileUploadResponse(path=path))
             except docker.errors.APIError:
                 results.append(FileUploadResponse(path=path, error="permission_denied"))
