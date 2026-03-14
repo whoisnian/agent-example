@@ -1,7 +1,7 @@
 # html-report-agent Specification
 
 ## Purpose
-TBD - created by archiving change deepagent-research-report. Update Purpose after archive.
+Accepts structured research results and a `DockerSandbox` instance, generates a self-contained HTML report, and writes it to `/workspace/report.html` inside the sandbox using deepagents's built-in `write_file` tool.
 ## Requirements
 ### Requirement: Generate an HTML report from research results
 The html-report subagent SHALL accept structured research results and a `DockerSandbox` instance, produce a self-contained HTML file (`report.html`), and write it to `/workspace` inside the sandbox using deepagents's built-in `write_file` tool (provided by `FilesystemMiddleware` backed by the sandbox).

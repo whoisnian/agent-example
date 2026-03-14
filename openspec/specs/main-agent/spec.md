@@ -1,7 +1,7 @@
 # main-agent Specification
 
 ## Purpose
-TBD - created by archiving change deepagent-research-report. Update Purpose after archive.
+Orchestrates the research pipeline: accepts a user-supplied topic, uploads project skills to the sandbox, delegates to the web-research and html-report subagents, shares the generated report via the share-html skill, downloads the report to the host, and prints the local path and shareable URL.
 ## Requirements
 ### Requirement: Accept research topic and run pipeline
 The main agent SHALL accept a user-supplied research topic string, create a `DockerSandbox` via `DockerSandboxProvider`, upload the share-html `SKILL.md` to the sandbox before creating the agent, invoke the web-research subagent to gather information via streaming, pass the results and the sandbox to the html-report subagent, use the share-html skill to upload and share the report, print the path of the generated HTML report and the shareable URL to the caller after streaming completes, and stop the sandbox in a `finally` block.

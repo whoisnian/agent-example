@@ -1,7 +1,7 @@
 # web-research-agent Specification
 
 ## Purpose
-TBD - created by archiving change deepagent-research-report. Update Purpose after archive.
+Searches the web for information on a given topic using DuckDuckGo and returns a structured research summary with key facts for use by downstream agents.
 ## Requirements
 ### Requirement: Search the web for a given topic
 The web-research subagent SHALL accept a topic string, perform web searches, and return a structured summary of findings including key facts, sources, and relevant context.
