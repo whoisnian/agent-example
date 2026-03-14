@@ -8,6 +8,7 @@ dependencies = [
     "dashscope>=1.25.13",
     "ddgs>=9.0.0",
     "deepagents>=0.4.11",
+    "docker>=7.0.0",
     "duckduckgo-search>=8.0.0",
     "langchain>=1.2.12",
     "langchain-community>=0.4.1",
