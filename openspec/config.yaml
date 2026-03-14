@@ -8,6 +8,10 @@ schema: spec-driven
 #     Tech stack: TypeScript, React, Node.js
 #     We use conventional commits
 #     Domain: e-commerce platform
+context: |
+  Tech stack: python, uv, asyncio, deepagents, dashscope
+  We follow PEP 8 style guide
+  Domain: a deep agent for various tasks
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
