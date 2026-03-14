@@ -1,0 +1,34 @@
+## ADDED Requirements
+
+### Requirement: Provision a Docker container sandbox
+The `DockerSandboxProvider` SHALL create and start a Docker container using the `python:3.14.3-bookworm` image with `/workspace` as the container working directory, and return a `DockerSandbox` instance that wraps it.
+
+#### Scenario: Default image and working directory
+- **WHEN** `DockerSandboxProvider().create()` is called with no arguments
+- **THEN** a running Docker container is started from `python:3.14.3-bookworm` with `working_dir` set to `/workspace` and a `DockerSandbox` wrapping that container is returned
+
+#### Scenario: Docker daemon unavailable
+- **WHEN** `DockerSandboxProvider().create()` is called and the Docker daemon is not reachable
+- **THEN** a `RuntimeError` is raised with a message indicating Docker is unavailable
+
+### Requirement: DockerSandbox implements deepagents BaseSandbox
+`DockerSandbox` SHALL extend `deepagents.backends.sandbox.BaseSandbox`, implementing `execute()` via Docker `exec_run` so all deepagents filesystem tools and shell commands route through the container.
+
+#### Scenario: execute() runs commands inside the container
+- **WHEN** `sandbox.execute(command)` is called with a shell command string
+- **THEN** the command is executed inside the Docker container with `/workspace` as the working directory and an `ExecuteResponse` is returned
+
+#### Scenario: Filesystem tools operate on container
+- **WHEN** a deepagents agent using `DockerSandbox` as its backend calls `write_file("report.html", content)`
+- **THEN** the file `/workspace/report.html` is created inside the Docker container
+
+### Requirement: Stop and clean up the sandbox
+`DockerSandbox` SHALL expose a `stop()` method that stops and removes the backing Docker container.
+
+#### Scenario: Successful stop
+- **WHEN** `sandbox.stop()` is called on a running sandbox
+- **THEN** the container is stopped and removed without raising an exception
+
+#### Scenario: Stop is idempotent
+- **WHEN** `sandbox.stop()` is called on an already stopped sandbox
+- **THEN** no exception is raised
