@@ -1,8 +1,9 @@
-from langchain_community.chat_models import ChatTongyi
 from langchain_community.tools import DuckDuckGoSearchRun
 
 from deepagents.graph import create_agent
 from deepagents.middleware.subagents import CompiledSubAgent
+
+from utils import get_model
 
 _SYSTEM_PROMPT = """You are a web research assistant. Given a topic, search the web \
 and return a structured summary of your findings.
@@ -16,15 +17,15 @@ Be thorough but focused. Return ONLY the structured research results."""
 
 
 def build_web_research_subagent() -> CompiledSubAgent:
-    model = ChatTongyi(model_name="deepseek-v3.2")
+    model = get_model()
     agent = create_agent(
-        model,
+        name="web-research-agent",
+        model=model,
         tools=[DuckDuckGoSearchRun()],
         system_prompt=_SYSTEM_PROMPT,
-        name="web-research",
     )
     return CompiledSubAgent(
-        name="web-research",
+        name="web-research-agent",
         description=(
             "Searches the web for information on a given topic and returns "
             "a structured research summary with key facts."

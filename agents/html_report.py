@@ -1,11 +1,12 @@
 import os
 from pathlib import Path
 
-from langchain_community.chat_models import ChatTongyi
 from langchain_core.tools import tool
 
 from deepagents.graph import create_agent
 from deepagents.middleware.subagents import CompiledSubAgent
+
+from utils import get_model
 
 _REPORT_PATH = os.environ.get("REPORT_OUTPUT_PATH", "report.html")
 
@@ -36,15 +37,15 @@ def write_report_html(html_content: str) -> str:
 
 
 def build_html_report_subagent() -> CompiledSubAgent:
-    model = ChatTongyi(model_name="deepseek-v3.2")
+    model = get_model()
     agent = create_agent(
-        model,
+        name="html-report-agent",
+        model=model,
         tools=[write_report_html],
         system_prompt=_SYSTEM_PROMPT,
-        name="html-report",
     )
     return CompiledSubAgent(
-        name="html-report",
+        name="html-report-agent",
         description=(
             "Takes structured research results and generates a self-contained "
             "HTML report file. Returns the absolute path to the generated report."
