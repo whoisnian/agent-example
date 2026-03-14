@@ -20,27 +20,32 @@ LangGraph's `astream` API with `stream_mode="messages"` and `subgraphs=True` sur
 
 ### Use `astream` with `subgraphs=True` and `version="v2"`
 
-With `subgraphs=True`, each yielded item is a `(namespace, chunk)` pair where `namespace` is a tuple of graph-node path strings identifying the active subgraph (e.g. `("main-agent:subagent:web-research",)`). This gives the agent/node name without parsing message metadata.
+With `version="v2"`, each yielded item is a dict `{'type', 'ns', 'data': (token, metadata)}`. Non-`messages` events (e.g. metadata events) are skipped; only `type == "messages"` events carry printable token and metadata.
 
-`version="v2"` uses the current LangGraph streaming protocol, which is stable and recommended for new code.
+`version="v2"` is the current recommended LangGraph streaming protocol.
 
 **Alternative considered**: `stream_mode="updates"` — yields graph state updates instead of message chunks; harder to extract human-readable text incrementally.
 
-### Determine node type from chunk class
+### Determine node type from `metadata['langgraph_node']`
 
-- `AIMessageChunk` with non-empty `tool_calls` → type `tool-call`
-- `AIMessageChunk` with text content → type `llm`
-- `ToolMessage` → type `tool-result`
-- Other → type `event`
+The event metadata dict carries `'langgraph_node'` with values like `'model'` or `'tools'`. Using this field is more reliable and readable than inspecting chunk class types, and exposes the exact graph node name for display.
 
-This avoids relying on fragile metadata fields and works with the LangGraph message type hierarchy.
+**Alternative considered**: class-based dispatch on `AIMessageChunk` / `ToolMessage` — works but loses the node name and requires importing LangChain message types.
 
-### Derive agent name from namespace tail
+### Derive agent name from `metadata['lc_agent_name']`
 
-Use `namespace[-1].split(":")[-1]` to extract the leaf node name from the full namespace path. Falls back to `"main"` when namespace is empty (top-level graph messages).
+`metadata['lc_agent_name']` is set by the DeepAgents runtime for each subgraph and directly contains the agent's declared name (e.g. `'web-research-agent'`). This is more reliable than parsing the `ns` tuple.
+
+### Per-event timing header
+
+Each event is prefixed with an incrementing index, wall-clock timestamp, and `+last/total` elapsed seconds. This makes it easy to identify slow nodes without external tooling.
+
+### Token usage from `response_metadata['token_usage']`
+
+The DashScope/ChatTongyi provider exposes token counts under `token.response_metadata['token_usage']` rather than the LangChain-standard `usage_metadata` field. The code checks for the provider-specific key.
 
 ## Risks / Trade-offs
 
-- [Chunk volume] Streaming produces many small chunks that may flood the terminal for long runs → Acceptable for a debug/development feature; no mitigation needed
-- [Token usage availability] `usage_metadata` is only present on the final chunk of a response in most providers → Print token usage only when the field is non-None; silently skip otherwise
+- [Chunk volume] Streaming produces many per-event lines that may flood the terminal for long runs → Acceptable for a debug/development feature; no mitigation needed
+- [Token usage availability] `response_metadata['token_usage']` is only present on final response tokens for the ChatTongyi/DashScope provider → Print token usage only when the key exists; silently skip otherwise
 - [API stability] `version="v2"` is the current recommended protocol but may change in future LangGraph releases → Pinned by existing `pyproject.toml` dependency ranges

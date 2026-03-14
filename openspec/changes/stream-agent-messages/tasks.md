@@ -1,18 +1,18 @@
 ## 1. Replace `ainvoke` with `astream` in `main()`
 
-- [ ] 1.1 In `main.py`, replace `result = await agent.ainvoke(...)` with an `async for namespace, chunk in agent.astream(..., stream_mode="messages", subgraphs=True, version="v2"):` loop
-- [ ] 1.2 Track the last `AIMessage` (non-chunk) across the stream to retain the final result for printing after the loop
+- [x] 1.1 In `main.py`, replace `result = await agent.ainvoke(...)` with `async for event in agent.astream(..., stream_mode="messages", subgraphs=True, version="v2"):` where each event is a dict with `type`, `ns`, and `data` keys
+- [x] 1.2 Add `time` module import and track per-event and total elapsed seconds using `time.time()`
 
-## 2. Implement per-chunk printing logic
+## 2. Implement per-event printing logic
 
-- [ ] 2.1 Extract the agent name from the `namespace` tuple: use `namespace[-1].split(":")[-1]` when non-empty, fall back to `"main"`
-- [ ] 2.2 Detect node type from chunk class: `AIMessageChunk` with `tool_calls` → `tool-call`; `AIMessageChunk` with text → `llm`; `ToolMessage` → `tool-result`; else `event`
-- [ ] 2.3 Print agent name, node type, and message content for each chunk in a readable one-line format
-- [ ] 2.4 When `chunk.usage_metadata` is not `None`, append input/output token counts to the printed line
-- [ ] 2.5 When node type is `tool-call`, print tool name(s) and arguments instead of (or alongside) raw content
-- [ ] 2.6 When node type is `tool-result`, truncate `ToolMessage.content` to a short preview (e.g. 120 chars)
+- [x] 2.1 Extract agent name from `metadata['lc_agent_name']` and node name from `metadata['langgraph_node']`
+- [x] 2.2 Print a header line per event: `{event_type}.{idx} ---- {timestamp} ---- (+{last}s/{total}s)`
+- [x] 2.3 Print agent name, node name, and for `model` nodes print `metadata['ls_model_name']`; for `tools` nodes print `token.name`
+- [x] 2.4 Print content via `truncate_str(token.content)` (add `truncate_str` to `utils.py`)
+- [x] 2.5 When `token.response_metadata` contains `'token_usage'`, print the token usage dict
+- [x] 2.6 When `token.tool_calls` is non-empty, print each tool call; use `format_todos()` for `write_todos` calls, else print name and truncated args (add `format_todos` to `utils.py`)
 
 ## 3. Verify end-to-end behaviour
 
-- [ ] 3.1 Run the agent with a sample topic and confirm intermediate chunks are printed during execution
-- [ ] 3.2 Confirm the final `report.html` path is still printed after the stream completes
+- [x] 3.1 Run the agent with a sample topic and confirm per-event headers and structured fields print during execution
+- [x] 3.2 Confirm agent name, node, content, token usage, and tool calls all appear correctly in the output
