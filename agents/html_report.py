@@ -2,6 +2,7 @@ from deepagents.graph import create_agent
 from deepagents.middleware.filesystem import FilesystemMiddleware
 from deepagents.middleware.subagents import CompiledSubAgent
 
+from middlewares.datetime_middleware import DatetimeMiddleware
 from sandbox import DockerSandbox
 from utils import get_model
 
@@ -13,7 +14,8 @@ already provided to you in this conversation.
    - Embed ALL styles inside a <style> tag — no external CSS, JS, or font links.
    - Include a clear title derived from the research topic.
    - Include the research summary and key facts, neatly formatted.
-   - Include a "Generated on <timestamp>" footer.
+   - Include a "Generated on <timestamp>" footer using the exact value from
+     "Task started at: ..." in your system prompt as the timestamp.
 2. Call the write_file tool with path "/workspace/report.html" and the complete HTML string.
 3. Return the file path "/workspace/report.html".
 
@@ -29,6 +31,7 @@ def build_html_report_subagent(sandbox: DockerSandbox) -> CompiledSubAgent:
         model=model,
         tools=[write_file_tool],
         system_prompt=_SYSTEM_PROMPT,
+        middleware=[DatetimeMiddleware()],
     )
     return CompiledSubAgent(
         name="html-report-agent",

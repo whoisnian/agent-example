@@ -1,10 +1,11 @@
 import asyncio
 import sys
-import time
+from datetime import datetime
 from pathlib import Path
 
 from deepagents.graph import create_deep_agent
 
+from context import CustomContext
 from agents.html_report import build_html_report_subagent
 from agents.web_research import build_web_research_subagent
 from sandbox import DockerSandboxProvider
@@ -27,6 +28,7 @@ async def main() -> None:
     topic = " ".join(sys.argv[1:]) or "What's LangChain Deep Agents?"
     print(f"Researching: {topic}")
 
+    start_time = datetime.now()
     sandbox = DockerSandboxProvider().create()
     try:
         skills_dir = Path(__file__).parent / "skills"
@@ -42,6 +44,7 @@ async def main() -> None:
             system_prompt=_SYSTEM_PROMPT,
             backend=sandbox,
             skills=["/workspace/skills/"],
+            context_schema=CustomContext,
             subagents=[
                 build_web_research_subagent(),
                 build_html_report_subagent(sandbox),
@@ -49,17 +52,18 @@ async def main() -> None:
         )
 
         idx = 1
-        last_time = start_time = time.time()
+        last_time = datetime.now()
         async for event in agent.astream(
             {"messages": [{"role": "user", "content": topic}]},
             stream_mode="messages",
             subgraphs=True,
             version="v2",
+            context=CustomContext(start_time=start_time),
         ):
-            current_time = time.time()
-            last_duration = round(current_time - last_time)
-            total_duration = round(current_time - start_time)
-            print(f"\n{event.get('type')}.{idx} -------------------- {time.strftime('%Y-%m-%d %H:%M:%S')} -------------------- (+{last_duration}s/{total_duration}s)")
+            current_time = datetime.now()
+            last_duration = round((current_time - last_time).total_seconds())
+            total_duration = round((current_time - start_time).total_seconds())
+            print(f"\n{event.get('type')}.{idx} -------------------- {current_time.strftime('%Y-%m-%d %H:%M:%S')} -------------------- (+{last_duration}s/{total_duration}s)")
             idx += 1
             last_time = current_time
 
