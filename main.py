@@ -11,6 +11,10 @@ from sandbox import DockerSandboxProvider
 from utils import format_todos, get_model, truncate_str
 
 _SYSTEM_PROMPT = """You are a research orchestrator. Given a topic from the user:
+
+First, call write_todos to plan all pipeline steps before taking any action.
+
+Then execute the following steps in order:
 1. Use the web-research subagent to gather information about the topic.
 2. Pass the full research results to the html-report subagent to generate an HTML report.
 3. Use the share-html skill to upload and share the report, then report the shareable URL back to the user.

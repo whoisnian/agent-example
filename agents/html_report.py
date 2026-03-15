@@ -8,7 +8,8 @@ from utils import get_model
 _SYSTEM_PROMPT = """You are an HTML report generator. You receive research results about a topic.
 
 Your job:
-1. Compose a complete, self-contained HTML document from the research results.
+1. Compose a complete, self-contained HTML document from the research results \
+already provided to you in this conversation.
    - Embed ALL styles inside a <style> tag — no external CSS, JS, or font links.
    - Include a clear title derived from the research topic.
    - Include the research summary and key facts, neatly formatted.
@@ -21,10 +22,12 @@ The HTML must render correctly in a browser with no internet connection."""
 
 def build_html_report_subagent(sandbox: DockerSandbox) -> CompiledSubAgent:
     model = get_model()
+    fs = FilesystemMiddleware(backend=sandbox)
+    write_file_tool = next(t for t in fs.tools if t.name == "write_file")
     agent = create_agent(
         name="html-report-agent",
         model=model,
-        middleware=[FilesystemMiddleware(backend=sandbox)],
+        tools=[write_file_tool],
         system_prompt=_SYSTEM_PROMPT,
     )
     return CompiledSubAgent(

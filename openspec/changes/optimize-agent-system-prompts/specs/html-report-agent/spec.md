@@ -1,11 +1,15 @@
 ## ADDED Requirements
 
-### Requirement: Generate report solely from provided research results
-The html-report subagent's system prompt SHALL explicitly instruct the agent to use only the research results passed to it as input. The agent SHALL NOT use `read_file`, `glob`, `grep`, or any other read/explore tool. Its only permitted tool call is `write_file` to write the generated HTML to `/workspace/report.html`.
+### Requirement: Expose only write_file tool to the html-report agent
+`build_html_report_subagent(sandbox)` SHALL instantiate `FilesystemMiddleware(backend=sandbox)`, extract the `write_file` tool from its `tools` list by name, and pass it to `create_agent()` via the `tools` parameter — without passing the middleware itself. The agent's tool list SHALL contain only `write_file`.
 
-#### Scenario: No filesystem exploration performed
-- **WHEN** the html-report subagent is invoked with research results
-- **THEN** it issues no calls to `read_file`, `glob`, `grep`, or any other tool except `write_file`
+#### Scenario: Agent tool list contains only write_file
+- **WHEN** `build_html_report_subagent(sandbox)` constructs the agent
+- **THEN** the agent is created with `tools=[write_file_tool]` and no `middleware` containing filesystem tools, so only `write_file` is available
+
+#### Scenario: Filesystem exploration tools are unavailable
+- **WHEN** the html-report agent is running
+- **THEN** it cannot call `ls`, `read_file`, `glob`, `grep`, or `execute` because those tools are not in its tool list
 
 #### Scenario: Report content derived from input only
 - **WHEN** the report is generated

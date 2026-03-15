@@ -39,13 +39,15 @@ The web-research agent prompt will instruct the agent to first identify 1–3 co
 
 **Rationale**: DuckDuckGo searches are unmetered but slow; limiting to three forces the agent to be selective. Keyword extraction as a prompt step mirrors chain-of-thought decomposition without needing a separate tool.
 
-### Decision: Explicit filesystem prohibition for html-report agent
-The html-report agent's prompt will contain a clear prohibition: "Do NOT use read_file, glob, grep, or any other tool — your only tool call should be write_file."
+### Decision: Restrict html-report agent to write_file tool only via tool list
+Instead of relying on prompt instructions to prohibit filesystem exploration, `build_html_report_subagent()` will instantiate `FilesystemMiddleware(backend=sandbox)`, extract the `write_file` tool from `middleware.tools` by name, and pass it directly to `create_agent(tools=[write_file_tool])` without the middleware. This means the agent's tool list contains only `write_file` — it structurally cannot call `ls`, `read_file`, `glob`, `grep`, or `execute`.
 
-**Rationale**: `FilesystemMiddleware` exposes read tools alongside write tools. Without an explicit prohibition, the agent may attempt to read previous reports or explore `/workspace`, introducing non-determinism.
+**Rationale**: Prompt-level prohibitions are unreliable — the model may still reason that it needs to "check the workspace" before writing. Constraining the available tool list is a hard structural enforcement that does not depend on the model following instructions.
+
+**Alternative considered**: Keeping `FilesystemMiddleware` as middleware and relying on prompt prohibition. Rejected — empirically observed that the agent ignores the prohibition and calls `ls /workspace` on the first action.
 
 ## Risks / Trade-offs
 
-- [Risk] LLM may ignore the `write_todos` planning step under token pressure → Mitigation: State it as step 1 in a numbered list; numbered lists are harder to skip than prose instructions.
+- [Risk] LLM may ignore the `write_todos` planning step under token pressure → Mitigation: State it as a pre-step before the numbered list; it is framed as an initialization action, not an optional step.
 - [Risk] Hard-capping at three searches may produce insufficient results for broad topics → Mitigation: The prompt instructs the agent to choose the three most impactful queries; acceptable trade-off for cost/latency reduction.
-- [Risk] Filesystem prohibition may cause the html-report agent to fail if it has already partially written a file and tries to verify it → Mitigation: The prohibition is on read/explore tools, not on `write_file` itself; the current prompt already says to call `write_file` and return.
+- [Risk] Extracting `write_file` from `FilesystemMiddleware` via `next(t for t in fs.tools if t.name == "write_file")` may break if the tool list order or name changes in a future deepagents version → Mitigation: Filter by `.name` attribute rather than by index, making it resilient to reordering.
