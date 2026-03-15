@@ -4,7 +4,7 @@
 Accepts structured research results and a `DockerSandbox` instance, generates a self-contained HTML report, and writes it to `/workspace/report.html` inside the sandbox using deepagents's built-in `write_file` tool.
 ## Requirements
 ### Requirement: Generate an HTML report from research results
-The html-report subagent SHALL accept structured research results and a `DockerSandbox` instance, produce a self-contained HTML file (`report.html`), and write it to `/workspace` inside the sandbox using deepagents's built-in `write_file` tool (provided by `FilesystemMiddleware` backed by the sandbox).
+The html-report subagent SHALL accept structured research results and a `DockerSandbox` instance, produce a self-contained HTML file (`report.html`), write it to `/workspace` inside the sandbox using deepagents's built-in `write_file` tool, and include the task start datetime — injected into its system prompt by `DatetimeMiddleware` — as a visible timestamp in the report's footer.
 
 #### Scenario: Successful report generation
 - **WHEN** the subagent is invoked with non-empty research results and uses a `DockerSandbox` as its backend
@@ -12,7 +12,11 @@ The html-report subagent SHALL accept structured research results and a `DockerS
 
 #### Scenario: Report content completeness
 - **WHEN** the report is generated
-- **THEN** it includes a title derived from the research topic, the research summary, and a timestamp
+- **THEN** it includes a title derived from the research topic, the research summary, and a "Generated on \<timestamp>" footer where `<timestamp>` is the `Task started at:` value injected by `DatetimeMiddleware`
+
+#### Scenario: Overwrite on re-run
+- **WHEN** `/workspace/report.html` already exists in the sandbox
+- **THEN** the subagent replaces it with the newly generated report
 
 ### Requirement: Expose only write_file tool to the html-report agent
 `build_html_report_subagent(sandbox)` SHALL instantiate `FilesystemMiddleware(backend=sandbox)`, extract the `write_file` tool from its `tools` list by name, and pass it to `create_agent()` via the `tools` parameter — without passing the middleware itself. The agent's tool list SHALL contain only `write_file`.
@@ -35,6 +39,17 @@ The generated report SHALL be a single standalone HTML file with all styling inl
 #### Scenario: Self-contained file
 - **WHEN** `report.html` is opened in a browser without internet access
 - **THEN** it renders correctly without any missing resources
+
+### Requirement: Apply DatetimeMiddleware to the html-report agent
+`build_html_report_subagent(sandbox)` SHALL instantiate `DatetimeMiddleware` and pass it via the `middleware` parameter of `create_agent()` so the agent's system prompt receives the injected task start datetime before each model call.
+
+#### Scenario: DatetimeMiddleware in middleware list
+- **WHEN** `build_html_report_subagent(sandbox)` constructs the agent
+- **THEN** `create_agent()` is called with `middleware=[DatetimeMiddleware()]`
+
+#### Scenario: Timestamp present in system prompt at model call time
+- **WHEN** `DatetimeMiddleware` runs `wrap_model_call` for the html-report agent
+- **THEN** the system prompt contains the `"Task started at: ..."` line before the model is called
 
 ### Requirement: Overwrite existing report
 The html-report subagent SHALL overwrite `report.html` if it already exists in the sandbox workspace, without prompting.

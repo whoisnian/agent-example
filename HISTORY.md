@@ -62,3 +62,11 @@ Copilot Chat Agent with `Claude Sonnet 4.6`
 # 2. Maybe it's impossible to completely prohibit the html report agent from calling other tools. So expose `write_file` tool from the `FilesystemMiddleware`, and edit `create_agent()` to pass `write_file` tool to the html report agent. Then update the system prompt and `openspec/changes/optimize-agent-system-prompts/` artifacts to reflect this change.
 /opsx-archive
 ```
+### 2026-03-15-datetime-middleware
+```sh
+/opsx-propose Add a datetime middleware to provide task start datetime information to the agents. The main agent add `context_schema` with `start_time` field, and initialize context with `start_time` value when calling `agent.astream()`. The datetime middleware should format the datetime value into string and append it to the system prompt for the agents to use. The html report agent use the middleware provided datetime information to add a timestamp to the generated report.
+# 1. Format the datetime value into unambiguous RFC3339 format like `2006-01-02T15:04:05Z07:00`.
+/opsx-apply
+# 1. Move the datetime middleware to a new directory `middlewares/`. And move the `DatetimeContext` dataclass as `CustomContext` in global `context.py` for future extension.
+/opsx-archive
+```
