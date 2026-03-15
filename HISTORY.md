@@ -53,3 +53,12 @@ Copilot Chat Agent with `Claude Sonnet 4.6`
 # 2. The `sandbox.upload_files()` should not be limited to working_dir, but always upload files to absolute path in the sandbox, change to the same behavior like `sandbox.download_files()`.
 /opsx-archive
 ```
+### 2026-03-15-optimize-agent-system-prompts
+```sh
+/opsx-propose Optimize the system prompts of the main agent and the subagents. The main agent should use `write_todos` tool to do planning first, and then web research, generate html report, and share html in sequence. The web research agent should focus on core keywords and search no more than three times. The html report agent should only base on the research results and do not explore the filesystem or the workspace.
+# 1. The main agent should not make the planning step as step 1, the planning should be done outside of these steps.
+/opsx-apply
+# 1. The html report agent still return `I'll create a comprehensive HTML report about LangChain Deep Agents based on the research results provided. Let me first check the workspace and then create the report.` and call `ls /workspace` to check the workspace, which is not expected.
+# 2. Maybe it's impossible to completely prohibit the html report agent from calling other tools. So expose `write_file` tool from the `FilesystemMiddleware`, and edit `create_agent()` to pass `write_file` tool to the html report agent. Then update the system prompt and `openspec/changes/optimize-agent-system-prompts/` artifacts to reflect this change.
+/opsx-archive
+```
