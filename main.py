@@ -1,9 +1,11 @@
+import argparse
 import asyncio
-import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 
 from deepagents.graph import create_deep_agent
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from context import CustomContext
 from agents.html_report import build_html_report_subagent
@@ -23,11 +25,18 @@ Then execute the following steps in order:
 
 
 async def main() -> None:
-    model = get_model()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--thread-id", default=None)
+    parser.add_argument("topic", nargs="*")
+    args = parser.parse_args()
 
-    topic = " ".join(sys.argv[1:]) or "What's LangChain Deep Agents?"
+    thread_id = args.thread_id or str(uuid.uuid4())
+    topic = " ".join(args.topic) or "What's LangChain Deep Agents?"
+
+    print(f"Thread ID: {thread_id}")
     print(f"Researching: {topic}")
 
+    model = get_model()
     start_time = datetime.now()
     sandbox = DockerSandboxProvider().create()
     try:
@@ -38,59 +47,62 @@ async def main() -> None:
             if f.is_file()
         ])
 
-        agent = create_deep_agent(
-            name="main-agent",
-            model=model,
-            system_prompt=_SYSTEM_PROMPT,
-            backend=sandbox,
-            skills=["/workspace/skills/"],
-            context_schema=CustomContext,
-            subagents=[
-                build_web_research_subagent(),
-                build_html_report_subagent(sandbox),
-            ],
-        )
+        async with AsyncSqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
+            agent = create_deep_agent(
+                name="main-agent",
+                model=model,
+                system_prompt=_SYSTEM_PROMPT,
+                backend=sandbox,
+                skills=["/workspace/skills/"],
+                context_schema=CustomContext,
+                subagents=[
+                    build_web_research_subagent(),
+                    build_html_report_subagent(sandbox),
+                ],
+                checkpointer=checkpointer,
+            )
 
-        idx = 1
-        last_time = datetime.now()
-        async for event in agent.astream(
-            {"messages": [{"role": "user", "content": topic}]},
-            stream_mode="messages",
-            subgraphs=True,
-            version="v2",
-            context=CustomContext(start_time=start_time),
-        ):
-            current_time = datetime.now()
-            last_duration = round((current_time - last_time).total_seconds())
-            total_duration = round((current_time - start_time).total_seconds())
-            print(f"\n{event.get('type')}.{idx} -------------------- {current_time.strftime('%Y-%m-%d %H:%M:%S')} -------------------- (+{last_duration}s/{total_duration}s)")
-            idx += 1
-            last_time = current_time
+            idx = 1
+            last_time = datetime.now()
+            async for event in agent.astream(
+                {"messages": [{"role": "user", "content": topic}]},
+                stream_mode="messages",
+                subgraphs=True,
+                version="v2",
+                config={"configurable": {"thread_id": thread_id}},
+                context=CustomContext(thread_id=thread_id, start_time=start_time),
+            ):
+                current_time = datetime.now()
+                last_duration = round((current_time - last_time).total_seconds())
+                total_duration = round((current_time - start_time).total_seconds())
+                print(f"\n{event.get('type')}.{idx} -------------------- {current_time.strftime('%Y-%m-%d %H:%M:%S')} -------------------- (+{last_duration}s/{total_duration}s)")
+                idx += 1
+                last_time = current_time
 
-            if event.get("type") != "messages":
-                continue
-            token, metadata = event.get("data", (None, None))
+                if event.get("type") != "messages":
+                    continue
+                token, metadata = event.get("data", (None, None))
 
-            print(f"agent: {metadata['lc_agent_name']}")
-            print(f"node:  {metadata['langgraph_node']}")
-            if metadata['langgraph_node'] == 'model':
-                print(f"name:  {metadata['ls_model_name']}")
-            elif metadata['langgraph_node'] == 'tools':
-                print(f"name:  {token.name}")
-            else:
-                print(f"unknown node: {metadata}")
+                print(f"agent: {metadata['lc_agent_name']}")
+                print(f"node:  {metadata['langgraph_node']}")
+                if metadata['langgraph_node'] == 'model':
+                    print(f"name:  {metadata['ls_model_name']}")
+                elif metadata['langgraph_node'] == 'tools':
+                    print(f"name:  {token.name}")
+                else:
+                    print(f"unknown node: {metadata}")
 
-            print(f"content: {truncate_str(token.content)}")
+                print(f"content: {truncate_str(token.content)}")
 
-            if token.response_metadata and 'token_usage' in token.response_metadata:
-                print(f"token_usage: {token.response_metadata['token_usage']}")
+                if token.response_metadata and 'token_usage' in token.response_metadata:
+                    print(f"token_usage: {token.response_metadata['token_usage']}")
 
-            if hasattr(token, 'tool_calls') and token.tool_calls:
-                for tc in token.tool_calls:
-                    if tc['name'] == 'write_todos':
-                        print(f"tool_call: write_todos:\n{format_todos(tc['args']['todos'])}")
-                    else:
-                        print(f"tool_call: {tc['name']} args: {truncate_str(str(tc['args']))}")
+                if hasattr(token, 'tool_calls') and token.tool_calls:
+                    for tc in token.tool_calls:
+                        if tc['name'] == 'write_todos':
+                            print(f"tool_call: write_todos:\n{format_todos(tc['args']['todos'])}")
+                        else:
+                            print(f"tool_call: {tc['name']} args: {truncate_str(str(tc['args']))}")
 
         # Download report.html from sandbox to host
         responses = sandbox.download_files(["/workspace/report.html"])
