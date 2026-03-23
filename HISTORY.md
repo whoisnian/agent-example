@@ -70,3 +70,9 @@ Copilot Chat Agent with `Claude Sonnet 4.6`
 # 1. Move the datetime middleware to a new directory `middlewares/`. And move the `DatetimeContext` dataclass as `CustomContext` in global `context.py` for future extension.
 /opsx-archive
 ```
+### 2026-03-24-add-checkpoint-persistence
+```sh
+/opsx:propose Add langgraph-checkpoint-sqlite to persist agent state between threads. If run main.py without thread_id argument, generate a new thread_id and start a new stream. If run with thread_id argument, load the agent state from the checkpoint and continue the stream. The new user input should be appended to the existing context messages. Add a thread_id field to the context schema.
+/opsx:apply
+/opsx:archive
+```
