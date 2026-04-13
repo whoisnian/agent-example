@@ -16,5 +16,10 @@ wheels/
 # Environment variable files
 .env
 
+# Sqlite database files
+*.db
+*.db-shm
+*.db-wal
+
 # Output files
 report.html
