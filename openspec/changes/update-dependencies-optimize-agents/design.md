@@ -39,9 +39,9 @@ The project is a deep agent pipeline built on `deepagents 0.4.11`, `langchain`, 
 
 ### 3. Filesystem permissions
 
-**Decision**: Add `FilesystemPermission` rules to the main agent to restrict writes to `/workspace/`.
+**Decision**: ~~Add `FilesystemPermission` rules to the main agent to restrict writes to `/workspace/`.~~ **Revised**: Cannot use `FilesystemPermission` with our `DockerSandbox` because the permission middleware does not yet support backends with command execution (`SandboxBackendProtocol`). The Docker sandbox already provides isolation, so this is acceptable.
 
-**Rationale**: This is a new security feature in 0.5.2 that aligns with defense-in-depth. Since we already use a Docker sandbox, file permissions add an additional layer of protection. The configuration is minimal (a few lines) and the benefit is clear.
+**Rationale**: During implementation, `_PermissionMiddleware` raised `NotImplementedError: _PermissionMiddleware does not yet support backends with command execution`. This is a known limitation in deepagents 0.5.2. Since the Docker sandbox itself provides file isolation, the security benefit is already achieved at the container level.
 
 ### 4. Backend factory deprecation
 
