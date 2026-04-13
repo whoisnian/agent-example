@@ -15,7 +15,8 @@ uv add deepagents langchain langchain-community dashscope
 ```
 
 ## coding with agent
-Copilot Chat Agent with `Claude Sonnet 4.6`
+* Copilot Chat Agent with `Claude Sonnet 4.6`/`Claude Opus 4.6`
+* Claude Code with `Claude Sonnet 4.6`/`Claude Opus 4.6`
 
 ### 2026-03-14-deepagent-research-report
 ```sh
@@ -75,4 +76,11 @@ Copilot Chat Agent with `Claude Sonnet 4.6`
 /opsx:propose Add langgraph-checkpoint-sqlite to persist agent state between threads. If run main.py without thread_id argument, generate a new thread_id and start a new stream. If run with thread_id argument, load the agent state from the checkpoint and continue the stream. The new user input should be appended to the existing context messages. Add a thread_id field to the context schema.
 /opsx:apply
 /opsx:archive
+```
+### 2026-04-14-update-dependencies-optimize-agents
+```sh
+/opsx-propose Update all dependencies to the latest versions. Make sure the code is compatible with the latest versions of these libraries. Find the new features in the latest deepagents that can be used to optimize the agent implementation, and update the code accordingly.
+/opsx-apply
+# 1. The deps in pyproject.toml failed to bump to latest.
+/opsx-archive
 ```

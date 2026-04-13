@@ -5,7 +5,7 @@ Provides `DatetimeMiddleware` and `CustomContext` for injecting the task start t
 
 ## Requirements
 ### Requirement: Inject task start datetime into the agent system prompt
-`DatetimeMiddleware` SHALL read a `start_time: datetime` value from `request.runtime.context`, format it as an RFC3339 string (e.g., `2026-03-15T10:30:00+08:00`) by calling `start_time.astimezone().isoformat(timespec="seconds")`, and append the formatted timestamp to the agent's system prompt before every model call, so the agent can reference the task start time in its output.
+`DatetimeMiddleware` SHALL read a `start_time: datetime` value from `request.runtime.context`, format it as an RFC3339 string (e.g., `2026-03-15T10:30:00+08:00`) by calling `start_time.astimezone().isoformat(timespec="seconds")`, and append the formatted timestamp to the agent's system prompt before every model call. The middleware SHALL implement the `AgentMiddleware` interface as defined in `deepagents>=0.5.2`.
 
 #### Scenario: Context carries start_time
 - **WHEN** the agent's `runtime.context` is a `CustomContext` instance with a non-None `start_time`
@@ -27,7 +27,7 @@ Provides `DatetimeMiddleware` and `CustomContext` for injecting the task start t
 - **THEN** it receives the `thread_id` string passed to `agent.astream()`
 
 ### Requirement: Support both sync and async model call wrapping
-`DatetimeMiddleware` SHALL implement both `wrap_model_call` and `awrap_model_call` so it can be used with synchronous and asynchronous agent graphs without raising an error.
+`DatetimeMiddleware` SHALL implement both `wrap_model_call` and `awrap_model_call` so it can be used with synchronous and asynchronous agent graphs without raising an error. The method signatures SHALL match the `AgentMiddleware` ABC in `deepagents>=0.5.2`.
 
 #### Scenario: Async wrapping
 - **WHEN** `awrap_model_call` is called with a `ModelRequest` and an async handler
