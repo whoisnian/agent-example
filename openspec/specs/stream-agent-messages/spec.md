@@ -3,7 +3,7 @@
 ## Requirements
 
 ### Requirement: Stream agent execution and print structured event output
-The main execution loop SHALL use `agent.astream(stream_mode="messages", subgraphs=True, version="v2")` and print each yielded `messages`-type event with a structured header and per-field output.
+The main execution loop SHALL use `agent.astream(stream_mode="messages", subgraphs=True, version="v2")` and print each yielded `messages`-type event with a structured header and per-field output. Additionally, when a model node yields a message chunk with non-empty `content`, the content SHALL be printed immediately with `flush=True` to achieve real-time incremental token streaming to the console.
 
 #### Scenario: Event header printed
 - **WHEN** any event is yielded from the stream
@@ -20,6 +20,10 @@ The main execution loop SHALL use `agent.astream(stream_mode="messages", subgrap
 #### Scenario: Tool name printed for tool nodes
 - **WHEN** `metadata['langgraph_node'] == 'tools'`
 - **THEN** the output SHALL include the tool name from `token.name`
+
+#### Scenario: Incremental token content streamed to console
+- **WHEN** a model node yields a message chunk with non-empty `token.content`
+- **THEN** the content SHALL be printed immediately using `print(token.content, end="", flush=True)` so the user sees output character-by-character as it arrives
 
 #### Scenario: Content printed truncated
 - **WHEN** a messages event is printed

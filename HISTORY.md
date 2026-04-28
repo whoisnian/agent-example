@@ -84,3 +84,13 @@ uv add deepagents langchain langchain-community dashscope
 # 1. The deps in pyproject.toml failed to bump to latest.
 /opsx-archive
 ```
+### 2026-04-29-switch-to-qwen-openai-streaming
+ChatTongyi does not yet support Qwen 3.5 according to https://github.com/langchain-ai/langchain-community/pull/540. So we switch to OpenAI-compatible mode for API calls.
+```sh
+/opsx:propose Changed default model from `deepseek-v3.2` to `qwen3.5-flash`. Invoke Ali DASHSCOPE API with OpenAI compatibility mode. And update `main.py` to support streaming output.
+/opsx:apply
+# 1. When I run `uv run python main.py "LangChain Deep Agents"`, streaming output causes `main.py` printing to be broken. Edit `main.py` to print raw `event` from `agent.astream()` and save it to events.log for debugging. Then analyze the content of events.log and fix the printing logic in `main.py` to adapt to streaming output, ensuring that the output is printed in a human-readable format.
+# 2. The script always hangs when calling duckduckgo_search tool. Upgrade all dependencies to the latest version to see if it can fix the problem.
+# 3. Make the `events.log` output as a debug log when running the script with `--debug` flag, and save the log to /tmp/agent-example-events.[random_suffix].log.
+/opsx:archive
+```
