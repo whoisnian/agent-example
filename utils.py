@@ -1,19 +1,23 @@
 import os
 
 from dotenv import load_dotenv
-from langchain_community.chat_models import ChatTongyi
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
-def get_model() -> ChatTongyi:
-    """Helper function to create a ChatTongyi model instance with API key from environment variable."""
+def get_model() -> ChatOpenAI:
+    """Helper function to create a ChatOpenAI model instance using DashScope's OpenAI-compatible endpoint."""
     api_key = os.environ.get("DASHSCOPE_API_KEY")
     if not api_key:
         raise ValueError(
             "DASHSCOPE_API_KEY is not set. "
             "Copy .env.example to .env and add your DashScope API key."
         )
-    return ChatTongyi(model_name="deepseek-v3.2", api_key=api_key)
+    return ChatOpenAI(
+        model="qwen3.5-flash",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=api_key,
+    )
 
 def truncate_str(s: str, max_len: int = 200) -> str:
     """Truncate a string to a maximum length, adding an ellipsis if it was truncated."""

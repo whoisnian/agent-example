@@ -1,10 +1,12 @@
 import argparse
 import asyncio
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
 
 from deepagents.graph import create_deep_agent
+from langchain_core.messages import AIMessageChunk, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from context import CustomContext
@@ -24,9 +26,25 @@ Then execute the following steps in order:
 4. Report the path of the generated HTML file back to the user."""
 
 
+def _print_accumulated_tools(tool_args: dict) -> None:
+    """Print accumulated tool call info at the end of a model turn."""
+    for tc_id, info in tool_args.items():
+        name = info["name"]
+        args_str = info["args"]
+        if name == "write_todos":
+            try:
+                parsed = json.loads(args_str)
+                print(f"    call: write_todos\n{format_todos(parsed.get('todos', []))}")
+            except (json.JSONDecodeError, TypeError):
+                print(f"    call: write_todos args: {truncate_str(args_str)}")
+        else:
+            print(f"    call: {name} args: {truncate_str(args_str)}")
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--thread-id", default=None)
+    parser.add_argument("--debug", action="store_true", help="Write raw events to a debug log in /tmp")
     parser.add_argument("topic", nargs="*")
     args = parser.parse_args()
 
@@ -64,6 +82,20 @@ async def main() -> None:
 
             idx = 1
             last_time = datetime.now()
+            if args.debug:
+                log_path = Path(f"/tmp/agent-example.events.{uuid.uuid4().hex[:8]}.log")
+                log_file = log_path.open("w")
+                print(f"Debug log: {log_path}")
+            else:
+                log_file = None
+
+            # Track current turn to avoid repeating headers
+            current_run_id = None
+            current_node = None
+            current_agent = None
+            accumulated_tool_args = {}  # tool_call_id -> {"name": str, "args": str}
+            accumulated_content = ""
+
             async for event in agent.astream(
                 {"messages": [{"role": "user", "content": topic}]},
                 stream_mode="messages",
@@ -72,37 +104,93 @@ async def main() -> None:
                 config={"configurable": {"thread_id": thread_id}},
                 context=CustomContext(thread_id=thread_id, start_time=start_time),
             ):
-                current_time = datetime.now()
-                last_duration = round((current_time - last_time).total_seconds())
-                total_duration = round((current_time - start_time).total_seconds())
-                print(f"\n{event.get('type')}.{idx} -------------------- {current_time.strftime('%Y-%m-%d %H:%M:%S')} -------------------- (+{last_duration}s/{total_duration}s)")
-                idx += 1
-                last_time = current_time
+                if log_file:
+                    log_file.write(repr(event) + "\n")
+                    log_file.flush()
 
                 if event.get("type") != "messages":
                     continue
                 token, metadata = event.get("data", (None, None))
+                if token is None:
+                    continue
 
-                print(f"agent: {metadata['lc_agent_name']}")
-                print(f"node:  {metadata['langgraph_node']}")
-                if metadata['langgraph_node'] == 'model':
-                    print(f"name:  {metadata['ls_model_name']}")
-                elif metadata['langgraph_node'] == 'tools':
-                    print(f"name:  {token.name}")
-                else:
-                    print(f"unknown node: {metadata}")
+                agent_name = metadata.get('lc_agent_name', '?')
+                node = metadata.get('langgraph_node', '?')
+                run_id = token.id if hasattr(token, 'id') else None
 
-                print(f"content: {truncate_str(token.content)}")
+                # Print header when turn changes (new run or node switch)
+                is_new_turn = (run_id != current_run_id or node != current_node
+                               or agent_name != current_agent)
+                if is_new_turn:
+                    # Flush previous turn's accumulated content
+                    if accumulated_content:
+                        print()
+                        accumulated_content = ""
+                    if accumulated_tool_args:
+                        _print_accumulated_tools(accumulated_tool_args)
+                        accumulated_tool_args = {}
 
-                if token.response_metadata and 'token_usage' in token.response_metadata:
-                    print(f"token_usage: {token.response_metadata['token_usage']}")
+                    current_run_id = run_id
+                    current_node = node
+                    current_agent = agent_name
 
-                if hasattr(token, 'tool_calls') and token.tool_calls:
-                    for tc in token.tool_calls:
-                        if tc['name'] == 'write_todos':
-                            print(f"tool_call: write_todos:\n{format_todos(tc['args']['todos'])}")
-                        else:
-                            print(f"tool_call: {tc['name']} args: {truncate_str(str(tc['args']))}")
+                    current_time = datetime.now()
+                    last_duration = round((current_time - last_time).total_seconds())
+                    total_duration = round((current_time - start_time).total_seconds())
+                    print(f"\n--- {idx}. [{agent_name}] {node} --- "
+                          f"{current_time.strftime('%H:%M:%S')} "
+                          f"(+{last_duration}s/{total_duration}s) ---")
+                    idx += 1
+                    last_time = current_time
+
+                    if node == 'model':
+                        model_name = metadata.get('ls_model_name', '?')
+                        print(f"    model: {model_name}")
+
+                # Handle ToolMessage (tool responses)
+                if isinstance(token, ToolMessage):
+                    tool_name = getattr(token, 'name', '?')
+                    content = token.content or ''
+                    print(f"    tool: {tool_name}")
+                    print(f"    result: {truncate_str(content)}")
+                    continue
+
+                # Handle AIMessageChunk (model streaming)
+                if isinstance(token, AIMessageChunk):
+                    # Stream text content
+                    if token.content:
+                        print(token.content, end="", flush=True)
+                        accumulated_content += token.content
+
+                    # Accumulate tool call chunks
+                    for tc_chunk in (token.tool_call_chunks or []):
+                        tc_id = tc_chunk.get('id') or 'pending'
+                        if tc_id not in accumulated_tool_args and tc_chunk.get('name'):
+                            accumulated_tool_args[tc_id] = {
+                                "name": tc_chunk['name'], "args": ""}
+                        if tc_id in accumulated_tool_args and tc_chunk.get('args'):
+                            accumulated_tool_args[tc_id]["args"] += tc_chunk['args']
+                        elif tc_id not in accumulated_tool_args and tc_chunk.get('args'):
+                            # Continuation chunk for the most recent tool call
+                            if accumulated_tool_args:
+                                last_key = list(accumulated_tool_args)[-1]
+                                accumulated_tool_args[last_key]["args"] += tc_chunk['args']
+
+                    # Check for finish
+                    finish = token.response_metadata.get(
+                        'finish_reason') if token.response_metadata else None
+                    if finish or getattr(token, 'chunk_position', None) == 'last':
+                        if accumulated_content:
+                            print()
+                            accumulated_content = ""
+                        if accumulated_tool_args:
+                            _print_accumulated_tools(accumulated_tool_args)
+                            accumulated_tool_args = {}
+                        if token.response_metadata.get('token_usage'):
+                            print(f"    usage: {token.response_metadata['token_usage']}")
+
+            if log_file:
+                log_file.close()
 
         # Download report.html from sandbox to host
         responses = sandbox.download_files(["/workspace/report.html"])
