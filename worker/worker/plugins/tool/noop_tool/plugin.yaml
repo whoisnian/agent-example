@@ -1,0 +1,15 @@
+kind: tool
+name: noop
+version: 0.1.0
+entrypoint: worker.plugins.tool.noop_tool.handler:noop
+schema:
+  input:
+    type: object
+    properties: {}
+  output:
+    type: object
+permissions: []
+applies_to:
+  task_types: []
+resources:
+  timeout_s: 5

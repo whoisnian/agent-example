@@ -1,0 +1,136 @@
+[project]
+name = "agent-example-worker"
+version = "0.1.0"
+description = "Worker service skeleton for the agent-example platform"
+authors = [
+    { name = "whoisnian", email = "zhuchangbao1998@gmail.com" }
+]
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    # LLM / agent framework.
+    # deepagents is pre-1.0 — track the current 0.6.x line (latest at time of
+    # writing: 0.6.1) and cap at the next minor since pre-1.0 minor bumps may
+    # break API. Bump the cap deliberately when 0.7.x ships.
+    # deepagents 0.6.x requires langchain-core >=1.0,<2.0; langchain /
+    # langchain-core stay on the 1.x line for consistency. The LangChain
+    # callback shape (BaseCallbackHandler.on_llm_start / on_llm_end) is
+    # centralized in core/cost_meter.py per design D6.
+    "langchain>=1.0,<2.0",
+    "langchain-core>=1.0,<2.0",
+    "deepagents>=0.6.1,<0.7.0",
+    # Messaging
+    "aio-pika>=9.5,<10.0",
+    # PostgreSQL
+    "asyncpg>=0.30,<1.0",
+    # S3 / OSS (SeaweedFS speaks the S3 protocol; aioboto3 unchanged)
+    "aioboto3>=15.0,<16.0",
+    # Config + validation
+    "pydantic>=2.12,<3.0",
+    "pydantic-settings>=2.12,<3.0",
+    "pyyaml>=6.0,<7.0",
+    # Observability
+    "structlog>=25.0,<27.0",
+    "opentelemetry-sdk>=1.40,<2.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.40,<2.0",
+    "prometheus-client>=0.23,<1.0",
+    # Control fast-path
+    "redis[hiredis]>=6.0,<7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.13,<1.0",
+    "mypy>=1.18,<2.0",
+    "pytest>=9.0,<10.0",
+    "pytest-asyncio>=1.0,<2.0",
+    "pytest-mock>=3.14,<4.0",
+    # SeaweedFS is started as a generic container in fixtures; we talk to its
+    # S3 endpoint via boto3 directly rather than relying on a vendor-specific
+    # testcontainers extra. Track upstream for a dedicated `seaweedfs` module.
+    "testcontainers[postgres,rabbitmq]>=4.13,<5.0",
+    "boto3>=1.35,<2.0",
+    "types-pyyaml>=6.0,<7.0",
+]
+
+[project.scripts]
+worker = "worker.main:run"
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "worker"
+module-root = ""
+
+# ---------------------------------------------------------------------------
+# Ruff (lint + format)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["worker", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W",          # pycodestyle / pyflakes
+    "I",                       # isort
+    "B",                       # bugbear
+    "UP",                      # pyupgrade
+    "SIM",                     # simplify
+    "ASYNC",                   # async-specific
+    "C4",                      # comprehensions
+    "TID",                     # tidy imports
+]
+ignore = [
+    "E501",  # line too long, handled by formatter
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests intentionally use looser conventions (assert tricks, manual timeouts).
+"tests/**" = ["B011", "ASYNC109"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ---------------------------------------------------------------------------
+# mypy (strict per design D2; agents/ excluded for now)
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unreachable = true
+exclude = [
+    "^worker/agents/",
+    "^worker/plugins/tool/.*/handler\\.py$",
+    "^tests/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "aio_pika.*",
+    "aioboto3.*",
+    "aiobotocore.*",
+    "asyncpg.*",
+    "botocore.*",
+    "deepagents.*",
+    "langchain.*",
+    "langchain_core.*",
+    "testcontainers.*",
+    "redis.*",
+    "prometheus_client.*",
+    "opentelemetry.*",
+]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-ra -m 'not integration'"
+markers = [
+    "integration: end-to-end tests requiring docker / testcontainers (run via `pytest -m integration`)",
+]
