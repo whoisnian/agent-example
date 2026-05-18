@@ -1,0 +1,77 @@
+name: worker-ci
+
+on:
+  push:
+    paths:
+      - 'worker/**'
+      - '.github/workflows/worker-ci.yml'
+  pull_request:
+    paths:
+      - 'worker/**'
+      - '.github/workflows/worker-ci.yml'
+
+defaults:
+  run:
+    working-directory: worker
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Pin Python 3.14
+        run: uv python install 3.14
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen --extra dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Mypy strict
+        run: uv run mypy --strict worker/
+
+      - name: Unit tests
+        run: uv run pytest -x -q
+
+  # Integration tests run against real Postgres / RabbitMQ / SeaweedFS containers
+  # via testcontainers (SeaweedFS started as a generic `DockerContainer` and
+  # accessed via `boto3`). Limited to `main` and the nightly schedule so PRs
+  # stay fast; trigger via `pytest -m integration`.
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+    needs: lint-type-test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "latest"
+          enable-cache: true
+          cache-dependency-glob: "worker/uv.lock"
+
+      - name: Pin Python 3.14
+        run: uv python install 3.14
+
+      - name: Install dependencies (locked)
+        run: uv sync --frozen --extra dev
+
+      - name: Integration tests
+        run: uv run pytest -x -q -m integration
