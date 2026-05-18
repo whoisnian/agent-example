@@ -1,0 +1,44 @@
+# golangci-lint v2 config for the api service.
+# Lint set per init-api-scaffold design D10: default + gocritic + errorlint + gosec.
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # default set
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    # additional per design D10
+    - gocritic
+    - errorlint
+    - gosec
+  settings:
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - ifElseChain
+        - whyNoLint
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    gosec:
+      excludes:
+        # G115: integer overflow conversions are noisy in this codebase and not security-relevant for our IDs.
+        - G115
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
