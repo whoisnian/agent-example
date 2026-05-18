@@ -22,3 +22,24 @@ Worker 允许后续通过 subagent、tool、skill 等方式进行功能扩展，
 将 ARCHITECTURE.md 和 HISTORY.md 移动至 docs 目录下，并在顶层创建前后端及 Worker 的代码根目录。
 补充 README.md 和 AGENTS.md，CLAUDE.md 关联至 AGENTS.md，后续使用 openspec 逐步实现各个系统模块。
 ```
+
+### 2026-05-18-init-api-web-worker-scaffold
+```md
+用 openspec 发起 init-api-scaffold 提案
+并行发起 init-worker-scaffold 和 init-web-scaffold 提案
+
+串行依次实现 /opsx:apply init-api-scaffold、/opsx:apply init-worker-scaffold、/opsx:apply init-web-scaffold
+
+依次整理 api、worker、web 的初版基础设施，尽量采用标准化方案并使用最新的技术栈，更新相关文档及 specs。例如：
+* api 使用最新的 Go 1.26，并升级 go.mod 中的所有依赖到最新版本，包括但不限于 gin、gorm、pgx、opentelemetry 等，确保代码兼容最新的 Go 版本，并且利用新版本的性能和安全改进。
+* worker 使用最新的 Python 3.14，并升级 pyproject.toml 中的所有依赖到最新版本，包括但不限于 deepagents、langchain、opentelemetry 等，确保代码兼容最新的 Python 版本，并且利用新版本的性能和安全改进。
+* web 前端使用较新的 node 24 和 npm 11 进行包管理，移除多余的 pnpm 和 nvm 相关文件，使用最新的 React 19，并升级 package.json 中的所有依赖到最新版本，包括但不限于 react-query、zustand、tailwindcss、vite 等，确保代码兼容最新的 React 版本，并且利用新版本的性能和安全改进。
+* docker-compose.dev.yml 中依赖的开源组件也使用最新版本，并考虑工具风险，例如 postgres 更新到 18.4，rabbitmq 更新到 4.3.0，redis 使用最后的 BSD License 版本 7.2，minio 已经不再维护，考虑替换为 S3 兼容的 seaweedfs，jaeger 更新到 2.18。
+* .github/workflows 中的 CI/CD 流程也要适配最新的技术栈和工具版本，确保在新的环境下能够顺利构建、测试和部署。
+* 更新 api、worker、web 各模块的 README，更新当前正在进行的 openspec propose，清理过时的描述和需求。
+
+docker-compose.dev.yml 不需要再提到 minio，seaweedfs 的ACCESS_KEY 也不需要使用 minioadmin，minio 仅出现在 openspec/changes/init-worker-scaffold 的 propose 中即可
+web/tsconfig.json 提示 选项“baseUrl”已弃用，并将停止在 TypeScript 7.0 中运行。
+
+整理所有未提交的代码变更，拆分为多个 commit 进行提交
+```
