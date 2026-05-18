@@ -33,11 +33,13 @@ jobs:
         run: go vet ./...
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # golangci-lint-action v7+ required for golangci-lint v2.
+        # `.golangci.yml` in the working directory is auto-discovered; no
+        # explicit --config flag needed.
+        uses: golangci/golangci-lint-action@v7
         with:
           working-directory: api
-          version: v2.0.0
-          args: --config=.golangci.yml
+          version: v2.5.0
 
       - name: Unit tests
         run: go test -race -count=1 ./...
