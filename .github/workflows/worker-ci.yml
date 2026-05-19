@@ -49,12 +49,12 @@ jobs:
 
   # Integration tests run against real Postgres / RabbitMQ / SeaweedFS containers
   # via testcontainers (SeaweedFS started as a generic `DockerContainer` and
-  # accessed via `boto3`). Limited to `main` and the nightly schedule so PRs
-  # stay fast; trigger via `pytest -m integration`.
+  # accessed via `boto3`). Runs only on pushes to `master` so PR feedback stays
+  # fast; trigger locally via `pytest -m integration`.
   integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    if: github.ref == 'refs/heads/main' || github.event_name == 'schedule'
+    if: github.ref == 'refs/heads/master'
     needs: lint-type-test
     steps:
       - name: Checkout

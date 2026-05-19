@@ -46,3 +46,25 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+  # Testcontainers-backed integration tests against a real Postgres 18.4.
+  # Runs only on pushes to `master` so PR feedback stays fast; trigger locally
+  # via `go test -tags=integration ./...` (i.e. `make test-integration`).
+  integration-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/master'
+    needs: vet-lint-test-build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+          cache-dependency-path: api/go.sum
+
+      - name: Integration tests
+        run: make test-integration
