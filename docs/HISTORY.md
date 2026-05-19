@@ -43,3 +43,19 @@ web/tsconfig.json 提示 选项“baseUrl”已弃用，并将停止在 TypeScri
 
 整理所有未提交的代码变更，拆分为多个 commit 进行提交
 ```
+
+### 2026-05-19-add-task-domain-schema
+```md
+用 openspec 发起 add-task-domain-schema 提案
+review 当前提案，并整理意见到 suggestions.md，改进当前提案
+整理 commit 并提交到远端仓库
+
+/opsx:apply add-task-domain-schema
+不需要 schedule 定时执行 integration-tests
+seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-cli
+参考 https://github.com/seaweedfs/seaweedfs/blob/master/README.md 更新 docker-compose.dev.yml 中的 seaweedfs 配置，seaweedfs 更新到最新版本
+使用 docker-compose.dev.yml 启动依赖服务，完成提案中的剩余任务
+.github/workflows 中使用的主分支名称改为 master
+
+先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
+```
