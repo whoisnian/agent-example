@@ -81,7 +81,7 @@ Files added under `api/queries/`:
 
 The api scaffold deferred testcontainers-Postgres integration tests (items 5.4, 6.6). This proposal is the right home: we're adding schema, and integration tests are the only credible way to prove a schema does what it says. Tests live at `api/internal/infrastructure/persistence/migrations_integration_test.go` behind the `//go:build integration` tag so `make test` skips them and `make test-integration` runs them.
 
-CI: api-ci.yml gains a second job `integration-tests` that mirrors worker-ci.yml's pattern — runs on `main` and on the nightly schedule.
+CI: api-ci.yml gains a second job `integration-tests` that runs on pushes to `master` only — no `schedule:` cron. PR feedback stays fast; integration regressions surface the moment a feature lands on `master`. (The worker-ci.yml `integration-tests` job is realigned to the same gate in this change; the earlier `event_name == 'schedule'` clause was a latent bug since neither workflow had a `schedule:` trigger.)
 
 ### D10. `tenant_id` / `user_id` columns without FKs
 
@@ -123,7 +123,7 @@ This deviation is documented here in lieu of patching ARCHITECTURE in a schema-o
 - **[Risk] `task_versions.parent_id` cycle is structurally possible** → Mitigation: parent_id can only reference rows that already exist (FK), and the application sets it once at INSERT and never updates it. The schema permits cycles only via deliberate UPDATE; reviewers reject such code. A future hardening proposal can add a recursive CTE check or trigger if needed.
 - **[Risk] BIGSERIAL on `task_events.id` and `cost_events.id` will be hot under load** → Mitigation: BIGSERIAL is fine for MVP throughput (we expect ≤ 100 events/s aggregate). Revisit when we add Citus-style sharding (post-MVP).
 - **[Risk] JSONB blobs grow unbounded** → Mitigation: `task_checkpoints.state` already has the inline budget (8 KiB per worker-execution-runtime spec) with overflow going to OSS. `task_events.payload` is bounded by application code (event kind contracts). `task_runs.error` is small by construction.
-- **[Risk] Integration tests need Docker, which CI may not provide everywhere** → Mitigation: the api-ci `integration-tests` job runs only on `main` + nightly, mirroring `worker-ci.yml`. PR feedback stays fast; integration regressions surface daily.
+- **[Risk] Integration tests need Docker, which CI may not provide everywhere** → Mitigation: the api-ci `integration-tests` job runs only on pushes to `master`. PR feedback stays fast; integration regressions surface at merge time. No scheduled / cron execution — deliberate decision to keep CI minutes predictable and to make every integration run causally tied to a code change.
 
 ## Migration Plan
 

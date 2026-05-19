@@ -51,6 +51,6 @@ Out of scope for this proposal (deferred to follow-ups):
 
 - **Code**: `api/migrations/` grows from 1 pair to 3 pairs of SQL files; `api/queries/` adds 8 files; `api/internal/infrastructure/persistence/sqlc/` gains its first generated business code (Querier interface + row types for ~12 queries).
 - **Dependencies**: adds `github.com/testcontainers/testcontainers-go/modules/postgres` (test-only) for the integration suite. sqlc generates against the existing `pgx/v5` driver pinned in `sqlc.yaml`.
-- **CI**: api-ci's existing unit lane is unaffected. The new integration lane (testcontainers-postgres) is added to `worker-ci.yml`-style separate job — runs on `main` + nightly, skipped on PRs unless tagged.
+- **CI**: api-ci's existing unit lane is unaffected. The new integration lane (testcontainers-postgres) is added as a `worker-ci.yml`-style separate job — gated `if: github.ref == 'refs/heads/master'`, skipped on PRs, **no `schedule:` cron**. The worker-ci.yml `integration-tests` job is realigned to the same gate (it referenced `schedule` while having no `schedule:` trigger — a latent dead-code bug).
 - **Cross-service contract**: Worker writes to `task_runs.last_heartbeat` / `task_checkpoints` / `artifacts` (per `worker-execution-runtime`) start succeeding once this lands. Worker code itself is unchanged.
 - **Downstream**: unblocks `add-task-create-api`, `add-task-iterate-api`, `add-task-cost-api`, `add-worker-code-agent`, `add-web-tasks-pages`.
