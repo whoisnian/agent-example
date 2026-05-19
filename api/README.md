@@ -6,7 +6,7 @@
 - **职责**：任务 CRUD、状态机推进、版本管理、互斥校验、成本查询聚合、Outbox 投递、Realtime Gateway 与 Worker 编排
 - **目录规划**：见 [`../docs/ARCHITECTURE.md §3.2`](../docs/ARCHITECTURE.md)
 
-> MVP 骨架由 OpenSpec 变更 `init-api-scaffold` 引入。当前提供"能启动 / 能连 PG / 能连 RabbitMQ / 能优雅关停 / Outbox Relayer 可投递"的最小可用骨架；尚未交付任何业务路由。
+> MVP 骨架由 OpenSpec 变更 `init-api-scaffold` 引入；任务域 / 成本域 schema 由 `add-task-domain-schema` 引入。当前提供"能启动 / 能连 PG / 能连 RabbitMQ / 能优雅关停 / Outbox Relayer 可投递 / 业务表 schema 就绪"的最小可用骨架；尚未交付任何业务路由。
 
 ## 本地启动
 
@@ -81,11 +81,26 @@ make migrate-up
 
 ## 关键不变量（实现层面）
 
-- 任何"创建活跃版本"的操作（create / iterate / rollback-branch）必须在事务内做互斥检查，并依赖 DB 唯一索引 `one_active_version_per_task` 兜底（**业务表由后续提案引入**；本骨架仅含 `outbox`）。
+- **任务级互斥由 DB 唯一部分索引 `one_active_version_per_task` 兜底**（迁移 `0002_init_task_domain`）。索引建在 `task_versions(task_id) WHERE is_active` 上，`is_active` 是 `STORED` 生成列。任何"创建活跃版本"的操作（create / iterate / rollback-branch）应用层再做一次显式检查只为更友好的 409，DB 索引才是真相之源。
 - 所有跨服务边界的事件走 **Outbox 模式**：DB 事务写业务表 + outbox，由 Relayer 异步发布到 RabbitMQ；Relayer 通过 `pg_try_advisory_lock` 做单活跃选主。
 - 任何状态翻转通过 Domain Service 的状态机方法完成，禁止裸 SQL UPDATE。
 - 错误返回结构：`{code, message, data, trace_id}`，互斥冲突使用 `409 active_version_exists`（业务码由具体业务提案补充）。
 - `infrastructure/persistence/sqlc/` 之外的业务层禁止直接使用 `pgx` / `database/sql`；唯一例外是 Outbox Relayer（架构 design D2）。
+
+## 业务表 schema
+
+`add-task-domain-schema` 引入了以下表（参见 [`docs/ARCHITECTURE.md §4`](../docs/ARCHITECTURE.md)）：
+
+| 域 | 表 | 备注 |
+|---|---|---|
+| 任务域（迁移 0002） | `tasks` / `task_versions` / `task_runs` / `task_events` / `task_checkpoints` / `artifacts` | `task_versions.is_active` 是 generated stored column；建在其上的 partial unique 索引就是任务级互斥的来源 |
+| 成本域（迁移 0003） | `pricing` / `cost_events` / `task_costs` | 历史价格行不可改（约定 + code review）；`task_costs` 由 Cost Service 独占 UPSERT |
+
+sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 `internal/infrastructure/persistence/sqlc/`。状态机 UPDATE 类查询等到引入状态机的提案再加。
+
+## 集成测试
+
+`make test-integration` 用 testcontainers 启 PostgreSQL 18.4，跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。
 
 ## 目录结构
 
