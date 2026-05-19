@@ -11,8 +11,9 @@ Worker 服务根目录。
 ## 本地启动
 
 ```bash
-# 1. 启动依赖栈（postgres + rabbitmq + redis + seaweedfs + seaweedfs-init bucket）
-docker compose -f ../docker-compose.dev.yml up -d postgres rabbitmq redis seaweedfs seaweedfs-init
+# 1. 启动依赖栈（postgres + rabbitmq + redis + seaweedfs）
+# SeaweedFS 以 `weed mini` 模式启动，按 S3_BUCKET 自动建桶，无需 init container。
+docker compose -f ../docker-compose.dev.yml up -d postgres rabbitmq redis seaweedfs
 
 # 2. 安装依赖（自动拉取 Python 3.14）
 make sync   # 或: uv sync --extra dev
@@ -22,7 +23,7 @@ export RABBITMQ_URL=amqp://guest:guest@localhost:5672/
 export DATABASE_URL=postgres://postgres:postgres@localhost:5432/agent_example
 export OSS_ENDPOINT=http://localhost:9000      # SeaweedFS S3 API (published as :9000)
 export OSS_BUCKET=worker-bucket
-export OSS_ACCESS_KEY_ID=dev-access-key        # dev-only creds; see infra/seaweedfs/s3-config.json
+export OSS_ACCESS_KEY_ID=dev-access-key        # dev-only creds; see docker-compose.dev.yml seaweedfs.environment
 export OSS_ACCESS_KEY_SECRET=dev-secret-key
 # 可选
 export REDIS_URL=redis://localhost:6379/0

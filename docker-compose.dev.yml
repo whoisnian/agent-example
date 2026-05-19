@@ -28,7 +28,11 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      # PG 18+ places data in a major-version-specific subdirectory under
+      # /var/lib/postgresql so `pg_upgrade --link` works without mount-point
+      # boundary issues. Mount the parent, not /var/lib/postgresql/data.
+      # See https://github.com/docker-library/postgres/pull/1259.
+      - postgres-data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d agent_example"]
       interval: 5s
@@ -66,52 +70,34 @@ services:
       timeout: 3s
       retries: 10
 
-  # S3-compatible object storage.
-  # SeaweedFS S3 API listens on 8333 inside the container; we publish it on
-  # host 9000 so OSS_ENDPOINT=http://localhost:9000 works out of the box.
+  # S3-compatible object storage via `weed mini` — the upstream-recommended
+  # quick-start mode (see https://github.com/seaweedfs/seaweedfs README).
+  # Boot-time env vars do everything in one shot:
+  #   * AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY → provision the dev identity
+  #   * S3_BUCKET → pre-create the bucket (comma-separate for multiple)
+  # No init-container, no IAM-config volume, no master/filer ports exposed.
+  # The S3 API listens on 8333 in-container; host 9000 keeps
+  # OSS_ENDPOINT=http://localhost:9000 working unchanged.
   seaweedfs:
-    image: chrislusf/seaweedfs:3.96
+    image: chrislusf/seaweedfs:4.26
     container_name: agent-example-seaweedfs
     restart: unless-stopped
     command:
-      - server
+      - mini
       - -dir=/data
-      - -s3
-      - -s3.config=/etc/seaweed/s3-config.json
-      - -ip=seaweedfs
+    environment:
+      AWS_ACCESS_KEY_ID: dev-access-key
+      AWS_SECRET_ACCESS_KEY: dev-secret-key
+      S3_BUCKET: worker-bucket
     ports:
       - "9000:8333"     # S3 API
-      - "9333:9333"     # Master (debug)
-      - "8888:8888"     # Filer (debug)
     volumes:
       - seaweedfs-data:/data
-      - ./infra/seaweedfs/s3-config.json:/etc/seaweed/s3-config.json:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:8333/ >/dev/null 2>&1 || exit 0"]
       interval: 5s
       timeout: 3s
       retries: 20
-
-  # One-shot bucket creator using the AWS CLI against SeaweedFS's S3 API.
-  # `s3 mb` is idempotent (returns 200 / "BucketAlreadyOwnedByYou") so re-running
-  # compose up is safe.
-  seaweedfs-init:
-    image: amazon/aws-cli:2.18.6
-    container_name: agent-example-seaweedfs-init
-    depends_on:
-      seaweedfs:
-        condition: service_healthy
-    environment:
-      AWS_ACCESS_KEY_ID: dev-access-key
-      AWS_SECRET_ACCESS_KEY: dev-secret-key
-      AWS_DEFAULT_REGION: us-east-1
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        aws --endpoint-url http://seaweedfs:8333 s3 mb s3://worker-bucket 2>/dev/null || true
-        echo "seaweedfs-init done"
-    restart: "no"
 
   # Optional Jaeger v2 for local trace visualisation. Enable via `--profile trace`.
   # Jaeger 2.x is the OpenTelemetry-aligned line; v1 is in maintenance.
