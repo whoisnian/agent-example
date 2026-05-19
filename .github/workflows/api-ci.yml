@@ -39,7 +39,7 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           working-directory: api
-          version: v2.5.0
+          version: v2.12.2
 
       - name: Unit tests
         run: go test -race -count=1 ./...
