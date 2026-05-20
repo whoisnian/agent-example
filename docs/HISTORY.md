@@ -59,3 +59,14 @@ seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-c
 
 先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
 ```
+
+### 2026-05-20-add-task-create-api
+```md
+用 openspec 发起 add-task-create-api 提案
+review 当前提案，并整理意见到 suggestions.md，改进当前提案
+整理 commit 并提交到远端仓库
+
+/opsx:apply add-task-create-api
+
+先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
+```
