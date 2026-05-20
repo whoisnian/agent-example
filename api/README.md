@@ -45,6 +45,9 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 | `LOG_LEVEL` | `info` | slog 级别 |
 | `OTLP_ENDPOINT` | 空（noop） | OTLP HTTP 导出地址，例如 `http://localhost:4318` |
 | `SHUTDOWN_DRAIN_TIMEOUT` | `30s` | 优雅关停 in-flight 请求等待时长 |
+| `DEFAULT_LANE` | `default` | 创建/迭代任务时，请求未提供 `lane` 字段时回退使用的 lane（写入 `outbox.topic = execute.<task_type>.<lane>`） |
+| `DEFAULT_TASK_DEADLINE` | `60m` | execute payload 中 `deadline_ts` 与 `now()` 的偏移量 |
+| `DEV_TENANT_ID` / `DEV_USER_ID` | 占位 UUID | 鉴权中间件接入前，task 表 `tenant_id` / `user_id` 的兜底写入值；接入 JWT 后由 middleware 注入并废弃 |
 
 ## 常用命令
 
@@ -98,6 +101,17 @@ make migrate-up
 
 sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 `internal/infrastructure/persistence/sqlc/`。状态机 UPDATE 类查询等到引入状态机的提案再加。
 
+## 任务写入端点（`task-write-api`）
+
+`add-task-create-api` 落地了首批写端点：
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/v1/tasks` | 新建任务 + v1；同一事务里插入 `tasks` / `task_versions` / `task_runs` / `outbox`，由 Relayer 异步投递 `execute.<task_type>.<lane>` |
+| `POST` | `/api/v1/tasks/{task_id}/iterate` | 基于 `base_version_id`（缺省取 `tasks.current_version`）派生新版本；活跃中返回 `409 active_version_exists`，DB 唯一索引 `one_active_version_per_task` 是真相之源 |
+
+请求/响应契约见 [`openspec/specs/task-write-api/spec.md`](../openspec/specs/task-write-api/spec.md)。鉴权中间件目前是 stub，`tenant_id` / `user_id` 取自 `DEV_TENANT_ID` / `DEV_USER_ID`，正式 JWT 接入后由 middleware 注入。
+
 ## 集成测试
 
 `make test-integration` 用 testcontainers 启 PostgreSQL 18.4，跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。
@@ -109,8 +123,8 @@ api/
 ├── cmd/api/main.go              进程入口 + 生命周期编排
 ├── internal/
 │   ├── interfaces/http/         HTTP 层（server、middleware、health、envelope、errors、recovery）
-│   ├── application/             用例编排（脚手架阶段为空）
-│   ├── domain/                  领域模型（脚手架阶段为空）
+│   ├── application/             用例编排（`task/` 由 add-task-create-api 引入）
+│   ├── domain/                  领域模型（`task/` 由 add-task-create-api 引入）
 │   ├── infrastructure/
 │   │   ├── config/              配置加载（env + 可选 yaml）
 │   │   ├── observability/       logger / tracing / metrics

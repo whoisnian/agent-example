@@ -24,10 +24,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
+
+	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/config"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/messaging"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence"
+	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence/sqlc"
 	httpapi "github.com/whoisnian/agent-example/api/internal/interfaces/http"
 )
 
@@ -63,6 +68,19 @@ func runServer(args []string) int {
 
 	logger := observability.NewLogger(cfg.LogLevel, os.Stdout)
 	logger.Info("api_starting", slog.String("addr", cfg.HTTPAddr))
+
+	// Validate static-shape config up front so we fail fast before opening
+	// any external connections.
+	devTenant, err := uuid.Parse(cfg.DevTenantID)
+	if err != nil {
+		logger.Error("dev_tenant_id_invalid", slog.String("err", err.Error()))
+		return 1
+	}
+	devUser, err := uuid.Parse(cfg.DevUserID)
+	if err != nil {
+		logger.Error("dev_user_id_invalid", slog.String("err", err.Error()))
+		return 1
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -150,10 +168,30 @@ func runServer(args []string) int {
 	probes.Register("postgres", pool.Probe)
 	probes.Register("rabbitmq", mqConn.Probe)
 
+	// Task-write-api wiring (domain → application → HTTP).
+	queries := sqlc.New(pool.Pool)
+	domainSvc := taskdomain.NewService(
+		pool.Pool,
+		queries,
+		taskdomain.SystemClock{},
+		taskdomain.UUIDv7Gen{},
+		cfg.DefaultLane,
+		cfg.DefaultTaskDeadline,
+	)
+	appSvc := apptask.NewService(domainSvc)
+	taskHandlers := &httpapi.TaskHandlers{
+		App:         appSvc,
+		Logger:      logger,
+		Metrics:     metrics,
+		DevTenantID: devTenant,
+		DevUserID:   devUser,
+	}
+
 	engine := httpapi.NewEngine(httpapi.ServerDeps{
-		Logger:  logger,
-		Metrics: metrics,
-		Probes:  probes,
+		Logger:       logger,
+		Metrics:      metrics,
+		Probes:       probes,
+		TaskHandlers: taskHandlers,
 	})
 	server := httpapi.NewServer(cfg.HTTPAddr, engine, logger)
 

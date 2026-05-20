@@ -63,6 +63,36 @@ func (q *Queries) CreateTaskVersion(ctx context.Context, arg CreateTaskVersionPa
 	return i, err
 }
 
+const getActiveVersionByTask = `-- name: GetActiveVersionByTask :one
+SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
+FROM task_versions
+WHERE task_id = $1 AND is_active
+ORDER BY version_no DESC
+LIMIT 1
+`
+
+// Returns the (at most one) active version row for a task; used by the
+// task-write-api 409 path to enrich the response envelope after the savepoint
+// detects a mutex hit. The unique partial index `one_active_version_per_task`
+// guarantees at most one match.
+func (q *Queries) GetActiveVersionByTask(ctx context.Context, taskID pgtype.UUID) (TaskVersion, error) {
+	row := q.db.QueryRow(ctx, getActiveVersionByTask, taskID)
+	var i TaskVersion
+	err := row.Scan(
+		&i.ID,
+		&i.TaskID,
+		&i.ParentID,
+		&i.VersionNo,
+		&i.Prompt,
+		&i.Params,
+		&i.Status,
+		&i.IsActive,
+		&i.ArtifactRoot,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getTaskVersionByID = `-- name: GetTaskVersionByID :one
 SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
 FROM task_versions
@@ -71,6 +101,38 @@ WHERE id = $1
 
 func (q *Queries) GetTaskVersionByID(ctx context.Context, id pgtype.UUID) (TaskVersion, error) {
 	row := q.db.QueryRow(ctx, getTaskVersionByID, id)
+	var i TaskVersion
+	err := row.Scan(
+		&i.ID,
+		&i.TaskID,
+		&i.ParentID,
+		&i.VersionNo,
+		&i.Prompt,
+		&i.Params,
+		&i.Status,
+		&i.IsActive,
+		&i.ArtifactRoot,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getVersionByTaskAndID = `-- name: GetVersionByTaskAndID :one
+SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
+FROM task_versions
+WHERE id = $1 AND task_id = $2
+`
+
+type GetVersionByTaskAndIDParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TaskID pgtype.UUID `json:"task_id"`
+}
+
+// Look up a specific version inside a task. Used to validate that an
+// iterate request's optional `base_version_id` belongs to the path task_id
+// atomically, without round-tripping a separate ownership check.
+func (q *Queries) GetVersionByTaskAndID(ctx context.Context, arg GetVersionByTaskAndIDParams) (TaskVersion, error) {
+	row := q.db.QueryRow(ctx, getVersionByTaskAndID, arg.ID, arg.TaskID)
 	var i TaskVersion
 	err := row.Scan(
 		&i.ID,
@@ -125,4 +187,19 @@ func (q *Queries) ListVersionsByTask(ctx context.Context, taskID pgtype.UUID) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const maxVersionNoForTask = `-- name: MaxVersionNoForTask :one
+SELECT COALESCE(MAX(version_no), 0)::int AS max_version_no
+FROM task_versions
+WHERE task_id = $1
+`
+
+// Highest version_no observed for a task, 0 when none exist. Used by iterate
+// to assign the new version_no (max + 1).
+func (q *Queries) MaxVersionNoForTask(ctx context.Context, taskID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, maxVersionNoForTask, taskID)
+	var max_version_no int32
+	err := row.Scan(&max_version_no)
+	return max_version_no, err
 }

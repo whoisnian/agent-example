@@ -135,3 +135,47 @@ func (q *Queries) ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, e
 	}
 	return items, nil
 }
+
+const lockTaskRow = `-- name: LockTaskRow :one
+SELECT id, status, current_version
+FROM tasks
+WHERE id = $1
+FOR UPDATE
+`
+
+type LockTaskRowRow struct {
+	ID             pgtype.UUID `json:"id"`
+	Status         string      `json:"status"`
+	CurrentVersion pgtype.UUID `json:"current_version"`
+}
+
+// Acquires a row-level lock on a task and returns its id/status/current_version.
+// Used by the iterate path so concurrent requests against the same task
+// serialise behind one another inside the transaction.
+func (q *Queries) LockTaskRow(ctx context.Context, id pgtype.UUID) (LockTaskRowRow, error) {
+	row := q.db.QueryRow(ctx, lockTaskRow, id)
+	var i LockTaskRowRow
+	err := row.Scan(&i.ID, &i.Status, &i.CurrentVersion)
+	return i, err
+}
+
+const updateTaskCurrentVersion = `-- name: UpdateTaskCurrentVersion :exec
+UPDATE tasks
+SET status = 'pending',
+    current_version = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateTaskCurrentVersionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	CurrentVersion pgtype.UUID `json:"current_version"`
+}
+
+// Points `tasks.current_version` at the new version and stamps the task back
+// to `pending`. Called by the iterate transaction after `createActiveVersion`
+// succeeds.
+func (q *Queries) UpdateTaskCurrentVersion(ctx context.Context, arg UpdateTaskCurrentVersionParams) error {
+	_, err := q.db.Exec(ctx, updateTaskCurrentVersion, arg.ID, arg.CurrentVersion)
+	return err
+}

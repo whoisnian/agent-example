@@ -26,6 +26,11 @@ type Querier interface {
 	// status raises SQLSTATE 23505 with that constraint name; callers translate
 	// the error to a 409 envelope (owned by add-task-create-api).
 	CreateTaskVersion(ctx context.Context, arg CreateTaskVersionParams) (TaskVersion, error)
+	// Returns the (at most one) active version row for a task; used by the
+	// task-write-api 409 path to enrich the response envelope after the savepoint
+	// detects a mutex hit. The unique partial index `one_active_version_per_task`
+	// guarantees at most one match.
+	GetActiveVersionByTask(ctx context.Context, taskID pgtype.UUID) (TaskVersion, error)
 	// Returns the pricing row in force at $4 for (resource_kind, resource_name,
 	// unit), or no rows if none. Used by the Cost Service when scoring a
 	// cost_event at write time.
@@ -38,11 +43,20 @@ type Querier interface {
 	GetTaskCost(ctx context.Context, taskID pgtype.UUID) (GetTaskCostRow, error)
 	GetTaskRunByID(ctx context.Context, id pgtype.UUID) (TaskRun, error)
 	GetTaskVersionByID(ctx context.Context, id pgtype.UUID) (TaskVersion, error)
+	// Look up a specific version inside a task. Used to validate that an
+	// iterate request's optional `base_version_id` belongs to the path task_id
+	// atomically, without round-tripping a separate ownership check.
+	GetVersionByTaskAndID(ctx context.Context, arg GetVersionByTaskAndIDParams) (TaskVersion, error)
 	// One row per version. Returns no rows if the Cost Service hasn't yet
 	// upserted anything for the version (treat as "0 across the board").
 	GetVersionCost(ctx context.Context, versionID pgtype.UUID) (TaskCost, error)
 	// Records a publish failure: bumps attempts and schedules a retry at next_retry_at.
 	IncrementOutboxAttempt(ctx context.Context, arg IncrementOutboxAttemptParams) error
+	// Append a new outbox row inside the same transaction as the business write
+	// it triggers. Returns id/status/created_at so the caller can correlate with
+	// the publisher's metric output. Used by the task-write-api flow to enqueue
+	// `execute.<task_type>.<lane>` messages.
+	InsertOutbox(ctx context.Context, arg InsertOutboxParams) (InsertOutboxRow, error)
 	// Idempotent on (run_id, seq). Duplicate inserts from the Realtime Gateway
 	// on Worker retries are silently dropped.
 	InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) error
@@ -57,16 +71,27 @@ type Querier interface {
 	// Returns all versions for a task ordered by version_no ascending so callers
 	// can rebuild the tree client-side.
 	ListVersionsByTask(ctx context.Context, taskID pgtype.UUID) ([]TaskVersion, error)
+	// Acquires a row-level lock on a task and returns its id/status/current_version.
+	// Used by the iterate path so concurrent requests against the same task
+	// serialise behind one another inside the transaction.
+	LockTaskRow(ctx context.Context, id pgtype.UUID) (LockTaskRowRow, error)
 	// Moves an outbox row to terminal failed state after exhausting retries.
 	MarkOutboxFailed(ctx context.Context, id int64) error
 	// Marks an outbox row as successfully published.
 	MarkOutboxSent(ctx context.Context, id int64) error
+	// Highest version_no observed for a task, 0 when none exist. Used by iterate
+	// to assign the new version_no (max + 1).
+	MaxVersionNoForTask(ctx context.Context, taskID pgtype.UUID) (int32, error)
 	// Returns up to $1 pending rows whose next_retry_at has elapsed (or is unset),
 	// ordered by id for stable replay. Used by the Outbox Relayer scan step.
 	ScanPendingOutbox(ctx context.Context, limit int32) ([]Outbox, error)
 	// The highest-step_seq checkpoint for a run, or zero rows if none. Workers
 	// use this on resume to find the resume point.
 	SelectLatestCheckpoint(ctx context.Context, runID pgtype.UUID) (TaskCheckpoint, error)
+	// Points `tasks.current_version` at the new version and stamps the task back
+	// to `pending`. Called by the iterate transaction after `createActiveVersion`
+	// succeeds.
+	UpdateTaskCurrentVersion(ctx context.Context, arg UpdateTaskCurrentVersionParams) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -52,6 +52,14 @@ type Config struct {
 	// Observability
 	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"" yaml:"otlp_endpoint"`
 	ServiceName  string `env:"OTEL_SERVICE_NAME" envDefault:"api" yaml:"service_name"`
+
+	// Task-write-api
+	DefaultLane         string        `env:"DEFAULT_LANE" envDefault:"default" yaml:"default_lane"`
+	DefaultTaskDeadline time.Duration `env:"DEFAULT_TASK_DEADLINE" envDefault:"60m" yaml:"default_task_deadline"`
+	// Dev-mode principal — auth middleware is a stub today; these IDs fill in
+	// the tenant/user fields the schema requires until JWT extraction lands.
+	DevTenantID string `env:"DEV_TENANT_ID" envDefault:"00000000-0000-0000-0000-000000000001" yaml:"dev_tenant_id"`
+	DevUserID   string `env:"DEV_USER_ID" envDefault:"00000000-0000-0000-0000-000000000002" yaml:"dev_user_id"`
 }
 
 // Load builds Config by:

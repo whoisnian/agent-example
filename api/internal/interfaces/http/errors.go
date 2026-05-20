@@ -3,6 +3,8 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+
+	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 )
 
 // DomainErrorKind enumerates the generic error catalogue from design D11. Feature
@@ -41,10 +43,32 @@ func (e *DomainError) Unwrap() error { return e.Cause }
 
 // MapError translates an error (DomainError or otherwise) into HTTP status +
 // code + message. Unknown errors degrade to 500 / internal_error.
+//
+// Task-write-api domain errors are recognised here so handlers do not have to
+// reach across packages for them; the `data` block (e.g. active_version_id)
+// is rendered separately by the handler so MapError stays envelope-agnostic.
 func MapError(err error) (status int, code, message string) {
 	if err == nil {
 		return http.StatusOK, "0", "ok"
 	}
+
+	// Domain-specific errors from the task aggregate.
+	switch {
+	case errors.Is(err, taskdomain.ErrTaskNotFound):
+		return http.StatusNotFound, "task_not_found", "task not found"
+	case errors.Is(err, taskdomain.ErrVersionNotFound):
+		return http.StatusNotFound, "version_not_found", "version not found"
+	}
+	var ave *taskdomain.ErrActiveVersionExists
+	if errors.As(err, &ave) {
+		return http.StatusConflict, "active_version_exists",
+			"task has an active version; wait for it to finish or cancel it first"
+	}
+	var iie *taskdomain.ErrInvalidInput
+	if errors.As(err, &iie) {
+		return http.StatusBadRequest, "invalid_input", iie.Error()
+	}
+
 	var de *DomainError
 	if errors.As(err, &de) {
 		s, defaultCode := kindToHTTP(de.Kind)

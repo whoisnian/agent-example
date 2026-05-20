@@ -23,3 +23,22 @@ WHERE tenant_id = $1
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
 ORDER BY created_at DESC, id DESC
 LIMIT $3 OFFSET $4;
+
+-- name: LockTaskRow :one
+-- Acquires a row-level lock on a task and returns its id/status/current_version.
+-- Used by the iterate path so concurrent requests against the same task
+-- serialise behind one another inside the transaction.
+SELECT id, status, current_version
+FROM tasks
+WHERE id = $1
+FOR UPDATE;
+
+-- name: UpdateTaskCurrentVersion :exec
+-- Points `tasks.current_version` at the new version and stamps the task back
+-- to `pending`. Called by the iterate transaction after `createActiveVersion`
+-- succeeds.
+UPDATE tasks
+SET status = 'pending',
+    current_version = $2,
+    updated_at = now()
+WHERE id = $1;

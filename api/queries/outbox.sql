@@ -32,3 +32,15 @@ WHERE id = $1;
 -- name: CountOutboxPending :one
 -- Used by the outbox_pending gauge.
 SELECT count(*) FROM outbox WHERE status = 'pending';
+
+-- name: InsertOutbox :one
+-- Append a new outbox row inside the same transaction as the business write
+-- it triggers. Returns id/status/created_at so the caller can correlate with
+-- the publisher's metric output. Used by the task-write-api flow to enqueue
+-- `execute.<task_type>.<lane>` messages.
+INSERT INTO outbox (
+    aggregate, aggregate_id, topic, payload
+) VALUES (
+    $1, $2, $3, $4
+)
+RETURNING id, status, created_at;

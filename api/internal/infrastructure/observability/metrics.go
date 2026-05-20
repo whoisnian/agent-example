@@ -25,6 +25,10 @@ type Metrics struct {
 	MQOutboxPublished   prometheus.Counter
 	OutboxFailedTotal   prometheus.Counter
 	OutboxRelayerLeader prometheus.Gauge
+
+	// Task-write-api business metrics
+	TasksCreatedTotal  *prometheus.CounterVec
+	TasksIteratedTotal *prometheus.CounterVec
 }
 
 // NewMetrics builds the registry and every collector.
@@ -83,6 +87,20 @@ func NewMetrics() *Metrics {
 			Name: "outbox_relayer_lock_owner",
 			Help: "1 when this replica currently holds the relayer advisory lock, else 0.",
 		}),
+		TasksCreatedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "tasks_created_total",
+				Help: "Tasks successfully created via POST /api/v1/tasks, labelled by task_type.",
+			},
+			[]string{"task_type"},
+		),
+		TasksIteratedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "tasks_iterated_total",
+				Help: "Iterate-task attempts via POST /api/v1/tasks/{id}/iterate. Outcome: success|conflict|not_found|invalid|error.",
+			},
+			[]string{"outcome"},
+		),
 	}
 
 	reg.MustRegister(
@@ -95,6 +113,8 @@ func NewMetrics() *Metrics {
 		m.MQOutboxPublished,
 		m.OutboxFailedTotal,
 		m.OutboxRelayerLeader,
+		m.TasksCreatedTotal,
+		m.TasksIteratedTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

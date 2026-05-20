@@ -41,6 +41,44 @@ func (q *Queries) IncrementOutboxAttempt(ctx context.Context, arg IncrementOutbo
 	return err
 }
 
+const insertOutbox = `-- name: InsertOutbox :one
+INSERT INTO outbox (
+    aggregate, aggregate_id, topic, payload
+) VALUES (
+    $1, $2, $3, $4
+)
+RETURNING id, status, created_at
+`
+
+type InsertOutboxParams struct {
+	Aggregate   string      `json:"aggregate"`
+	AggregateID pgtype.UUID `json:"aggregate_id"`
+	Topic       string      `json:"topic"`
+	Payload     []byte      `json:"payload"`
+}
+
+type InsertOutboxRow struct {
+	ID        int64              `json:"id"`
+	Status    string             `json:"status"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+// Append a new outbox row inside the same transaction as the business write
+// it triggers. Returns id/status/created_at so the caller can correlate with
+// the publisher's metric output. Used by the task-write-api flow to enqueue
+// `execute.<task_type>.<lane>` messages.
+func (q *Queries) InsertOutbox(ctx context.Context, arg InsertOutboxParams) (InsertOutboxRow, error) {
+	row := q.db.QueryRow(ctx, insertOutbox,
+		arg.Aggregate,
+		arg.AggregateID,
+		arg.Topic,
+		arg.Payload,
+	)
+	var i InsertOutboxRow
+	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
+	return i, err
+}
+
 const markOutboxFailed = `-- name: MarkOutboxFailed :exec
 UPDATE outbox
 SET status = 'failed',
