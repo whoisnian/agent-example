@@ -42,6 +42,11 @@ class Metrics:
     # Control signals
     control_signals_total: Counter
 
+    # Agent orchestration
+    agent_runs_total: Counter
+    agent_steps_total: Counter
+    agent_step_duration_seconds: Histogram
+
 
 def build_metrics(registry: CollectorRegistry | None = None) -> Metrics:
     """Create and register the worker metric set on the given registry.
@@ -109,6 +114,23 @@ def build_metrics(registry: CollectorRegistry | None = None) -> Metrics:
             "worker_control_signals_total",
             "Control signals received (deduplicated across RMQ + Redis), by action.",
             labelnames=("action",),
+            registry=reg,
+        ),
+        agent_runs_total=Counter(
+            "worker_agent_runs_total",
+            "Agent runs by task_type and outcome (success|error|cancelled).",
+            labelnames=("task_type", "outcome"),
+            registry=reg,
+        ),
+        agent_steps_total=Counter(
+            "worker_agent_steps_total",
+            "Completed agent steps by task_type.",
+            labelnames=("task_type",),
+            registry=reg,
+        ),
+        agent_step_duration_seconds=Histogram(
+            "worker_agent_step_duration_seconds",
+            "Wall-clock seconds per completed agent step.",
             registry=reg,
         ),
     )

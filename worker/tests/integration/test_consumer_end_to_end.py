@@ -16,6 +16,8 @@ from uuid import uuid4
 import aio_pika
 import pytest
 import structlog
+from worker.agents.base import AgentSpec
+from worker.agents.registry import AgentRegistry
 from worker.core.consumer import TaskConsumer
 from worker.core.control import ControlListener
 from worker.core.dispatcher import ExecutionDispatcher
@@ -28,8 +30,32 @@ from worker.core.mq_connection import (
 from worker.core.persistence import Persistence
 from worker.core.publisher import CostEventPublisher, EventPublisher
 from worker.core.storage import OssClient
+from worker.plugins.loader import load_plugins
 
 pytestmark = pytest.mark.integration
+
+
+def _empty_registry() -> AgentRegistry:
+    """Registry with no agents → every task_type is unimplemented (DLX path)."""
+    return AgentRegistry(load_plugins())
+
+
+class _TrivialAgent:
+    """Agent that returns immediately — exercises the consumer success path."""
+
+    def __init__(self, spec: AgentSpec) -> None:
+        self._spec = spec
+
+    @property
+    def task_type(self) -> str:
+        return self._spec.task_type
+
+    @property
+    def spec(self) -> AgentSpec:
+        return self._spec
+
+    async def run(self, ctx: Any, message: Any) -> None:
+        return None
 
 
 async def _bootstrap_exchanges(channel: aio_pika.abc.AbstractChannel) -> None:
@@ -105,7 +131,7 @@ async def test_unimplemented_dispatch_round_trip(
         oss_client=oss,
         event_publisher=events,
         cost_publisher=costs,
-        dispatcher=ExecutionDispatcher(),
+        dispatcher=ExecutionDispatcher(_empty_registry()),
         control_listener=control,
         metrics=metrics,
         logger=logger,
@@ -158,6 +184,126 @@ async def test_unimplemented_dispatch_round_trip(
         # The original delivery should land on the DLX.
         dlx_bodies = await _drain_queue(dlx_q, count=1, timeout=15.0)
         assert dlx_bodies, "expected at least one message on task.dlx"
+    finally:
+        consumer.stop()
+        consumer_task.cancel()
+        with __import__("contextlib").suppress(Exception):
+            await consumer_task
+        await mq.close()
+
+
+async def test_registered_agent_success_round_trip(
+    rmq_container,  # type: ignore[no-untyped-def]
+    pg_pool,  # type: ignore[no-untyped-def]
+    minio_container,  # type: ignore[no-untyped-def]
+    tmp_path,  # type: ignore[no-untyped-def]
+) -> None:
+    """A registered agent that returns normally drives the consumer success path:
+    mark_run_terminal(succeeded) + a status=succeeded event + ack (no DLX)."""
+    url = rmq_container.get_connection_url()
+    mq = MqConnection(url)
+    await mq.connect()
+    channel = await mq.channel()
+    await _bootstrap_exchanges(channel)
+    await assert_topology(channel)
+
+    worker_id = "wk-success"
+    lane = "default"
+    execute_q, _ctl_q = await declare_worker_queues(channel, lane=lane, worker_id=worker_id)
+
+    persistence = Persistence(pg_pool, heartbeat_interval_seconds=5.0)
+    endpoint = (
+        f"http://{minio_container.get_container_host_ip()}:{minio_container.get_exposed_port(9000)}"
+    )
+    oss = OssClient(
+        endpoint_url=endpoint,
+        bucket="worker-bucket",
+        access_key_id=minio_container.access_key,
+        access_key_secret=minio_container.secret_key,
+    )
+    await oss.ensure_bucket()
+
+    metrics = build_metrics()
+    logger = structlog.get_logger().bind(worker_id=worker_id)
+    events = EventPublisher(mq, metrics=metrics, logger=logger)
+    costs = CostEventPublisher(mq, metrics=metrics, logger=logger)
+    control = ControlListener(
+        worker_id=worker_id, mq=mq, redis_url=None, metrics=metrics, logger=logger
+    )
+
+    prompt = tmp_path / "system.md"
+    prompt.write_text("trivial agent prompt", encoding="utf-8")
+    registry = AgentRegistry(load_plugins())
+    registry.register(
+        _TrivialAgent(AgentSpec(task_type="code-gen", model_key="code", system_prompt_path=prompt))
+    )
+
+    consumer = TaskConsumer(
+        worker_id=worker_id,
+        lane=lane,
+        mq_channel=channel,
+        queue=execute_q,
+        persistence=persistence,
+        oss_client=oss,
+        event_publisher=events,
+        cost_publisher=costs,
+        dispatcher=ExecutionDispatcher(registry),
+        control_listener=control,
+        metrics=metrics,
+        logger=logger,
+        heartbeat_interval=1.0,
+        checkpoint_inline_bytes=8 * 1024,
+    )
+
+    events_q = await channel.declare_queue("test.events.sink.ok", auto_delete=True, durable=False)
+    events_x = await channel.declare_exchange(
+        "task.events", type=aio_pika.ExchangeType.TOPIC, durable=True, passive=True
+    )
+    await events_q.bind(events_x, routing_key="event.#")
+    dlx_q = await channel.declare_queue("q.task.dlx", durable=True, passive=True)
+
+    task_id = uuid4()
+    version_id = uuid4()
+    run_id = uuid4()
+    payload = {
+        "msg_id": str(uuid4()),
+        "idempotency_key": f"key-{uuid4()}",
+        "task_id": str(task_id),
+        "version_id": str(version_id),
+        "run_id": str(run_id),
+        "attempt_no": 1,
+        "task_type": "code-gen",
+        "prompt": "hello",
+        "params": {},
+        "tenant_id": "demo",
+    }
+    task_x = await channel.declare_exchange(
+        "task.exchange", type=aio_pika.ExchangeType.TOPIC, durable=True, passive=True
+    )
+    await task_x.publish(
+        aio_pika.Message(body=json.dumps(payload).encode("utf-8")),
+        routing_key=f"execute.code-gen.{lane}",
+    )
+
+    consumer_task = asyncio.create_task(consumer.run())
+    try:
+        bodies = await _drain_queue(events_q, count=2, timeout=15.0)
+        statuses = [
+            json.loads(b)["payload"].get("status")
+            for b in bodies
+            if json.loads(b)["kind"] == "status"
+        ]
+        assert "running" in statuses
+        assert "succeeded" in statuses
+
+        # task_runs row reached terminal succeeded.
+        async with pg_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT status FROM task_runs WHERE id = $1", run_id)
+        assert row is not None and row["status"] == "succeeded"
+
+        # Nothing on the DLX (message was acked, not nacked).
+        dlx_bodies = await _drain_queue(dlx_q, count=1, timeout=2.0)
+        assert not dlx_bodies, "succeeded run must not land on task.dlx"
     finally:
         consumer.stop()
         consumer_task.cancel()

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -72,6 +72,31 @@ class Settings(BaseSettings):
     lane: str = Field(default="default", description="Queue lane suffix: q.task.execute.<lane>")
     drain_timeout_seconds: float = Field(
         default=60.0, description="Graceful shutdown drain timeout"
+    )
+
+    # Agent assembly (design D3/D9). Models are resolved per task_type by the
+    # ModelFactory; the API key is held in a SecretStr so it is never rendered
+    # in repr/log output (AGENTS.md §6).
+    code_agent_model: str = Field(
+        default="claude-opus-4-7",
+        description="Chat model id for the code-gen agent (ARCHITECTURE §8.6).",
+    )
+    research_agent_model: str = Field(
+        default="claude-sonnet-4-6",
+        description="Chat model id for the research agent (ARCHITECTURE §8.6).",
+    )
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        description="Provider API key for ProviderModelFactory (OpenAI protocol); never logged.",
+    )
+    openai_base_url: str | None = Field(
+        default=None,
+        description="Optional OpenAI-compatible base URL (e.g. a gateway/proxy); None = OpenAI.",
+    )
+    max_step_retries: int = Field(
+        default=2,
+        ge=0,
+        description="Per-delivery critic retry budget per step (design D13).",
     )
 
     @field_validator("log_level")

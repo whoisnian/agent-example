@@ -1,0 +1,19 @@
+kind: tool
+name: web_search
+version: 0.1.0
+entrypoint: worker.plugins.tool.web_search.handler:web_search
+schema:
+  input:
+    type: object
+    properties:
+      query: { type: string }
+      top_k: { type: integer, default: 5 }
+    required: [query]
+  output:
+    type: object
+permissions:
+  - network.egress
+applies_to:
+  task_types: [research]
+resources:
+  timeout_s: 30

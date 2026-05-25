@@ -85,3 +85,38 @@ def test_settings_defaults(required_env: dict[str, str]) -> None:
     assert settings.metrics_port == 9090
     assert settings.drain_timeout_seconds == 60.0
     assert isinstance(settings, Settings)
+
+
+def test_agent_settings_defaults(required_env: dict[str, str]) -> None:
+    settings = load(env=required_env)
+    assert settings.code_agent_model == "claude-opus-4-7"
+    assert settings.research_agent_model == "claude-sonnet-4-6"
+    assert settings.max_step_retries == 2
+    assert settings.openai_api_key is None
+    assert settings.openai_base_url is None
+
+
+def test_agent_settings_env_overrides(required_env: dict[str, str]) -> None:
+    env = dict(required_env)
+    env["CODE_AGENT_MODEL"] = "gpt-4o"
+    env["RESEARCH_AGENT_MODEL"] = "gpt-4o-mini"
+    env["MAX_STEP_RETRIES"] = "5"
+    env["OPENAI_API_KEY"] = "sk-secret-value"
+    env["OPENAI_BASE_URL"] = "https://gateway.example/v1"
+    settings = load(env=env)
+    assert settings.code_agent_model == "gpt-4o"
+    assert settings.research_agent_model == "gpt-4o-mini"
+    assert settings.max_step_retries == 5
+    assert settings.openai_base_url == "https://gateway.example/v1"
+    # The key is usable via get_secret_value() but never rendered.
+    assert settings.openai_api_key is not None
+    assert settings.openai_api_key.get_secret_value() == "sk-secret-value"
+
+
+def test_api_key_not_leaked_in_repr_or_str(required_env: dict[str, str]) -> None:
+    env = dict(required_env)
+    env["OPENAI_API_KEY"] = "sk-do-not-leak"
+    settings = load(env=env)
+    assert "sk-do-not-leak" not in repr(settings)
+    assert "sk-do-not-leak" not in str(settings)
+    assert "sk-do-not-leak" not in str(settings.model_dump())

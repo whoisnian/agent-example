@@ -1,13 +1,14 @@
-"""Execution dispatcher (placeholder).
+"""Execution dispatcher.
 
-The scaffold deliberately has no real agents. Every dispatch attempt raises
-:class:`AgentNotImplementedError`; the consumer translates that into a final
-``task.events`` ``error`` event (``code=unimplemented``) and ``nack(requeue=False)``
-so the message lands on ``task.dlx`` (spec: worker-execution-runtime →
-"Execution Dispatcher (Placeholder)").
+Given a parsed :class:`TaskExecuteMessage` and a prepared :class:`RunContext`,
+resolves the agent registered for the message's ``task_type`` and runs it. When
+no agent is registered, raises :class:`AgentNotImplementedError`; the consumer
+turns that into a final ``task.events`` ``error`` event (``code=unimplemented``)
+and ``nack(requeue=False)`` so the message lands on ``task.dlx`` (spec:
+worker-execution-runtime → "Execution Dispatcher").
 
-Future agent proposals will replace this with a registry lookup; we keep the
-exception type and signature stable so call sites do not change.
+Agent exceptions (including ``asyncio.CancelledError``) propagate unchanged so
+the consumer applies its requeue / error / DLX policy.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from worker.agents.registry import AgentRegistry
     from worker.core.messages import TaskExecuteMessage
     from worker.core.run_context import RunContext
 
@@ -28,14 +30,17 @@ class AgentNotImplementedError(RuntimeError):
 
 
 class ExecutionDispatcher:
-    """Looks up agents by ``task_type`` and runs them.
+    """Looks up agents by ``task_type`` in the registry and runs them."""
 
-    The scaffold always raises ``AgentNotImplementedError``.
-    """
+    def __init__(self, registry: AgentRegistry) -> None:
+        self._registry = registry
 
     async def dispatch(
         self,
         ctx: RunContext,
         message: TaskExecuteMessage,
     ) -> None:
-        raise AgentNotImplementedError(message.task_type)
+        agent = self._registry.get(message.task_type)
+        if agent is None:
+            raise AgentNotImplementedError(message.task_type)
+        await agent.run(ctx, message)

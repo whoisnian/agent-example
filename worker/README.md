@@ -72,6 +72,22 @@ make run    # 或: uv run worker
 | `CHECKPOINT_INLINE_BYTES` | `8192`（超出走 OSS） |
 | `LANE` | `default`（消费 `q.task.execute.<lane>`） |
 | `DRAIN_TIMEOUT_SECONDS` | `60` 秒 |
+| `CODE_AGENT_MODEL` | `claude-opus-4-7` |
+| `RESEARCH_AGENT_MODEL` | `claude-sonnet-4-6` |
+| `OPENAI_API_KEY` | 未配置（`SecretStr`，不会出现在日志 / repr） |
+| `OPENAI_BASE_URL` | 未配置 → OpenAI 官方；可指向任意 OpenAI 兼容网关 |
+| `MAX_STEP_RETRIES` | `2`（每次投递的 critic 重试预算，不跨重投递持久化） |
+
+## Agents
+
+每个 `task_type` 装配一个 agent，由 `ExecutionDispatcher` 按类型查 `AgentRegistry` 路由；未注册的类型抛 `AgentNotImplementedError` → DLX。
+
+- **模型注入（`agents/model.py`）**：agent 通过 `ModelFactory.get(model_key)` 拿模型，绝不直接 import provider SDK。生产用 `ProviderModelFactory`（`ChatOpenAI` + 可选 `base_url`，覆盖 OpenAI 及任意 OpenAI 兼容网关）。`model_key` → 模型名由 `CODE_AGENT_MODEL` / `RESEARCH_AGENT_MODEL` 决定。
+- **测试 seam**：测试注入 `FakeModelFactory`（脚本化 `FakeChatModel`），整个 plan→execute→critic→checkpoint→event→artifact 闭环无网络、无 API key 即可跑（见 `tests/support/fake_model.py`）。
+- **编排循环（`agents/loop.py`）**：由 worker（而非框架）掌控的 planner→executor→critic 外层循环，逐 step 写 `task_checkpoints`、发 `task.events`（`plan` / `step`），在 step 边界处理 cancel / pause / deadline，从最新 checkpoint 恢复。
+  - 实现取舍：`deepagents.create_deep_agent` 需要 `bind_tools` 且内部模型调用次数不确定，无法用脚本化 fake 做确定性逐 step 测试，故 MVP 循环**直接按角色调用模型**；`build_deep_agent` 作为更丰富推理路径保留（详见 design D2b）。
+- **MVP 边界**：`code-gen` 只产出文件，不执行代码（无沙箱，ARCHITECTURE §8.4）；`web_search` 为确定性 stub，不引入真实搜索依赖。
+- **产物**：成功时执行器产出的文件经 `oss_fs` 工具写入 `ctx.oss_prefix`，并通过 `Persistence.insert_artifact` 记录 `artifacts` 行；上传/落库失败则整 run 失败。
 
 ## 关键不变量
 

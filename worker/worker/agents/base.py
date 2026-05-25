@@ -1,0 +1,161 @@
+"""Agent contract and deep-agent assembly (design D1/D2).
+
+An :class:`Agent` is what the :class:`~worker.core.dispatcher.ExecutionDispatcher`
+looks up by ``task_type`` and runs. Concrete agents are built from a static
+:class:`AgentSpec` (system prompt, tools, subagents, model key, limits) that is
+validated once at startup; the underlying ``deepagents`` graph is constructed
+per run via :func:`build_deep_agent` so per-run state (the ``CostMeter``
+callback, the OSS-scoped filesystem, cancel/pause tokens) binds to that run's
+``RunContext`` rather than to a process-global singleton.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from worker.agents.loop import run_agent_loop
+
+if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
+    from worker.agents.loop import WriteFile
+    from worker.agents.model import ModelFactory
+    from worker.core.messages import TaskExecuteMessage
+    from worker.core.run_context import RunContext
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSpec:
+    """Static, validatable description of an agent.
+
+    ``model_key`` is resolved through the :class:`ModelFactory` at run time.
+    ``tool_names`` must each resolve to a registered ``tool`` plugin.
+    ``subagents`` are ``deepagents``-compatible subagent definitions
+    (planner / executor / critic) passed through to ``create_deep_agent``.
+    """
+
+    task_type: str
+    model_key: str
+    system_prompt_path: Path
+    tool_names: tuple[str, ...] = ()
+    subagents: tuple[Any, ...] = ()
+    limits: dict[str, Any] = field(default_factory=dict)
+
+    def read_system_prompt(self) -> str:
+        return self.system_prompt_path.read_text(encoding="utf-8")
+
+
+@runtime_checkable
+class Agent(Protocol):
+    """Runnable agent resolved by the dispatcher.
+
+    Implementations MUST reach infrastructure only through ``ctx`` (no direct
+    MQ/DB/OSS imports) and MUST return normally on success so the consumer
+    marks the run ``succeeded``.
+    """
+
+    @property
+    def task_type(self) -> str: ...
+
+    @property
+    def spec(self) -> AgentSpec: ...
+
+    async def run(self, ctx: RunContext, message: TaskExecuteMessage) -> None: ...
+
+
+def build_deep_agent(
+    spec: AgentSpec,
+    ctx: RunContext,
+    model_factory: ModelFactory,
+    tools: Sequence[BaseTool],
+) -> Any:
+    """Construct a per-run ``deepagents`` graph for ``spec``.
+
+    Built per consumed message (design D2). This is the richer-reasoning
+    assembly path; the MVP :class:`LoopAgent` instead drives the model directly
+    per role for deterministic, fake-model-testable per-step control (see the
+    slice-B note in design.md re: "Deep Agent Assembly"). Kept available for
+    agents/steps that want the framework's internal tool-calling loop.
+    """
+    from deepagents import create_deep_agent
+
+    return create_deep_agent(
+        model=model_factory.get(spec.model_key),
+        tools=list(tools),
+        system_prompt=spec.read_system_prompt(),
+        subagents=list(spec.subagents) or None,
+    )
+
+
+class LoopAgent:
+    """Concrete :class:`Agent` that runs the planner/executor/critic loop.
+
+    Generic over task type — the code-gen and research agents are just this
+    class with different :class:`AgentSpec`s. On success it records an
+    ``artifacts`` row (the only business table the worker may write) for each
+    file the executor produced; a failure to persist or upload propagates so
+    the run is reported failed rather than falsely ``succeeded`` (design D7).
+    """
+
+    def __init__(
+        self,
+        *,
+        spec: AgentSpec,
+        model_factory: ModelFactory,
+        persistence: Any,
+        write_file: WriteFile,
+        max_step_retries: int,
+        metrics: Any | None = None,
+    ) -> None:
+        self._spec = spec
+        self._model_factory = model_factory
+        self._persistence = persistence
+        self._write_file = write_file
+        self._max_step_retries = max_step_retries
+        self._metrics = metrics
+
+    @property
+    def task_type(self) -> str:
+        return self._spec.task_type
+
+    @property
+    def spec(self) -> AgentSpec:
+        return self._spec
+
+    async def run(self, ctx: RunContext, message: TaskExecuteMessage) -> None:
+        model = self._model_factory.get(self._spec.model_key)
+        try:
+            produced = await run_agent_loop(
+                ctx,
+                message,
+                model=model,
+                system_prompt=self._spec.read_system_prompt(),
+                write_file=self._write_file,
+                max_step_retries=self._max_step_retries,
+                deadline_ts=message.deadline_ts,
+                metrics=self._metrics,
+            )
+            for art in produced:
+                await self._persistence.insert_artifact(
+                    version_id=ctx.version_id,
+                    kind="file",
+                    oss_key=art.oss_key,
+                    mime=art.mime,
+                    bytes_size=art.bytes,
+                    sha256=art.sha256,
+                )
+        except asyncio.CancelledError:
+            self._record_run("cancelled")
+            raise
+        except BaseException:
+            self._record_run("error")
+            raise
+        self._record_run("success")
+
+    def _record_run(self, outcome: str) -> None:
+        if self._metrics is not None:
+            self._metrics.agent_runs_total.labels(self._spec.task_type, outcome).inc()

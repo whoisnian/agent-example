@@ -1,0 +1,23 @@
+kind: tool
+name: oss_fs
+version: 0.1.0
+entrypoint: worker.plugins.tool.oss_fs.handler:oss_fs
+schema:
+  input:
+    type: object
+    properties:
+      op:
+        type: string
+        enum: [write, read]
+      path: { type: string }
+      content: { type: string }
+    required: [op, path]
+  output:
+    type: object
+permissions:
+  - oss.read
+  - oss.write
+applies_to:
+  task_types: [code-gen, research]
+resources:
+  timeout_s: 30

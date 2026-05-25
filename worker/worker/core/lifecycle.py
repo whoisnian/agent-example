@@ -12,6 +12,8 @@ import signal
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING
 
+from worker.agents import build_agent_registry
+from worker.agents.model import ProviderModelFactory
 from worker.core.config import Settings
 from worker.core.consumer import TaskConsumer
 from worker.core.control import ControlListener
@@ -89,7 +91,20 @@ async def serve(settings: Settings) -> int:
 
         event_pub = EventPublisher(mq, metrics=metrics, logger=logger)
         cost_pub = CostEventPublisher(mq, metrics=metrics, logger=logger)
-        dispatcher = ExecutionDispatcher()
+
+        model_factory = ProviderModelFactory(
+            model_by_key={
+                "code": settings.code_agent_model,
+                "research": settings.research_agent_model,
+            },
+            api_key=settings.openai_api_key,
+            base_url=settings.openai_base_url,
+        )
+        agent_registry = build_agent_registry(
+            registry_plugins, model_factory, persistence, settings, metrics
+        )
+        logger.info("agents_registered", count=len(agent_registry))
+        dispatcher = ExecutionDispatcher(agent_registry)
 
         control = ControlListener(
             worker_id=settings.worker_id,

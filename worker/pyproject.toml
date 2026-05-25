@@ -18,6 +18,12 @@ dependencies = [
     "langchain>=1.0,<2.0",
     "langchain-core>=1.0,<2.0",
     "deepagents>=0.6.1,<0.7.0",
+    # Provider chat model, resolved only inside agents/model.py (design D3);
+    # agents never import it directly. ChatOpenAI speaks the OpenAI protocol and
+    # accepts a base_url override, so it also fronts any OpenAI-compatible
+    # gateway (incl. proxies for other providers) — broader reach than a single
+    # vendor SDK. Tracks the langchain 1.x line.
+    "langchain-openai>=1.0,<2.0",
     # Messaging
     "aio-pika>=9.5,<10.0",
     # PostgreSQL
