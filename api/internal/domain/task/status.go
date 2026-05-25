@@ -32,3 +32,24 @@ func IsActive(s string) bool {
 	_, ok := activeStatuses[Status(s)]
 	return ok
 }
+
+// taskStatuses is the set of statuses a *task* (not a version) may carry —
+// the six values from the tasks_status_check constraint in migration 0002.
+// Note this is NOT activeStatuses: the version-only `queued` / `cancelling`
+// are absent. Used by the read API to validate the `status` list filter.
+var taskStatuses = map[Status]struct{}{
+	StatusPending:   {},
+	StatusRunning:   {},
+	StatusPaused:    {},
+	StatusCancelled: {},
+	StatusSucceeded: {},
+	StatusFailed:    {},
+}
+
+// IsValidTaskStatus reports whether `s` is one of the six task statuses. The
+// read API rejects any other `status` query value with 400 invalid_input
+// rather than silently returning an empty page.
+func IsValidTaskStatus(s string) bool {
+	_, ok := taskStatuses[Status(s)]
+	return ok
+}
