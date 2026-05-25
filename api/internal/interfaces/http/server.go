@@ -16,10 +16,11 @@ import (
 // ServerDeps groups the wiring inputs for the HTTP server. Keeping them in a
 // struct keeps the constructor signature stable as we add dependencies.
 type ServerDeps struct {
-	Logger       *slog.Logger
-	Metrics      *observability.Metrics
-	Probes       *ProbeRegistry
-	TaskHandlers *TaskHandlers // optional; nil disables business routes
+	Logger           *slog.Logger
+	Metrics          *observability.Metrics
+	Probes           *ProbeRegistry
+	TaskHandlers     *TaskHandlers     // optional; nil disables the write routes
+	TaskReadHandlers *TaskReadHandlers // optional; nil disables the read routes
 }
 
 // NewEngine assembles the gin engine and the documented middleware chain:
@@ -49,11 +50,17 @@ func NewEngine(deps ServerDeps) *gin.Engine {
 	e.GET("/readyz", readyzHandler(deps.Probes))
 	e.GET("/metrics", gin.WrapH(promhttp.HandlerFor(deps.Metrics.Registry, promhttp.HandlerOpts{})))
 
-	// Business routes under /api/v1. The TaskHandlers wiring stays optional so
-	// tests can spin up an engine without the full Domain Service if needed.
-	if deps.TaskHandlers != nil {
+	// Business routes under /api/v1. Each handler set stays optional so tests
+	// can spin up an engine with only the write or only the read side; the v1
+	// group is created once and shared so both register on the same prefix.
+	if deps.TaskHandlers != nil || deps.TaskReadHandlers != nil {
 		v1 := e.Group("/api/v1")
-		deps.TaskHandlers.Register(v1)
+		if deps.TaskHandlers != nil {
+			deps.TaskHandlers.Register(v1)
+		}
+		if deps.TaskReadHandlers != nil {
+			deps.TaskReadHandlers.Register(v1)
+		}
 	}
 
 	return e

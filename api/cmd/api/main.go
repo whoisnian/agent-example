@@ -187,11 +187,21 @@ func runServer(args []string) int {
 		DevUserID:   devUser,
 	}
 
+	// Task-read-api wiring (queries-only read service, same dev identity).
+	appReadSvc := apptask.NewReadService(taskdomain.NewReadService(queries))
+	taskReadHandlers := &httpapi.TaskReadHandlers{
+		App:         appReadSvc,
+		Logger:      logger,
+		DevTenantID: devTenant,
+		DevUserID:   devUser,
+	}
+
 	engine := httpapi.NewEngine(httpapi.ServerDeps{
-		Logger:       logger,
-		Metrics:      metrics,
-		Probes:       probes,
-		TaskHandlers: taskHandlers,
+		Logger:           logger,
+		Metrics:          metrics,
+		Probes:           probes,
+		TaskHandlers:     taskHandlers,
+		TaskReadHandlers: taskReadHandlers,
 	})
 	server := httpapi.NewServer(cfg.HTTPAddr, engine, logger)
 

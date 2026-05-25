@@ -112,6 +112,26 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 
 请求/响应契约见 [`openspec/specs/task-write-api/spec.md`](../openspec/specs/task-write-api/spec.md)。鉴权中间件目前是 stub，`tenant_id` / `user_id` 取自 `DEV_TENANT_ID` / `DEV_USER_ID`，正式 JWT 接入后由 middleware 注入。
 
+## 任务读取端点（`task-read-api`）
+
+`add-task-read-api` 落地了 owner-scoped 的只读端点（无事务、无 Outbox、不调用 LLM）。所有响应走统一 `{code, message, data, trace_id}` 信封；未拥有的资源一律返回 `404`（绝不 `403`，不泄露存在性）。
+
+| 方法 | 路径 | 查询参数 | 说明 |
+|---|---|---|---|
+| `GET` | `/api/v1/tasks` | `page`（默认 1，<1 截到 1）、`page_size`（默认 20，截到 [1,100]）、`status`（六个任务态之一，非法→400） | 分页列表，每行含成本摘要；`data = {items, page, page_size, total}` |
+| `GET` | `/api/v1/tasks/{task_id}` | — | 任务详情 + 当前版本摘要 + 成本摘要；`data = {task, current_version, cost}` |
+| `GET` | `/api/v1/tasks/{task_id}/versions` | — | 扁平版本树（按 `version_no` 升序，节点带 `parent_id`），每节点含成本；`data = {items}` |
+| `GET` | `/api/v1/versions/{version_id}` | — | 版本详情 + runs（按 `attempt_no` 升序）+ 成本；`data = {version, runs, cost}` |
+| `GET` | `/api/v1/versions/{version_id}/events` | `after_id`（默认 0，全局 `task_events.id` 游标，非 `seq`）、`limit`（默认 200，截到 [1,1000]） | WS 断线补齐；`data = {items, next_after_id}` |
+
+要点：
+
+- **成本摘要**内嵌于列表 / 详情 / 版本节点，来自 `task_costs` 表。`amount_usd` 是保留 8 位小数的**十进制字符串**（如 `"0.62000000"`），避免 `float64` 丢精度；Cost Service 尚未实现时恒为 `"0.00000000"`，读取永不因成本缺失而失败。成本明细端点（`/cost`）属于 `add-task-cost-api`。
+- **事件游标**用全局 `task_events.id`；每个事件同时暴露 `id` 与 `seq` 供实时客户端对齐（详见提案 design D7 / Open Question #3）。
+- 同写端点，`tenant_id` / `user_id` 取自 `DEV_TENANT_ID` / `DEV_USER_ID`。
+
+请求/响应契约见 [`openspec/specs/task-read-api/spec.md`](../openspec/specs/task-read-api/spec.md)。
+
 ## 集成测试
 
 `make test-integration` 用 testcontainers 启 PostgreSQL 18.4，跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。
