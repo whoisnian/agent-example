@@ -104,3 +104,44 @@ func (q *Queries) GetTaskRunByID(ctx context.Context, id pgtype.UUID) (TaskRun, 
 	)
 	return i, err
 }
+
+const listRunsByVersion = `-- name: ListRunsByVersion :many
+SELECT id, version_id, attempt_no, worker_run_id, status, started_at, ended_at, last_heartbeat, error, idempotency_key
+FROM task_runs
+WHERE version_id = $1
+ORDER BY attempt_no ASC
+`
+
+// All runs for a version, oldest attempt first, for the version-detail view
+// (retry history). The (version_id, attempt_no) unique constraint backs the
+// ordering.
+func (q *Queries) ListRunsByVersion(ctx context.Context, versionID pgtype.UUID) ([]TaskRun, error) {
+	rows, err := q.db.Query(ctx, listRunsByVersion, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TaskRun
+	for rows.Next() {
+		var i TaskRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.VersionID,
+			&i.AttemptNo,
+			&i.WorkerRunID,
+			&i.Status,
+			&i.StartedAt,
+			&i.EndedAt,
+			&i.LastHeartbeat,
+			&i.Error,
+			&i.IdempotencyKey,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

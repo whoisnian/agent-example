@@ -18,3 +18,12 @@ WHERE id = $1;
 SELECT *
 FROM task_runs
 WHERE idempotency_key = $1;
+
+-- name: ListRunsByVersion :many
+-- All runs for a version, oldest attempt first, for the version-detail view
+-- (retry history). The (version_id, attempt_no) unique constraint backs the
+-- ordering.
+SELECT *
+FROM task_runs
+WHERE version_id = $1
+ORDER BY attempt_no ASC;

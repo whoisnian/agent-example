@@ -42,3 +42,13 @@ SET status = 'pending',
     current_version = $2,
     updated_at = now()
 WHERE id = $1;
+
+-- name: CountTasks :one
+-- Total count of the caller's tasks for offset pagination, using the same
+-- owner + optional-status predicate as ListTasks. Pass NULL for `status` to
+-- skip the filter.
+SELECT COUNT(*)::bigint AS total
+FROM tasks
+WHERE tenant_id = $1
+  AND user_id = $2
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text);

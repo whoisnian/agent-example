@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countTasks = `-- name: CountTasks :one
+SELECT COUNT(*)::bigint AS total
+FROM tasks
+WHERE tenant_id = $1
+  AND user_id = $2
+  AND ($3::text IS NULL OR status = $3::text)
+`
+
+type CountTasksParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+	Status   *string     `json:"status"`
+}
+
+// Total count of the caller's tasks for offset pagination, using the same
+// owner + optional-status predicate as ListTasks. Pass NULL for `status` to
+// skip the filter.
+func (q *Queries) CountTasks(ctx context.Context, arg CountTasksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTasks, arg.TenantID, arg.UserID, arg.Status)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const createTask = `-- name: CreateTask :one
 INSERT INTO tasks (
     id, tenant_id, user_id, title, task_type, status, current_version

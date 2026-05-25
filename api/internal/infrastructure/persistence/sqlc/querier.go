@@ -13,6 +13,10 @@ import (
 type Querier interface {
 	// Used by the outbox_pending gauge.
 	CountOutboxPending(ctx context.Context) (int64, error)
+	// Total count of the caller's tasks for offset pagination, using the same
+	// owner + optional-status predicate as ListTasks. Pass NULL for `status` to
+	// skip the filter.
+	CountTasks(ctx context.Context, arg CountTasksParams) (int64, error)
 	// Insert a new task and return the row. The caller is responsible for ID
 	// generation and for choosing the initial `status` (typically 'pending').
 	CreateTask(ctx context.Context, arg CreateTaskParams) (Task, error)
@@ -65,9 +69,26 @@ type Querier interface {
 	// event id it has already observed. Results are monotonically ordered by
 	// id; the (task_id, id) index supports the predicate. Pagination via LIMIT.
 	ListEventsAfter(ctx context.Context, arg ListEventsAfterParams) ([]TaskEvent, error)
+	// All runs for a version, oldest attempt first, for the version-detail view
+	// (retry history). The (version_id, attempt_no) unique constraint backs the
+	// ordering.
+	ListRunsByVersion(ctx context.Context, versionID pgtype.UUID) ([]TaskRun, error)
+	// Batched per-task cost totals for the task list, avoiding an N+1 of
+	// GetTaskCost per row. Returns one row per task_id that has any task_costs
+	// rows; tasks absent from the result are zero-filled by the caller.
+	ListTaskCostsByTasks(ctx context.Context, taskIds []pgtype.UUID) ([]ListTaskCostsByTasksRow, error)
 	// Owner-scoped listing with an optional status filter. Pass NULL for `status`
 	// to skip the filter. Newest tasks first; pagination via LIMIT/OFFSET.
 	ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, error)
+	// All per-version cost rows for a task, fetched once for the whole version
+	// tree (avoids a per-node GetVersionCost N+1). Versions without a row are
+	// zero-filled by the caller. Covered by the task_costs (task_id) index.
+	ListVersionCostsByTask(ctx context.Context, taskID pgtype.UUID) ([]TaskCost, error)
+	// Version-scoped event backfill for the HTTP replay endpoint. Anchors on the
+	// existing (task_id, id) index (task_id equality + id range) and filters
+	// version_id as a residual predicate, so no new index is required. The caller
+	// passes the task_id resolved from the version plus the highest id seen.
+	ListVersionEventsAfter(ctx context.Context, arg ListVersionEventsAfterParams) ([]TaskEvent, error)
 	// Returns all versions for a task ordered by version_no ascending so callers
 	// can rebuild the tree client-side.
 	ListVersionsByTask(ctx context.Context, taskID pgtype.UUID) ([]TaskVersion, error)

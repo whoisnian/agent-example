@@ -89,3 +89,58 @@ func (q *Queries) ListEventsAfter(ctx context.Context, arg ListEventsAfterParams
 	}
 	return items, nil
 }
+
+const listVersionEventsAfter = `-- name: ListVersionEventsAfter :many
+SELECT id, task_id, version_id, run_id, seq, kind, payload, created_at
+FROM task_events
+WHERE task_id = $1
+  AND version_id = $2
+  AND id > $3
+ORDER BY id ASC
+LIMIT $4
+`
+
+type ListVersionEventsAfterParams struct {
+	TaskID    pgtype.UUID `json:"task_id"`
+	VersionID pgtype.UUID `json:"version_id"`
+	ID        int64       `json:"id"`
+	Limit     int32       `json:"limit"`
+}
+
+// Version-scoped event backfill for the HTTP replay endpoint. Anchors on the
+// existing (task_id, id) index (task_id equality + id range) and filters
+// version_id as a residual predicate, so no new index is required. The caller
+// passes the task_id resolved from the version plus the highest id seen.
+func (q *Queries) ListVersionEventsAfter(ctx context.Context, arg ListVersionEventsAfterParams) ([]TaskEvent, error) {
+	rows, err := q.db.Query(ctx, listVersionEventsAfter,
+		arg.TaskID,
+		arg.VersionID,
+		arg.ID,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TaskEvent
+	for rows.Next() {
+		var i TaskEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.TaskID,
+			&i.VersionID,
+			&i.RunID,
+			&i.Seq,
+			&i.Kind,
+			&i.Payload,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
