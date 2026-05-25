@@ -70,3 +70,16 @@ review 当前提案，并整理意见到 suggestions.md，改进当前提案
 
 先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
 ```
+
+### 2026-05-25-add-worker-code-agent
+```md
+用 openspec 发起 add-worker-code-agent 提案
+review 当前 openspec/changes/add-worker-code-agent/ 目录下的提案，并整理改进意见到 suggestions.md
+判断 openspec/changes/add-worker-code-agent/suggestions.md 中的意见是否有效，改进当前提案
+整理当前改动 commit 并提交到远端仓库
+
+/opsx:apply add-worker-code-agent
+使用 langchain-openai 替代 langchain-anthropic，以提供更加广泛的模型支持
+
+先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
+```

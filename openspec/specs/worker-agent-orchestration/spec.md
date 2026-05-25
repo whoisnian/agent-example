@@ -1,5 +1,8 @@
-## ADDED Requirements
+# worker-agent-orchestration Specification
 
+## Purpose
+TBD - created by archiving change add-worker-code-agent. Update Purpose after archive.
+## Requirements
 ### Requirement: Agent Registry and Contract
 
 The worker SHALL define an `Agent` contract exposing a `task_type` and an `async run(ctx: RunContext, message: TaskExecuteMessage) -> None` method, and an `AgentRegistry` mapping `task_type` to a registered agent (or agent spec). The registry MUST be populated at process startup and validated once (system-prompt path resolvable, declared tools known); a malformed agent spec MUST fail startup non-zero rather than fail at first message. Agents MUST reach all infrastructure (MQ, DB, OSS, cost, checkpoint, logger, cancel/pause tokens) exclusively through the injected `RunContext`; importing MQ/DB/OSS clients directly inside agent code is forbidden.
@@ -18,7 +21,9 @@ The worker SHALL define an `Agent` contract exposing a `task_type` and an `async
 
 ### Requirement: Deep Agent Assembly via Model Factory
 
-The worker SHALL build each agent's deep agent (planner / executor / critic subagents plus task-scoped tools) on top of `deepagents.create_deep_agent`. Agents MUST obtain their chat model through an injected `ModelFactory.get(model_key)` and MUST NOT import a provider SDK directly. The deep agent MUST be constructed per consumed message so that per-run state — the OSS-prefixed filesystem, the run's `CostMeter` callback, and the cancel/pause tokens — is bound to that run's `RunContext`. The provider API key MUST be read from environment/secret and MUST NOT be logged or committed.
+The worker SHALL assemble each agent's planner / executor / critic roles plus task-scoped tools around an injected chat model. Agents MUST obtain their chat model through an injected `ModelFactory.get(model_key)` and MUST NOT import a provider SDK directly. Per-run state — the OSS-prefixed filesystem, the run's `CostMeter` callback, and the cancel/pause tokens — MUST be bound to that run's `RunContext` (constructed per consumed message), never to a process-global singleton. The provider API key MUST be read from environment/secret and MUST NOT be logged or committed.
+
+Agents MAY build on `deepagents.create_deep_agent` for the richer-reasoning assembly path. The MVP loop instead invokes the chat model directly once per role to keep the per-step checkpoint/event cadence and fake-model tests deterministic (see design D2b); this satisfies the assembly requirement provided the `ModelFactory` seam and per-run binding above hold.
 
 #### Scenario: Model resolved through the factory
 - **WHEN** an agent runs with a `ModelFactory` configured for its `model_key`
@@ -30,7 +35,7 @@ The worker SHALL build each agent's deep agent (planner / executor / critic suba
 
 #### Scenario: Per-run binding across sequential runs
 - **WHEN** a worker process (consumer `prefetch=1`, runs sequential) handles two messages in succession
-- **THEN** each run MUST use a freshly built deep agent bound to its own `RunContext`, so a prior run's `CostMeter` / cancel / pause state never leaks into the next and cost events carry the correct `run_id` and sequence per run
+- **THEN** each run MUST use a freshly built agent bound to its own `RunContext`, so a prior run's `CostMeter` / cancel / pause state never leaks into the next and cost events carry the correct `run_id` and sequence per run
 
 ### Requirement: Planner / Executor / Critic Step Loop
 
@@ -115,3 +120,4 @@ The worker SHALL record agent metrics in its existing registry: `agent_runs_tota
 #### Scenario: Successful run increments run and step metrics
 - **WHEN** a code-gen run completes 3 steps successfully
 - **THEN** `agent_runs_total{task_type="code-gen",outcome="success"}` MUST increase by 1 and `agent_steps_total{task_type="code-gen"}` MUST increase by 3
+
