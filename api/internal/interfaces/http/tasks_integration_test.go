@@ -126,6 +126,7 @@ func newSuite(t *testing.T) *suite {
 		30*time.Minute,
 	)
 	appSvc := apptask.NewService(domainSvc)
+	appReadSvc := apptask.NewReadService(taskdomain.NewReadService(queries))
 
 	probes := httpapi.NewProbeRegistry(time.Second)
 	engine := httpapi.NewEngine(httpapi.ServerDeps{
@@ -136,6 +137,12 @@ func newSuite(t *testing.T) *suite {
 			App:         appSvc,
 			Logger:      logger,
 			Metrics:     metrics,
+			DevTenantID: devTenantID,
+			DevUserID:   devUserID,
+		},
+		TaskReadHandlers: &httpapi.TaskReadHandlers{
+			App:         appReadSvc,
+			Logger:      logger,
 			DevTenantID: devTenantID,
 			DevUserID:   devUserID,
 		},
