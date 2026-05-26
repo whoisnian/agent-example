@@ -1,8 +1,9 @@
 import { createBrowserRouter, Navigate, type RouteObject } from "react-router-dom";
 import { RootLayout } from "@/routes/root-layout";
 import { RequireAuth } from "@/routes/require-auth";
-import { TaskListPlaceholder } from "@/routes/placeholders/TaskListPlaceholder";
-import { TaskDetailPlaceholder } from "@/routes/placeholders/TaskDetailPlaceholder";
+import { TaskList } from "@/routes/TaskList";
+import { TaskCreate } from "@/routes/TaskCreate";
+import { TaskDetail } from "@/routes/TaskDetail";
 import { CostDashboardPlaceholder } from "@/routes/placeholders/CostDashboardPlaceholder";
 import { SettingsPlaceholder } from "@/routes/placeholders/SettingsPlaceholder";
 import { LoginPlaceholder } from "@/routes/placeholders/LoginPlaceholder";
@@ -19,8 +20,9 @@ export const routes: RouteObject[] = [
     ),
     children: [
       { index: true, element: <Navigate to="/tasks" replace /> },
-      { path: "tasks", element: <TaskListPlaceholder /> },
-      { path: "tasks/:id", element: <TaskDetailPlaceholder /> },
+      { path: "tasks", element: <TaskList /> },
+      { path: "tasks/new", element: <TaskCreate /> },
+      { path: "tasks/:id", element: <TaskDetail /> },
       { path: "cost", element: <CostDashboardPlaceholder /> },
       { path: "settings", element: <SettingsPlaceholder /> },
     ],

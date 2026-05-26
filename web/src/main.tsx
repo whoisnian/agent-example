@@ -10,6 +10,7 @@ import { createAppRouter } from "@/router";
 import { createQueryClient } from "@/services/query-client";
 import { setNavigator } from "@/services/http";
 import { setRealtimeNavigator } from "@/services/ws";
+import { installRealtimeGapFill } from "@/features/tasks/use-task-live";
 
 import "@/styles/globals.css";
 
@@ -23,6 +24,11 @@ const navigate = (to: string): void => {
 };
 setNavigator(navigate);
 setRealtimeNavigator(navigate);
+
+// Register the realtime gap-fill handler once (id-based event backfill into
+// the React Query cache); avoids a per-page setRealtimeOnGap that remounts
+// would clobber.
+installRealtimeGapFill(queryClient);
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {

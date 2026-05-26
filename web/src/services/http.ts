@@ -17,18 +17,26 @@ export class ApiError extends Error {
   public readonly code: ApiErrorCode;
   public readonly traceId: string | undefined;
   public readonly status: number;
+  /**
+   * The error envelope's `data` block, when present (e.g. `invalid_input`'s
+   * `{field, reason}`, or the 409 `{active_version_id, active_version_status}`).
+   * `undefined` for synthetic client errors (timeout/network). Callers narrow.
+   */
+  public readonly data: unknown;
 
   constructor(args: {
     code: ApiErrorCode;
     message: string;
     traceId?: string | undefined;
     status: number;
+    data?: unknown;
   }) {
     super(args.message);
     this.name = "ApiError";
     this.code = args.code;
     this.traceId = args.traceId;
     this.status = args.status;
+    this.data = args.data;
   }
 }
 
@@ -204,6 +212,7 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
       message: envelope.message ?? "request failed",
       traceId: envelope.trace_id,
       status: response.status,
+      data: envelope.data,
     });
     if (toastOnError) emitErrorToast(err);
     throw err;

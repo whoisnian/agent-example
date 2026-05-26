@@ -2,45 +2,51 @@ import type { JSX } from "react";
 import { describe, expect, it, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, Navigate } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/features/auth/store";
+import { createQueryClient } from "@/services/query-client";
 import { RequireAuth } from "@/routes/require-auth";
 import { RootLayout } from "@/routes/root-layout";
-import { TaskListPlaceholder } from "@/routes/placeholders/TaskListPlaceholder";
-import { TaskDetailPlaceholder } from "@/routes/placeholders/TaskDetailPlaceholder";
+import { TaskList } from "@/routes/TaskList";
+import { TaskCreate } from "@/routes/TaskCreate";
+import { TaskDetail } from "@/routes/TaskDetail";
 import { CostDashboardPlaceholder } from "@/routes/placeholders/CostDashboardPlaceholder";
 import { SettingsPlaceholder } from "@/routes/placeholders/SettingsPlaceholder";
 import { LoginPlaceholder } from "@/routes/placeholders/LoginPlaceholder";
 import { NotFoundPlaceholder } from "@/routes/placeholders/NotFoundPlaceholder";
 
 /**
- * The production app uses `createBrowserRouter` (data router). The data router
- * builds an internal `Request` object on every navigation, which trips the
- * jsdom × undici AbortSignal interop bug. We assemble the same route tree with
- * the legacy `<Routes>` API for tests — same components, same paths, no Request
- * construction — and verify route → component resolution.
+ * The production app uses `createBrowserRouter` (data router), which trips a
+ * jsdom × undici AbortSignal interop bug under test. We assemble the same route
+ * tree with the legacy `<Routes>` API — same components, same paths — and wrap
+ * it in a fresh QueryClientProvider since the real pages fetch via React Query.
+ * Page data is served by the MSW handlers (test/mocks).
  */
 function TestApp({ path }: { path: string }): JSX.Element {
   return (
-    <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/login" element={<LoginPlaceholder />} />
-        <Route
-          path="/"
-          element={
-            <RequireAuth>
-              <RootLayout />
-            </RequireAuth>
-          }
-        >
-          <Route index element={<Navigate to="/tasks" replace />} />
-          <Route path="tasks" element={<TaskListPlaceholder />} />
-          <Route path="tasks/:id" element={<TaskDetailPlaceholder />} />
-          <Route path="cost" element={<CostDashboardPlaceholder />} />
-          <Route path="settings" element={<SettingsPlaceholder />} />
-        </Route>
-        <Route path="*" element={<NotFoundPlaceholder />} />
-      </Routes>
-    </MemoryRouter>
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/login" element={<LoginPlaceholder />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <RootLayout />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Navigate to="/tasks" replace />} />
+            <Route path="tasks" element={<TaskList />} />
+            <Route path="tasks/new" element={<TaskCreate />} />
+            <Route path="tasks/:id" element={<TaskDetail />} />
+            <Route path="cost" element={<CostDashboardPlaceholder />} />
+            <Route path="settings" element={<SettingsPlaceholder />} />
+          </Route>
+          <Route path="*" element={<NotFoundPlaceholder />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
@@ -59,24 +65,30 @@ describe("router skeleton", () => {
     expect(screen.getByTestId("placeholder-login")).toBeInTheDocument();
   });
 
-  it("renders the shell + TaskList placeholder when authenticated", () => {
+  it("renders the shell + TaskList page when authenticated", () => {
     useAuthStore.setState({ token: "test" });
     renderAt("/tasks");
     expect(screen.getByTestId("top-bar")).toBeInTheDocument();
     expect(screen.getByTestId("side-nav")).toBeInTheDocument();
-    expect(screen.getByTestId("placeholder-tasks")).toBeInTheDocument();
+    expect(screen.getByTestId("task-list-page")).toBeInTheDocument();
   });
 
-  it("parses :id param on /tasks/:id", () => {
+  it("renders TaskCreate on /tasks/new", () => {
+    useAuthStore.setState({ token: "test" });
+    renderAt("/tasks/new");
+    expect(screen.getByTestId("task-create-page")).toBeInTheDocument();
+  });
+
+  it("renders TaskDetail on /tasks/:id", async () => {
     useAuthStore.setState({ token: "test" });
     renderAt("/tasks/abc-123");
-    expect(screen.getByTestId("task-id")).toHaveTextContent("abc-123");
+    expect(await screen.findByTestId("task-detail-page")).toBeInTheDocument();
   });
 
   it("redirects / to /tasks", () => {
     useAuthStore.setState({ token: "test" });
     renderAt("/");
-    expect(screen.getByTestId("placeholder-tasks")).toBeInTheDocument();
+    expect(screen.getByTestId("task-list-page")).toBeInTheDocument();
   });
 
   it("renders NotFound for unknown routes", () => {
