@@ -203,3 +203,31 @@ func (q *Queries) UpdateTaskCurrentVersion(ctx context.Context, arg UpdateTaskCu
 	_, err := q.db.Exec(ctx, updateTaskCurrentVersion, arg.ID, arg.CurrentVersion)
 	return err
 }
+
+const updateTaskStatus = `-- name: UpdateTaskStatus :execrows
+UPDATE tasks
+SET status = $2,
+    updated_at = now()
+WHERE id = $1
+  AND current_version = $3
+  AND status NOT IN ('succeeded', 'failed', 'cancelled')
+  AND status IS DISTINCT FROM $2
+`
+
+type UpdateTaskStatusParams struct {
+	ID             pgtype.UUID `json:"id"`
+	Status         string      `json:"status"`
+	CurrentVersion pgtype.UUID `json:"current_version"`
+}
+
+// Event-ingest state-machine CAS (add-event-ingest-status-sync). Only the
+// task's current (active) version may drive tasks.status, so the update is
+// gated on current_version = $3 — a stale event for a superseded version is
+// a no-op. Same terminal + real-transition guards as UpdateVersionStatus.
+func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateTaskStatus, arg.ID, arg.Status, arg.CurrentVersion)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

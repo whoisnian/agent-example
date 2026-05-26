@@ -48,6 +48,7 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 | `DEFAULT_LANE` | `default` | 创建/迭代任务时，请求未提供 `lane` 字段时回退使用的 lane（写入 `outbox.topic = execute.<task_type>.<lane>`） |
 | `DEFAULT_TASK_DEADLINE` | `60m` | execute payload 中 `deadline_ts` 与 `now()` 的偏移量 |
 | `DEV_TENANT_ID` / `DEV_USER_ID` | 占位 UUID | 鉴权中间件接入前，task 表 `tenant_id` / `user_id` 的兜底写入值；接入 JWT 后由 middleware 注入并废弃 |
+| `EVENT_CONSUMER_PREFETCH` | 16 | 事件消费者（`q.task.events`）的 AMQP prefetch（QoS）；多副本竞争同一队列，无需选主 |
 
 ## 常用命令
 
@@ -131,6 +132,21 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 - 同写端点，`tenant_id` / `user_id` 取自 `DEV_TENANT_ID` / `DEV_USER_ID`。
 
 请求/响应契约见 [`openspec/specs/task-read-api/spec.md`](../openspec/specs/task-read-api/spec.md)。
+
+## 事件消费 / 状态同步（`task-event-ingest`）
+
+`add-event-ingest-status-sync` 落地了 API 侧的事件消费者：订阅 `q.task.events`（绑定 `event.#`），消费 Worker 上报的 `event.<task_type>.<kind>` 流，在**单事务**内幂等写入 `task_events`（`ON CONFLICT (run_id, seq) DO NOTHING`）并驱动状态机。这让"提交→执行→看到结果"闭环真正跑通——在此之前读端点恒返回 `pending` + 空事件流。
+
+要点：
+
+- **写入边界（关键）**：消费者是 `task_versions.status` + `tasks.status` 的**唯一权威写者**（偿还 `add-task-create-api` Open Question #4 的 `tasks.status` writer 债务）。`task_runs.status` 仍归 **Worker 所有**（架构 §6.1：Worker claim run 时写 `running`、结束时写终态），消费者从不触碰它。
+- **事件 → 状态映射**：`kind=status` 按 `payload.status` 驱动版本状态；`kind=error` 一律视为 `failed`（Worker 错误路径只发 `error`、不发尾随的 `status:failed`）；`plan` / `step` / 未识别状态仅落库不翻转。版本与任务状态域不同（版本允许 `queued`/`cancelling`，任务不允许），故 `queued`→任务 `pending`、`cancelling`→跳过任务更新。
+- **终态守卫 + 真实翻转守卫**：状态翻转走 SQL 层 CAS（`WHERE status NOT IN (终态) AND status IS DISTINCT FROM $新值`）。前者保证终态版本永不被乱序/迟到事件改写，后者保证重投的同态事件影响 0 行，使 `event_status_transitions_total` 计数准确。
+- **任务态仅由当前版本驱动**：`UPDATE tasks ... WHERE current_version = $version`，超期版本的事件不会改写已迭代到新版本的任务态。
+- **投递语义**：解码失败 / 缺字段 → `nack(requeue=false)` 进 DLQ；可重试 DB 错误（连接 `08*` / 资源 `53*` / `40001` / `40P01` / deadline）→ `nack(requeue=true)`；其余（含约束违反 `23xxx`）默认 → DLQ，杜绝毒消息无限重投。
+- **无选主**：`q.task.events` 是工作队列，RabbitMQ 在多副本间负载均衡；消费者幂等，故无需 Outbox Relayer 那样的 advisory-lock 选主。
+
+请求/响应契约见 [`openspec/specs/task-event-ingest/spec.md`](../openspec/changes/add-event-ingest-status-sync/specs/task-event-ingest/spec.md)。
 
 ## 集成测试
 

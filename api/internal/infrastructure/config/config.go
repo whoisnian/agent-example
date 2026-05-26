@@ -49,6 +49,9 @@ type Config struct {
 	OutboxMaxAttempts int           `env:"OUTBOX_MAX_ATTEMPTS" envDefault:"10" yaml:"outbox_max_attempts"`
 	OutboxLockID      int64         `env:"OUTBOX_LOCK_ID" envDefault:"918273645" yaml:"outbox_lock_id"`
 
+	// Event-ingest consumer (add-event-ingest-status-sync)
+	EventConsumerPrefetch int `env:"EVENT_CONSUMER_PREFETCH" envDefault:"16" yaml:"event_consumer_prefetch"`
+
 	// Observability
 	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"" yaml:"otlp_endpoint"`
 	ServiceName  string `env:"OTEL_SERVICE_NAME" envDefault:"api" yaml:"service_name"`

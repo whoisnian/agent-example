@@ -113,6 +113,20 @@ type Querier interface {
 	// to `pending`. Called by the iterate transaction after `createActiveVersion`
 	// succeeds.
 	UpdateTaskCurrentVersion(ctx context.Context, arg UpdateTaskCurrentVersionParams) error
+	// Event-ingest state-machine CAS (add-event-ingest-status-sync). Only the
+	// task's current (active) version may drive tasks.status, so the update is
+	// gated on current_version = $3 — a stale event for a superseded version is
+	// a no-op. Same terminal + real-transition guards as UpdateVersionStatus.
+	UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusParams) (int64, error)
+	// Event-ingest state-machine CAS (add-event-ingest-status-sync). The WHERE
+	// clause carries two guards so the update is safe under at-least-once,
+	// out-of-order delivery:
+	//   * terminal guard: a version already in a terminal state is never moved;
+	//   * real-transition guard (IS DISTINCT FROM): a redelivered same-status
+	//     event affects 0 rows, so the caller's transition metric is accurate.
+	// Setting a terminal status flips the generated is_active column to false
+	// automatically, freeing the one_active_version_per_task index slot.
+	UpdateVersionStatus(ctx context.Context, arg UpdateVersionStatusParams) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

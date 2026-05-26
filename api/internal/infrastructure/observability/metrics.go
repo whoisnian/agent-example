@@ -29,6 +29,12 @@ type Metrics struct {
 	// Task-write-api business metrics
 	TasksCreatedTotal  *prometheus.CounterVec
 	TasksIteratedTotal *prometheus.CounterVec
+
+	// Event-ingest / status-sync metrics
+	EventsIngestedTotal         *prometheus.CounterVec
+	EventStatusTransitionsTotal prometheus.Counter
+	EventIngestMalformedTotal   prometheus.Counter
+	EventConsumerConnected      prometheus.Gauge
 }
 
 // NewMetrics builds the registry and every collector.
@@ -101,6 +107,25 @@ func NewMetrics() *Metrics {
 			},
 			[]string{"outcome"},
 		),
+		EventsIngestedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "events_ingested_total",
+				Help: "Worker task events successfully persisted, labelled by kind.",
+			},
+			[]string{"kind"},
+		),
+		EventStatusTransitionsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "event_status_transitions_total",
+			Help: "Version/task state-machine transitions actually applied from ingested events.",
+		}),
+		EventIngestMalformedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "event_ingest_malformed_total",
+			Help: "Undecodable / invalid task-event deliveries dead-lettered without requeue.",
+		}),
+		EventConsumerConnected: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "event_consumer_connected",
+			Help: "1 when the task-events consumer is subscribed, else 0.",
+		}),
 	}
 
 	reg.MustRegister(
@@ -115,6 +140,10 @@ func NewMetrics() *Metrics {
 		m.OutboxRelayerLeader,
 		m.TasksCreatedTotal,
 		m.TasksIteratedTotal,
+		m.EventsIngestedTotal,
+		m.EventStatusTransitionsTotal,
+		m.EventIngestMalformedTotal,
+		m.EventConsumerConnected,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

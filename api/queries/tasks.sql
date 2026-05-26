@@ -52,3 +52,16 @@ FROM tasks
 WHERE tenant_id = $1
   AND user_id = $2
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text);
+
+-- name: UpdateTaskStatus :execrows
+-- Event-ingest state-machine CAS (add-event-ingest-status-sync). Only the
+-- task's current (active) version may drive tasks.status, so the update is
+-- gated on current_version = $3 — a stale event for a superseded version is
+-- a no-op. Same terminal + real-transition guards as UpdateVersionStatus.
+UPDATE tasks
+SET status = $2,
+    updated_at = now()
+WHERE id = $1
+  AND current_version = $3
+  AND status NOT IN ('succeeded', 'failed', 'cancelled')
+  AND status IS DISTINCT FROM $2;

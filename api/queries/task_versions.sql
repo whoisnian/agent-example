@@ -49,3 +49,18 @@ WHERE id = $1 AND task_id = $2;
 SELECT COALESCE(MAX(version_no), 0)::int AS max_version_no
 FROM task_versions
 WHERE task_id = $1;
+
+-- name: UpdateVersionStatus :execrows
+-- Event-ingest state-machine CAS (add-event-ingest-status-sync). The WHERE
+-- clause carries two guards so the update is safe under at-least-once,
+-- out-of-order delivery:
+--   * terminal guard: a version already in a terminal state is never moved;
+--   * real-transition guard (IS DISTINCT FROM): a redelivered same-status
+--     event affects 0 rows, so the caller's transition metric is accurate.
+-- Setting a terminal status flips the generated is_active column to false
+-- automatically, freeing the one_active_version_per_task index slot.
+UPDATE task_versions
+SET status = $2
+WHERE id = $1
+  AND status NOT IN ('succeeded', 'failed', 'cancelled')
+  AND status IS DISTINCT FROM $2;

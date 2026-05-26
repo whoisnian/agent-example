@@ -187,6 +187,26 @@ func runServer(args []string) int {
 		DevUserID:   devUser,
 	}
 
+	// Event-ingest consumer: drives task_versions.status + tasks.status from
+	// the worker event stream (constructed after domainSvc exists). Shares
+	// q.task.events across replicas with no leader election; the handler is
+	// idempotent so competing consumers are safe.
+	eventHandler := messaging.NewEventIngestHandler(domainSvc, logger, metrics)
+	eventConsumer := messaging.NewConsumer(
+		mqConn,
+		messaging.QueueTaskEvents,
+		cfg.EventConsumerPrefetch,
+		eventHandler.Handle,
+		logger,
+		metrics,
+	)
+	consumerCtx, stopConsumer := context.WithCancel(ctx)
+	consumerDone := make(chan struct{})
+	go func() {
+		defer close(consumerDone)
+		eventConsumer.Run(consumerCtx)
+	}()
+
 	// Task-read-api wiring (queries-only read service, same dev identity).
 	appReadSvc := apptask.NewReadService(taskdomain.NewReadService(queries))
 	taskReadHandlers := &httpapi.TaskReadHandlers{
@@ -238,6 +258,12 @@ func runServer(args []string) int {
 	relayer.Stop()
 	stopRelayer()
 	<-relayerDone
+
+	// Stop the consumer before closing the MQ connection so an in-flight
+	// delivery isn't nacked into a closing channel.
+	eventConsumer.Stop()
+	stopConsumer()
+	<-consumerDone
 
 	if err := publisher.Close(); err != nil {
 		logger.Warn("publisher_close_error", slog.String("err", err.Error()))

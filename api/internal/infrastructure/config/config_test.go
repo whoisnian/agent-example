@@ -117,3 +117,28 @@ func TestLoad_BadYAMLPath_Errors(t *testing.T) {
 		t.Fatal("expected error for missing yaml file")
 	}
 }
+
+func TestLoad_EventConsumerPrefetch_DefaultAndOverride(t *testing.T) {
+	cfg, err := Load("", envMap(map[string]string{
+		"DATABASE_URL": "postgres://x",
+		"RABBITMQ_URL": "amqp://y",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.EventConsumerPrefetch != 16 {
+		t.Errorf("EventConsumerPrefetch default = %d, want 16", cfg.EventConsumerPrefetch)
+	}
+
+	cfg, err = Load("", envMap(map[string]string{
+		"DATABASE_URL":            "postgres://x",
+		"RABBITMQ_URL":            "amqp://y",
+		"EVENT_CONSUMER_PREFETCH": "64",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.EventConsumerPrefetch != 64 {
+		t.Errorf("EventConsumerPrefetch override = %d, want 64", cfg.EventConsumerPrefetch)
+	}
+}
