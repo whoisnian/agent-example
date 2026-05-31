@@ -52,3 +52,56 @@ func (q *Queries) GetEffectivePricing(ctx context.Context, arg GetEffectivePrici
 	)
 	return i, err
 }
+
+const listEffectivePricings = `-- name: ListEffectivePricings :many
+SELECT id, resource_kind, resource_name, unit, unit_price_usd, effective_at, expires_at
+FROM pricing
+WHERE resource_kind = $1
+  AND resource_name = $2
+  AND effective_at <= $3
+  AND (expires_at IS NULL OR expires_at > $3)
+ORDER BY effective_at DESC
+`
+
+type ListEffectivePricingsParams struct {
+	ResourceKind string             `json:"resource_kind"`
+	ResourceName string             `json:"resource_name"`
+	EffectiveAt  pgtype.Timestamptz `json:"effective_at"`
+}
+
+// Returns every pricing row for (resource_kind, resource_name) whose
+// effective window covers $3 (occurred_at), across all units. The Cost
+// Service picks at most one row per `unit` in Go — the row with the latest
+// effective_at wins on collision. Replaces N per-unit GetEffectivePricing
+// round-trips with a single scan per event.
+//
+// Window predicate is right-exclusive on expires_at (a row whose expires_at
+// equals occurred_at exactly does NOT match — matches the spec scenario
+// "Pricing windows abut exactly at occurred_at").
+func (q *Queries) ListEffectivePricings(ctx context.Context, arg ListEffectivePricingsParams) ([]Pricing, error) {
+	rows, err := q.db.Query(ctx, listEffectivePricings, arg.ResourceKind, arg.ResourceName, arg.EffectiveAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Pricing
+	for rows.Next() {
+		var i Pricing
+		if err := rows.Scan(
+			&i.ID,
+			&i.ResourceKind,
+			&i.ResourceName,
+			&i.Unit,
+			&i.UnitPriceUsd,
+			&i.EffectiveAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

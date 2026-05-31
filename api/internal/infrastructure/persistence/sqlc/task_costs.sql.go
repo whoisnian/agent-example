@@ -178,3 +178,59 @@ func (q *Queries) ListVersionCostsByTask(ctx context.Context, taskID pgtype.UUID
 	}
 	return items, nil
 }
+
+const upsertVersionCost = `-- name: UpsertVersionCost :exec
+INSERT INTO task_costs (
+    version_id, task_id,
+    input_tokens, output_tokens, cached_tokens,
+    tool_calls, wall_time_ms, compute_seconds, amount_usd
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
+)
+ON CONFLICT (version_id) DO UPDATE SET
+    input_tokens    = task_costs.input_tokens    + EXCLUDED.input_tokens,
+    output_tokens   = task_costs.output_tokens   + EXCLUDED.output_tokens,
+    cached_tokens   = task_costs.cached_tokens   + EXCLUDED.cached_tokens,
+    tool_calls      = task_costs.tool_calls      + EXCLUDED.tool_calls,
+    wall_time_ms    = task_costs.wall_time_ms    + EXCLUDED.wall_time_ms,
+    compute_seconds = task_costs.compute_seconds + EXCLUDED.compute_seconds,
+    amount_usd      = task_costs.amount_usd      + EXCLUDED.amount_usd,
+    updated_at      = now()
+`
+
+type UpsertVersionCostParams struct {
+	VersionID      pgtype.UUID    `json:"version_id"`
+	TaskID         pgtype.UUID    `json:"task_id"`
+	InputTokens    int64          `json:"input_tokens"`
+	OutputTokens   int64          `json:"output_tokens"`
+	CachedTokens   int64          `json:"cached_tokens"`
+	ToolCalls      int32          `json:"tool_calls"`
+	WallTimeMs     int64          `json:"wall_time_ms"`
+	ComputeSeconds int64          `json:"compute_seconds"`
+	AmountUsd      pgtype.Numeric `json:"amount_usd"`
+}
+
+// Sole writer to task_costs (task-cost-data-model §"Task Costs Aggregation
+// Table"). Per-event aggregate increment; caller pre-resolves NULL→0 and
+// per-kind column gating per spec §"Aggregate Increment Mapping Per Kind".
+//
+// task_id is deliberately ABSENT from DO UPDATE SET — task-cost-data-model
+// §"Task Costs task_id is Immutable Per version_id" requires that a
+// version_id's task ownership never migrate via the UPSERT. The settler
+// pre-verifies via task_versions and DLQs on mismatch, so by the time we
+// get here the supplied task_id is authoritative for an INSERT but
+// redundant on UPDATE.
+func (q *Queries) UpsertVersionCost(ctx context.Context, arg UpsertVersionCostParams) error {
+	_, err := q.db.Exec(ctx, upsertVersionCost,
+		arg.VersionID,
+		arg.TaskID,
+		arg.InputTokens,
+		arg.OutputTokens,
+		arg.CachedTokens,
+		arg.ToolCalls,
+		arg.WallTimeMs,
+		arg.ComputeSeconds,
+		arg.AmountUsd,
+	)
+	return err
+}

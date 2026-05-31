@@ -149,6 +149,24 @@ func (q *Queries) GetVersionByTaskAndID(ctx context.Context, arg GetVersionByTas
 	return i, err
 }
 
+const getVersionOwnerTaskID = `-- name: GetVersionOwnerTaskID :one
+SELECT task_id
+FROM task_versions
+WHERE id = $1
+`
+
+// Narrow lookup returning just the version's owning task_id. Used by the
+// Cost Service to verify a worker-supplied (task_id, version_id) before
+// the task_costs UPSERT, enforcing task-cost-data-model §"Task Costs
+// task_id is Immutable Per version_id". Returns no rows if version_id is
+// unknown (caller treats as DLQ-permanent).
+func (q *Queries) GetVersionOwnerTaskID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getVersionOwnerTaskID, id)
+	var task_id pgtype.UUID
+	err := row.Scan(&task_id)
+	return task_id, err
+}
+
 const listVersionsByTask = `-- name: ListVersionsByTask :many
 SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
 FROM task_versions

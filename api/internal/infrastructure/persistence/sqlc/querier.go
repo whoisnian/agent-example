@@ -54,8 +54,22 @@ type Querier interface {
 	// One row per version. Returns no rows if the Cost Service hasn't yet
 	// upserted anything for the version (treat as "0 across the board").
 	GetVersionCost(ctx context.Context, versionID pgtype.UUID) (TaskCost, error)
+	// Narrow lookup returning just the version's owning task_id. Used by the
+	// Cost Service to verify a worker-supplied (task_id, version_id) before
+	// the task_costs UPSERT, enforcing task-cost-data-model §"Task Costs
+	// task_id is Immutable Per version_id". Returns no rows if version_id is
+	// unknown (caller treats as DLQ-permanent).
+	GetVersionOwnerTaskID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	// Records a publish failure: bumps attempts and schedules a retry at next_retry_at.
 	IncrementOutboxAttempt(ctx context.Context, arg IncrementOutboxAttemptParams) error
+	// Idempotent insert keyed on (run_id, kind, seq) — the uniqueness boundary
+	// after migration 0004_cost_events_kind_unique (matches the Worker's
+	// per-(run_id, kind) seq namespace per worker-messaging §"Cost Event
+	// Publisher"). Returns the inserted row's quantity / amount fields so the
+	// caller can drive the task_costs UPSERT in the same transaction. On
+	// duplicate delivery the RETURNING set is empty (caller treats pgx.ErrNoRows
+	// as "duplicate, skip aggregate UPSERT").
+	InsertCostEvent(ctx context.Context, arg InsertCostEventParams) (InsertCostEventRow, error)
 	// Append a new outbox row inside the same transaction as the business write
 	// it triggers. Returns id/status/created_at so the caller can correlate with
 	// the publisher's metric output. Used by the task-write-api flow to enqueue
@@ -65,6 +79,16 @@ type Querier interface {
 	// on Worker retries are silently dropped.
 	InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) error
 	ListArtifactsByVersion(ctx context.Context, versionID pgtype.UUID) ([]Artifact, error)
+	// Returns every pricing row for (resource_kind, resource_name) whose
+	// effective window covers $3 (occurred_at), across all units. The Cost
+	// Service picks at most one row per `unit` in Go — the row with the latest
+	// effective_at wins on collision. Replaces N per-unit GetEffectivePricing
+	// round-trips with a single scan per event.
+	//
+	// Window predicate is right-exclusive on expires_at (a row whose expires_at
+	// equals occurred_at exactly does NOT match — matches the spec scenario
+	// "Pricing windows abut exactly at occurred_at").
+	ListEffectivePricings(ctx context.Context, arg ListEffectivePricingsParams) ([]Pricing, error)
 	// Pagination for WS gap-fill and HTTP replay: caller passes the highest
 	// event id it has already observed. Results are monotonically ordered by
 	// id; the (task_id, id) index supports the predicate. Pagination via LIMIT.
@@ -127,6 +151,17 @@ type Querier interface {
 	// Setting a terminal status flips the generated is_active column to false
 	// automatically, freeing the one_active_version_per_task index slot.
 	UpdateVersionStatus(ctx context.Context, arg UpdateVersionStatusParams) (int64, error)
+	// Sole writer to task_costs (task-cost-data-model §"Task Costs Aggregation
+	// Table"). Per-event aggregate increment; caller pre-resolves NULL→0 and
+	// per-kind column gating per spec §"Aggregate Increment Mapping Per Kind".
+	//
+	// task_id is deliberately ABSENT from DO UPDATE SET — task-cost-data-model
+	// §"Task Costs task_id is Immutable Per version_id" requires that a
+	// version_id's task ownership never migrate via the UPSERT. The settler
+	// pre-verifies via task_versions and DLQs on mismatch, so by the time we
+	// get here the supplied task_id is authoritative for an INSERT but
+	// redundant on UPDATE.
+	UpsertVersionCost(ctx context.Context, arg UpsertVersionCostParams) error
 }
 
 var _ Querier = (*Queries)(nil)

@@ -50,6 +50,16 @@ SELECT COALESCE(MAX(version_no), 0)::int AS max_version_no
 FROM task_versions
 WHERE task_id = $1;
 
+-- name: GetVersionOwnerTaskID :one
+-- Narrow lookup returning just the version's owning task_id. Used by the
+-- Cost Service to verify a worker-supplied (task_id, version_id) before
+-- the task_costs UPSERT, enforcing task-cost-data-model §"Task Costs
+-- task_id is Immutable Per version_id". Returns no rows if version_id is
+-- unknown (caller treats as DLQ-permanent).
+SELECT task_id
+FROM task_versions
+WHERE id = $1;
+
 -- name: UpdateVersionStatus :execrows
 -- Event-ingest state-machine CAS (add-event-ingest-status-sync). The WHERE
 -- clause carries two guards so the update is safe under at-least-once,

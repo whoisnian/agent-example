@@ -45,3 +45,31 @@ GROUP BY task_id;
 SELECT *
 FROM task_costs
 WHERE task_id = $1;
+
+-- name: UpsertVersionCost :exec
+-- Sole writer to task_costs (task-cost-data-model §"Task Costs Aggregation
+-- Table"). Per-event aggregate increment; caller pre-resolves NULL→0 and
+-- per-kind column gating per spec §"Aggregate Increment Mapping Per Kind".
+--
+-- task_id is deliberately ABSENT from DO UPDATE SET — task-cost-data-model
+-- §"Task Costs task_id is Immutable Per version_id" requires that a
+-- version_id's task ownership never migrate via the UPSERT. The settler
+-- pre-verifies via task_versions and DLQs on mismatch, so by the time we
+-- get here the supplied task_id is authoritative for an INSERT but
+-- redundant on UPDATE.
+INSERT INTO task_costs (
+    version_id, task_id,
+    input_tokens, output_tokens, cached_tokens,
+    tool_calls, wall_time_ms, compute_seconds, amount_usd
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9
+)
+ON CONFLICT (version_id) DO UPDATE SET
+    input_tokens    = task_costs.input_tokens    + EXCLUDED.input_tokens,
+    output_tokens   = task_costs.output_tokens   + EXCLUDED.output_tokens,
+    cached_tokens   = task_costs.cached_tokens   + EXCLUDED.cached_tokens,
+    tool_calls      = task_costs.tool_calls      + EXCLUDED.tool_calls,
+    wall_time_ms    = task_costs.wall_time_ms    + EXCLUDED.wall_time_ms,
+    compute_seconds = task_costs.compute_seconds + EXCLUDED.compute_seconds,
+    amount_usd      = task_costs.amount_usd      + EXCLUDED.amount_usd,
+    updated_at      = now();
