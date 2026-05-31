@@ -19,9 +19,10 @@ type ServerDeps struct {
 	Logger           *slog.Logger
 	Metrics          *observability.Metrics
 	Probes           *ProbeRegistry
-	TaskHandlers     *TaskHandlers     // optional; nil disables the write routes
-	TaskReadHandlers *TaskReadHandlers // optional; nil disables the read routes
-	TaskCostHandlers *TaskCostHandlers // optional; nil disables the cost-read routes
+	TaskHandlers        *TaskHandlers        // optional; nil disables the write routes
+	TaskReadHandlers    *TaskReadHandlers    // optional; nil disables the read routes
+	TaskCostHandlers    *TaskCostHandlers    // optional; nil disables the cost-read routes
+	TaskControlHandlers *TaskControlHandlers // optional; nil disables the control route
 }
 
 // NewEngine assembles the gin engine and the documented middleware chain:
@@ -54,7 +55,7 @@ func NewEngine(deps ServerDeps) *gin.Engine {
 	// Business routes under /api/v1. Each handler set stays optional so tests
 	// can spin up an engine with only the write or only the read side; the v1
 	// group is created once and shared so both register on the same prefix.
-	if deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil {
+	if deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil || deps.TaskControlHandlers != nil {
 		v1 := e.Group("/api/v1")
 		if deps.TaskHandlers != nil {
 			deps.TaskHandlers.Register(v1)
@@ -64,6 +65,9 @@ func NewEngine(deps ServerDeps) *gin.Engine {
 		}
 		if deps.TaskCostHandlers != nil {
 			deps.TaskCostHandlers.Register(v1)
+		}
+		if deps.TaskControlHandlers != nil {
+			deps.TaskControlHandlers.Register(v1)
 		}
 	}
 

@@ -193,6 +193,35 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 
 请求/响应契约见 [`openspec/specs/task-cost-api/spec.md`](../openspec/changes/add-task-cost-api/specs/task-cost-api/spec.md)。
 
+## 任务控制端点（`task-control-api`）
+
+`add-task-control-api` 落地了用户停-控任务的入口：`POST /api/v1/tasks/{task_id}/control` 接受 `{action, reason?}`，其中 `action ∈ {pause, resume, cancel}`，`reason` 可选，去尾空格后上限 200 字符（与 `task.title` 校验一致）。**API 永远不直接改 `tasks.status` / `task_versions.status`**——它只往 `outbox` 写一行控制消息；最终状态翻转由 Worker 在事件流中上报、`task-event-ingest` 写入，保留"事件消费是唯一状态写者"的不变量。
+
+| 响应 | 含义 |
+|------|------|
+| `202 Accepted`（`code=0`） | 请求已落到 `outbox`，将异步生效；`data = {accepted, action, task_id, effective}`，其中 `effective = "queued"` 表示该任务已有 active run，Worker 会在秒级收到；`effective = "best_effort"` 表示尚未 claim（pre-claim 阶段），broker 可能因为没有绑定而丢弃消息（前端可重试） |
+| `400 invalid_input` | `action` 缺失或非法、`reason` 超 200 字符、JSON 解析失败、`task_id` 非 UUID。`data.field` 指明出错字段 |
+| `404 task_not_found` | 任务不存在或不属于调用者（owner-scoped，与 `task-read-api` 一致；不返回 `403`，不泄露存在性） |
+| `409 invalid_state` | 当前 `tasks.status` 不允许该动作。`message` 字段携带当前状态供前端展示（如 `cannot pause task in status "paused"`） |
+
+状态机前置条件：
+
+| action  | 允许的 `tasks.status` |
+|---------|------------------------|
+| pause   | `pending` / `running` |
+| resume  | `paused`               |
+| cancel  | 非终态（即不在 `cancelled` / `succeeded` / `failed`） |
+
+要点：
+
+- **幂等性**：API **不** dedupe——重复 pause 会产出两条 outbox 行；Worker 通过内存 flag 在自己一端去重。
+- **并发**：同一任务的并发请求在 `LockTaskForControl` 的 `FOR UPDATE` 行锁上序列化，第二个请求看到的是第一个事务提交后的状态。
+- **outbox 路由**：每行带 `exchange = "task.control"`、`topic = "task.<task_id>"`。由迁移 `0006_outbox_exchange` 引入的 `outbox.exchange` 列让 Relayer 按行选择目标交换机。
+- **拓扑演进**：`task.control` 由 `direct` 改成 `topic`（worker 后续按 `task.*` 模式绑定）。`DeclareTopology` 启动时通过 `retypableExchanges` 列表预删除并重声明；该列表 **append-only**，未来版本不得移除条目，否则跨版本回滚会撞 FAIL-FAST。
+- **指标**：`task_control_requests_total{action ∈ {pause,resume,cancel,unknown}, outcome ∈ {accepted,conflict,not_found,invalid}}`。`unknown` 标签只与 `invalid` 配对，用于无法解析的 action。
+
+请求/响应契约见 [`openspec/specs/task-control-api/spec.md`](../openspec/changes/add-task-control-api/specs/task-control-api/spec.md)。
+
 ## 集成测试
 
 `make test-integration` 用 testcontainers 启 PostgreSQL 18.4，跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。

@@ -262,13 +262,26 @@ func runServer(args []string) int {
 		DevUserID:   devUser,
 	}
 
+	// Task-control-api wiring (writes outbox; worker drives state via events).
+	appControlSvc := apptask.NewControlService(
+		taskdomain.NewControlService(pool.Pool, queries, taskdomain.SystemClock{}),
+	)
+	taskControlHandlers := &httpapi.TaskControlHandlers{
+		App:         appControlSvc,
+		Logger:      logger,
+		Metrics:     metrics,
+		DevTenantID: devTenant,
+		DevUserID:   devUser,
+	}
+
 	engine := httpapi.NewEngine(httpapi.ServerDeps{
-		Logger:           logger,
-		Metrics:          metrics,
-		Probes:           probes,
-		TaskHandlers:     taskHandlers,
-		TaskReadHandlers: taskReadHandlers,
-		TaskCostHandlers: taskCostHandlers,
+		Logger:              logger,
+		Metrics:             metrics,
+		Probes:              probes,
+		TaskHandlers:        taskHandlers,
+		TaskReadHandlers:    taskReadHandlers,
+		TaskCostHandlers:    taskCostHandlers,
+		TaskControlHandlers: taskControlHandlers,
 	})
 	server := httpapi.NewServer(cfg.HTTPAddr, engine, logger)
 

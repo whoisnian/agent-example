@@ -516,7 +516,7 @@ CREATE INDEX ON outbox (status, next_retry_at);
 | POST   | `/tasks` | 创建任务（隐式创建首版本） |
 | GET    | `/tasks` | 列表（分页 + 过滤，含累计成本） |
 | GET    | `/tasks/{task_id}` | 详情（含当前版本摘要 + 成本摘要） |
-| POST   | `/tasks/{task_id}/control` | 控制：pause/resume/cancel |
+| POST   | `/tasks/{task_id}/control` | 控制：pause/resume/cancel — capability `task-control-api`，202 Accepted；状态机翻转由 worker 事件驱动 |
 | POST   | `/tasks/{task_id}/iterate` | 基于当前版本迭代 → 新版本（活跃中返回 **409 active_version_exists**） |
 | POST   | `/tasks/{task_id}/rollback` | 回滚到指定版本（branch 模式同样受 409 约束；switch 模式仅切指针不受约束） |
 | GET    | `/tasks/{task_id}/versions` | 版本列表（树） |

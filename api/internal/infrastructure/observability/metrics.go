@@ -43,6 +43,9 @@ type Metrics struct {
 	CostAmountSettledUSDTotal      prometheus.Counter
 	CostEventSettleDurationSeconds prometheus.Histogram
 	CostConsumerConnected          prometheus.Gauge
+
+	// Task control metrics (add-task-control-api §"Observability")
+	TaskControlRequestsTotal *prometheus.CounterVec
 }
 
 // NewMetrics builds the registry and every collector.
@@ -168,6 +171,13 @@ func NewMetrics() *Metrics {
 			Name: "cost_consumer_connected",
 			Help: "1 when the cost-events consumer is subscribed, else 0. Independent of event_consumer_connected.",
 		}),
+		TaskControlRequestsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "task_control_requests_total",
+				Help: "POST /tasks/{id}/control requests. action ∈ {pause,resume,cancel,unknown}; outcome ∈ {accepted,conflict,not_found,invalid}; unknown action pairs only with invalid outcome.",
+			},
+			[]string{"action", "outcome"},
+		),
 	}
 
 	reg.MustRegister(
@@ -192,6 +202,7 @@ func NewMetrics() *Metrics {
 		m.CostAmountSettledUSDTotal,
 		m.CostEventSettleDurationSeconds,
 		m.CostConsumerConnected,
+		m.TaskControlRequestsTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)
