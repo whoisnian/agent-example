@@ -231,6 +231,8 @@ func TestStructuralIntegrity(t *testing.T) {
 	}
 
 	// A few representative indexes (existence, not query plan).
+	// cost_events_run_kind_seq_key replaces the legacy cost_events_run_seq_key
+	// as of migration 0004_cost_events_kind_unique (add-cost-service).
 	wantIndexes := []string{
 		"tasks_tenant_user_status_idx",
 		"task_versions_task_parent_idx",
@@ -238,7 +240,7 @@ func TestStructuralIntegrity(t *testing.T) {
 		"task_runs_status_heartbeat_idx",
 		"task_events_run_seq_key",
 		"task_events_task_id_idx",
-		"cost_events_run_seq_key",
+		"cost_events_run_kind_seq_key",
 		"cost_events_task_occurred_idx",
 		"cost_events_version_idx",
 		"task_costs_task_idx",
@@ -250,6 +252,17 @@ func TestStructuralIntegrity(t *testing.T) {
 		).Scan(&n); err != nil {
 			t.Errorf("index %q missing: %v", name, err)
 		}
+	}
+
+	// The legacy index MUST be gone after 0004.
+	var legacy int
+	err := conn.QueryRow(ctx,
+		`SELECT 1 FROM pg_indexes WHERE indexname = 'cost_events_run_seq_key'`,
+	).Scan(&legacy)
+	if err == nil {
+		t.Errorf("legacy index cost_events_run_seq_key still present after 0004_cost_events_kind_unique")
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("unexpected error checking legacy index: %v", err)
 	}
 }
 
@@ -506,7 +519,7 @@ func TestPerRunIdempotencyUniques(t *testing.T) {
 		}
 	})
 
-	t.Run("cost_events (run_id, seq)", func(t *testing.T) {
+	t.Run("cost_events (run_id, kind, seq) — same kind collides", func(t *testing.T) {
 		if _, err := conn.Exec(ctx,
 			`INSERT INTO cost_events
 			 (task_id, version_id, run_id, seq, kind, resource_name, amount_usd, occurred_at)
@@ -522,9 +535,44 @@ func TestPerRunIdempotencyUniques(t *testing.T) {
 			taskID, verID, runID,
 		)
 		code, constraint := pgErrorCode(t, err)
-		if code != "23505" || constraint != "cost_events_run_seq_key" {
-			t.Errorf("got SQLSTATE %s / constraint %q, want 23505 / cost_events_run_seq_key",
+		if code != "23505" || constraint != "cost_events_run_kind_seq_key" {
+			t.Errorf("got SQLSTATE %s / constraint %q, want 23505 / cost_events_run_kind_seq_key",
 				code, constraint)
+		}
+	})
+
+	t.Run("cost_events cross-kind seq=1 coexist (S1 regression)", func(t *testing.T) {
+		// The Worker allocates seq per-(run_id, kind). With the (run_id, kind, seq)
+		// uniqueness from 0004, three events with seq=1 across kinds MUST all
+		// persist; the legacy (run_id, seq) index would have collided them.
+		newRun := mustUUID(t)
+		if _, err := conn.Exec(ctx,
+			`INSERT INTO task_runs (id, version_id, attempt_no, status, idempotency_key)
+			 VALUES ($1, $2, 2, 'running', $3)`,
+			newRun, verID, "ik-cross-kind-"+newRun.String(),
+		); err != nil {
+			t.Fatalf("seed run: %v", err)
+		}
+		for _, k := range []string{"llm", "tool", "compute"} {
+			if _, err := conn.Exec(ctx,
+				`INSERT INTO cost_events
+				 (task_id, version_id, run_id, seq, kind, resource_name, amount_usd, occurred_at)
+				 VALUES ($1, $2, $3, 1, $4, 'r', 0.0, now())`,
+				taskID, verID, newRun, k,
+			); err != nil {
+				t.Errorf("seq=1 kind=%s insert failed: %v", k, err)
+			}
+		}
+		// Verify three rows landed.
+		var n int
+		if err := conn.QueryRow(ctx,
+			`SELECT count(*) FROM cost_events WHERE run_id = $1 AND seq = 1`,
+			newRun,
+		).Scan(&n); err != nil {
+			t.Fatalf("count: %v", err)
+		}
+		if n != 3 {
+			t.Errorf("want 3 cost_events rows with seq=1 across kinds, got %d", n)
 		}
 	})
 
@@ -597,6 +645,122 @@ func TestPricingInvariants(t *testing.T) {
 				code, constraint)
 		}
 	})
+}
+
+// ---------------------------------------------------------------------------
+// 5.7 seed pricing (0005) — load + tolerant down
+// ---------------------------------------------------------------------------
+
+func TestSeedPricingLoaded(t *testing.T) {
+	t.Parallel()
+	dsn := newPostgresContainer(t)
+	migrateUp(t, dsn)
+	conn := connect(t, dsn)
+	ctx := context.Background()
+
+	// At least one row exists for (llm, claude-opus-4-7, per_1k_input_tokens)
+	// in force at now(). Mirrors the spec scenario "Seeded prices are
+	// queryable after migrate up".
+	var price float64
+	if err := conn.QueryRow(ctx,
+		`SELECT unit_price_usd
+		 FROM pricing
+		 WHERE resource_kind = 'llm'
+		   AND resource_name = 'claude-opus-4-7'
+		   AND unit          = 'per_1k_input_tokens'
+		   AND effective_at <= now()
+		   AND (expires_at IS NULL OR expires_at > now())
+		 ORDER BY effective_at DESC
+		 LIMIT 1`,
+	).Scan(&price); err != nil {
+		t.Fatalf("seed lookup: %v", err)
+	}
+	if price <= 0 {
+		t.Errorf("opus input price = %v, want > 0", price)
+	}
+
+	// All expected (kind, resource_name, unit) triples present.
+	wantTriples := []struct{ kind, name, unit string }{
+		{"llm", "claude-opus-4-7", "per_1k_input_tokens"},
+		{"llm", "claude-opus-4-7", "per_1k_output_tokens"},
+		{"llm", "claude-sonnet-4-6", "per_1k_input_tokens"},
+		{"llm", "claude-sonnet-4-6", "per_1k_output_tokens"},
+		{"llm", "claude-haiku-4-5", "per_1k_input_tokens"},
+		{"llm", "claude-haiku-4-5", "per_1k_output_tokens"},
+		{"tool", "oss_fs", "per_call"},
+		{"compute", "worker", "per_second"},
+	}
+	for _, w := range wantTriples {
+		var n int
+		if err := conn.QueryRow(ctx,
+			`SELECT 1 FROM pricing
+			 WHERE resource_kind = $1 AND resource_name = $2 AND unit = $3`,
+			w.kind, w.name, w.unit,
+		).Scan(&n); err != nil {
+			t.Errorf("seed (%s, %s, %s) missing: %v", w.kind, w.name, w.unit, err)
+		}
+	}
+}
+
+func TestSeedPricingDownPreservesReferencedRows(t *testing.T) {
+	t.Parallel()
+	dsn := newPostgresContainer(t)
+	migrateUp(t, dsn)
+	conn := connect(t, dsn)
+	ctx := context.Background()
+
+	// Identify a seeded pricing row's id.
+	var seedID uuid.UUID
+	if err := conn.QueryRow(ctx,
+		`SELECT id FROM pricing
+		 WHERE resource_kind = 'llm' AND resource_name = 'claude-opus-4-7'
+		   AND unit = 'per_1k_input_tokens'`,
+	).Scan(&seedID); err != nil {
+		t.Fatalf("seed id lookup: %v", err)
+	}
+
+	// Insert a cost_events row referencing the seed (need a task/version/run
+	// for FK satisfaction — cost_events.task_id/version_id/run_id have no FK
+	// but task_costs would; we only INSERT into cost_events here).
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO cost_events
+		 (task_id, version_id, run_id, seq, kind, resource_name, amount_usd,
+		  pricing_id, occurred_at)
+		 VALUES ($1, $2, $3, 1, 'llm', 'claude-opus-4-7', 0.50, $4, now())`,
+		mustUUID(t), mustUUID(t), mustUUID(t), seedID,
+	); err != nil {
+		t.Fatalf("insert referencing cost_events: %v", err)
+	}
+
+	// Roll back 0005_seed_pricing one step. The tolerant DELETE must skip the
+	// referenced row and complete without 23503.
+	m, err := persistence.NewMigrator(migrationsDir(t), dsn)
+	if err != nil {
+		t.Fatalf("new migrator: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+	if err := m.Down(); err != nil {
+		t.Fatalf("0005 down: %v", err)
+	}
+
+	// The referenced row MUST still be present.
+	var stillThere int
+	if err := conn.QueryRow(ctx,
+		`SELECT 1 FROM pricing WHERE id = $1`, seedID,
+	).Scan(&stillThere); err != nil {
+		t.Errorf("referenced seed row was deleted by 0005_down: %v", err)
+	}
+
+	// schema_migrations.dirty must be false.
+	var dirty bool
+	if err := conn.QueryRow(ctx,
+		`SELECT dirty FROM schema_migrations`,
+	).Scan(&dirty); err != nil {
+		t.Fatalf("read schema_migrations: %v", err)
+	}
+	if dirty {
+		t.Errorf("schema_migrations.dirty = true after partial 0005 down")
+	}
 }
 
 // ---------------------------------------------------------------------------
