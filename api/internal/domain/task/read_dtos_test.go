@@ -26,6 +26,13 @@ func TestNumericToDecimalString(t *testing.T) {
 		{"integer_value", numeric(t, 5, 0), "5.00000000"},
 		{"large_18_8", numeric(t, 1234567890000, -8), "12345.67890000"},
 		{"negative", numeric(t, -62000000, -8), "-0.62000000"},
+		// Pricing-shape values from add-task-cost-api §"Pricing list" — the
+		// seed migration round-trips these through NUMERIC(18, 8). The
+		// renderer MUST produce a scale-8 string for each so wire format
+		// stays consistent between /pricing and amount_usd elsewhere.
+		{"pricing_0.015", numeric(t, 1500000, -8), "0.01500000"},
+		{"pricing_0.0001", numeric(t, 10000, -8), "0.00010000"},
+		{"pricing_negative", numeric(t, -50000000, -8), "-0.50000000"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
