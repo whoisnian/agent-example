@@ -52,6 +52,9 @@ type Config struct {
 	// Event-ingest consumer (add-event-ingest-status-sync)
 	EventConsumerPrefetch int `env:"EVENT_CONSUMER_PREFETCH" envDefault:"16" yaml:"event_consumer_prefetch"`
 
+	// Cost-ingest consumer (add-cost-service)
+	CostIngestPrefetch int `env:"COST_INGEST_PREFETCH" envDefault:"64" yaml:"cost_ingest_prefetch"`
+
 	// Observability
 	OTLPEndpoint string `env:"OTEL_EXPORTER_OTLP_ENDPOINT" envDefault:"" yaml:"otlp_endpoint"`
 	ServiceName  string `env:"OTEL_SERVICE_NAME" envDefault:"api" yaml:"service_name"`

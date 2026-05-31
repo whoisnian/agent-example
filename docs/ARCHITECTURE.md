@@ -184,7 +184,7 @@ internal/
 - **Task Service**：任务 CRUD、状态机推进、控制指令派发；**所有"创建活跃版本"的操作（create/iterate/rollback-branch）必须先在 DB 事务内做互斥检查**（详见 §6.4）。
 - **Version Service**：基于父版本创建新版本，维护版本树，提供回滚（= 以指定版本为父创建新版本）。
 - **Artifact Service**：管理 OSS 对象元数据，颁发 STS 临时凭证。
-- **Cost Service**：消费 `cost.events`，做模型价格表查询、维度聚合、写入 `task_costs` 与 `cost_events`；对外暴露按 task/version/user/time 范围聚合的查询接口。
+- **Cost Service**：消费 `cost.events`，做模型价格表查询、维度聚合、写入 `task_costs` 与 `cost_events`；对外暴露按 task/version/user/time 范围聚合的查询接口。落地见 `task-cost-ingest`（OpenSpec change `add-cost-service`），与 `task-event-ingest` 共享 `isRetryable` 重试策略。
 - **Realtime Gateway**：独立部署进程，订阅 `task.events`，按用户/任务维度推送给已订阅的 WS 客户端；成本类增量事件也走这条通道下发，前端不必额外轮询。
 - **Outbox Relayer**：扫描 `outbox` 表未投递事件，发布到 RabbitMQ，发布成功后标记，保证"DB 状态变化 ↔ MQ 事件"的原子性。
 

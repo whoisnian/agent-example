@@ -26,6 +26,7 @@ import (
 
 	"github.com/google/uuid"
 
+	appcost "github.com/whoisnian/agent-example/api/internal/application/cost"
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/config"
@@ -198,7 +199,7 @@ func runServer(args []string) int {
 		cfg.EventConsumerPrefetch,
 		eventHandler.Handle,
 		logger,
-		metrics,
+		metrics.EventConsumerConnected,
 	)
 	consumerCtx, stopConsumer := context.WithCancel(ctx)
 	consumerDone := make(chan struct{})
@@ -206,6 +207,42 @@ func runServer(args []string) int {
 		defer close(consumerDone)
 		eventConsumer.Run(consumerCtx)
 	}()
+
+	// Cost-ingest consumer (add-cost-service): subscribes to q.cost.events,
+	// prices each delivery against `pricing`, and UPSERTs task_costs. Owns
+	// its own gauge so an outage on q.task.events doesn't mask q.cost.events.
+	costSettler := appcost.NewSettler(pool.Pool, queries)
+	costHandler := messaging.NewCostIngestHandler(costSettler, logger, metrics)
+	costConsumer := messaging.NewConsumer(
+		mqConn,
+		messaging.QueueCostEvents,
+		cfg.CostIngestPrefetch,
+		costHandler.Handle,
+		logger,
+		metrics.CostConsumerConnected,
+	)
+	costConsumerCtx, stopCostConsumer := context.WithCancel(ctx)
+	costConsumerDone := make(chan struct{})
+	go func() {
+		defer close(costConsumerDone)
+		costConsumer.Run(costConsumerCtx)
+	}()
+
+	// Startup pricing-coverage log — operational guardrail (S4) against a
+	// resource_name typo silently producing $0 events forever. Best-effort:
+	// a DB hiccup at boot only logs a WARN and proceeds.
+	if coverage, cerr := costSettler.ListEffectivePricingCoverage(ctx, time.Now()); cerr != nil {
+		logger.Warn("cost_pricing_coverage_query_failed", slog.String("err", cerr.Error()))
+	} else {
+		pairs := make([]string, 0, len(coverage))
+		for _, e := range coverage {
+			pairs = append(pairs, e.Kind+":"+e.Name)
+		}
+		logger.Info("cost_pricing_coverage",
+			slog.Int("count", len(coverage)),
+			slog.Any("resources", pairs),
+		)
+	}
 
 	// Task-read-api wiring (queries-only read service, same dev identity).
 	appReadSvc := apptask.NewReadService(taskdomain.NewReadService(queries))
@@ -259,11 +296,15 @@ func runServer(args []string) int {
 	stopRelayer()
 	<-relayerDone
 
-	// Stop the consumer before closing the MQ connection so an in-flight
-	// delivery isn't nacked into a closing channel.
+	// Stop the consumers before closing the MQ connection so in-flight
+	// deliveries aren't nacked into a closing channel.
 	eventConsumer.Stop()
 	stopConsumer()
 	<-consumerDone
+
+	costConsumer.Stop()
+	stopCostConsumer()
+	<-costConsumerDone
 
 	if err := publisher.Close(); err != nil {
 		logger.Warn("publisher_close_error", slog.String("err", err.Error()))

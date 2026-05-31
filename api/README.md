@@ -148,6 +148,28 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 
 请求/响应契约见 [`openspec/specs/task-event-ingest/spec.md`](../openspec/changes/add-event-ingest-status-sync/specs/task-event-ingest/spec.md)。
 
+## 成本结算（`task-cost-ingest`）
+
+`add-cost-service` 落地了第二个消费者，订阅 `q.cost.events`（绑定 `cost.#`），按 `pricing` 表结算 Worker 上报的 `cost.<kind>` 事件并 UPSERT `task_costs`——读端点的 `amount_usd` 从此不再恒为 `"0.00000000"`。
+
+要点：
+
+- **唯一写者**：消费者是 `task_costs` 的唯一权威写者（spec `task-cost-data-model` §"Task Costs Aggregation Table"），同时是 `cost_events` 的唯一写者。Worker 只发事件，不直接持久化。
+- **幂等边界**：`(run_id, kind, seq)` 三列唯一（迁移 `0004_cost_events_kind_unique` 把原 `(run_id, seq)` 重做为三列，以匹配 Worker 的"per-run-per-kind"`seq` 命名空间）。重投递走 `ON CONFLICT DO NOTHING RETURNING`，零行返回即跳过聚合 UPSERT，无双计数。
+- **结算公式**（spec §"Cost Event Settlement Math"）：
+  - `llm`：`(input_tokens/1000)×per_1k_input_tokens + (output_tokens/1000)×per_1k_output_tokens + (cached_tokens/1000)×per_1k_cached_tokens`
+  - `tool`：`(calls ?? 1)×per_call + (duration_ms/1000)×per_second`
+  - `compute`：`(duration_ms/1000)×per_second`
+  - 全部用 `*big.Rat` 精确有理数运算，绑回 `NUMERIC(18,8)`。
+- **缺价非致命**：找不到 `pricing` 行时 `amount_usd=0`、`pricing_id=NULL`，事件仍落库、token 列仍 UPSERT，便于将来回填；同时 `cost_pricing_missing_total{kind,resource}` +1。启动期会输出 `cost_pricing_coverage` INFO 日志，列出当前生效的 `(kind, resource_name)`，是抗 `resource_name` 拼写错误的运维护栏。建议告警：`increase(cost_pricing_missing_total[10m]) > 5`。
+- **`task_id` 不可变**：消费者结算前用 `task_versions` 反查 `version_id` 的所属 `task_id`，不匹配视为永久错误进 DLQ；`task_costs` UPSERT 的 `DO UPDATE SET` 也不包含 `task_id`。
+- **聚合列映射**：`compute_seconds = floor(duration_ms/1000)`（亚秒事件贡献 0，`amount_usd` 仍精确）；`wall_time_ms` 仅 llm/tool 累加；`tool_calls` 仅 tool 累加，与是否匹配到 `per_call` 价无关。
+- **投递语义**：解码失败 / 未知 `kind` / `task_id` 不匹配 → DLQ；可重试 DB 错误（与 event-ingest 共享 `isRetryable`）→ 重排；其余永久错误 → DLQ。
+- **指标**：`cost_events_consumed_total{kind}` / `cost_events_settled_total{kind,result}` / `cost_pricing_missing_total{kind,resource}` / `cost_amount_settled_usd_total` / `cost_event_settle_duration_seconds` / `cost_consumer_connected`（与 `event_consumer_connected` 独立）。
+- **配置**：`COST_INGEST_PREFETCH`（默认 64）。
+
+请求/响应契约见 [`openspec/specs/task-cost-ingest/spec.md`](../openspec/changes/add-cost-service/specs/task-cost-ingest/spec.md)。
+
 ## 集成测试
 
 `make test-integration` 用 testcontainers 启 PostgreSQL 18.4，跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。

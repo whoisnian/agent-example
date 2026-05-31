@@ -35,6 +35,14 @@ type Metrics struct {
 	EventStatusTransitionsTotal prometheus.Counter
 	EventIngestMalformedTotal   prometheus.Counter
 	EventConsumerConnected      prometheus.Gauge
+
+	// Cost-ingest / settlement metrics (add-cost-service §"Observability Metrics")
+	CostEventsConsumedTotal        *prometheus.CounterVec
+	CostEventsSettledTotal         *prometheus.CounterVec
+	CostPricingMissingTotal        *prometheus.CounterVec
+	CostAmountSettledUSDTotal      prometheus.Counter
+	CostEventSettleDurationSeconds prometheus.Histogram
+	CostConsumerConnected          prometheus.Gauge
 }
 
 // NewMetrics builds the registry and every collector.
@@ -126,6 +134,40 @@ func NewMetrics() *Metrics {
 			Name: "event_consumer_connected",
 			Help: "1 when the task-events consumer is subscribed, else 0.",
 		}),
+		CostEventsConsumedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cost_events_consumed_total",
+				Help: "Worker cost events received by the Cost Service, labelled by kind.",
+			},
+			[]string{"kind"},
+		),
+		CostEventsSettledTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cost_events_settled_total",
+				Help: "Cost events settled by the Cost Service. result: ok|missing_pricing|duplicate|error.",
+			},
+			[]string{"kind", "result"},
+		),
+		CostPricingMissingTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "cost_pricing_missing_total",
+				Help: "Cost events whose (kind, resource_name) had no pricing row at occurred_at — settled with amount_usd=0 and pricing_id NULL.",
+			},
+			[]string{"kind", "resource"},
+		),
+		CostAmountSettledUSDTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "cost_amount_settled_usd_total",
+			Help: "Cumulative USD amount across successfully settled cost events (best-effort float64; exact value lives in DB).",
+		}),
+		CostEventSettleDurationSeconds: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Name:    "cost_event_settle_duration_seconds",
+			Help:    "End-to-end per-delivery settlement latency (pricing lookup + tx).",
+			Buckets: prometheus.DefBuckets,
+		}),
+		CostConsumerConnected: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "cost_consumer_connected",
+			Help: "1 when the cost-events consumer is subscribed, else 0. Independent of event_consumer_connected.",
+		}),
 	}
 
 	reg.MustRegister(
@@ -144,6 +186,12 @@ func NewMetrics() *Metrics {
 		m.EventStatusTransitionsTotal,
 		m.EventIngestMalformedTotal,
 		m.EventConsumerConnected,
+		m.CostEventsConsumedTotal,
+		m.CostEventsSettledTotal,
+		m.CostPricingMissingTotal,
+		m.CostAmountSettledUSDTotal,
+		m.CostEventSettleDurationSeconds,
+		m.CostConsumerConnected,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

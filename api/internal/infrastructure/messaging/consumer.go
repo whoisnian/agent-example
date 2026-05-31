@@ -6,9 +6,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	amqp "github.com/rabbitmq/amqp091-go"
-
-	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
 
 // DeliveryHandler processes a single delivery. It owns the ack/nack decision
@@ -24,37 +23,41 @@ type DeliveryHandler func(ctx context.Context, d amqp.Delivery) error
 //
 // The Run/Stop shape mirrors the Relayer (atomic.Bool + ctx).
 type Consumer struct {
-	conn      *Connection
-	queue     string
-	prefetch  int
-	handler   DeliveryHandler
-	logger    *slog.Logger
-	connected *atomic.Bool // mirrors the EventConsumerConnected gauge
-	metrics   *observability.Metrics
+	conn           *Connection
+	queue          string
+	prefetch       int
+	handler        DeliveryHandler
+	logger         *slog.Logger
+	connected      *atomic.Bool
+	connectedGauge prometheus.Gauge // per-queue: avoids two consumers sharing one gauge
 
 	stopped atomic.Bool
 }
 
 // NewConsumer builds a Consumer. prefetch <= 0 falls back to 1.
+//
+// The connectedGauge is per-queue so multiple consumers (e.g. event-ingest +
+// cost-ingest) each drive their own connection-state gauge; a nil gauge
+// disables that signal entirely (useful in tests).
 func NewConsumer(
 	conn *Connection,
 	queue string,
 	prefetch int,
 	handler DeliveryHandler,
 	logger *slog.Logger,
-	m *observability.Metrics,
+	connectedGauge prometheus.Gauge,
 ) *Consumer {
 	if prefetch <= 0 {
 		prefetch = 1
 	}
 	return &Consumer{
-		conn:      conn,
-		queue:     queue,
-		prefetch:  prefetch,
-		handler:   handler,
-		logger:    logger,
-		connected: &atomic.Bool{},
-		metrics:   m,
+		conn:           conn,
+		queue:          queue,
+		prefetch:       prefetch,
+		handler:        handler,
+		logger:         logger,
+		connected:      &atomic.Bool{},
+		connectedGauge: connectedGauge,
 	}
 }
 
@@ -155,12 +158,12 @@ func (c *Consumer) subscribeAndServe(ctx context.Context) error {
 
 func (c *Consumer) setConnected(v bool) {
 	c.connected.Store(v)
-	if c.metrics == nil {
+	if c.connectedGauge == nil {
 		return
 	}
 	if v {
-		c.metrics.EventConsumerConnected.Set(1)
+		c.connectedGauge.Set(1)
 	} else {
-		c.metrics.EventConsumerConnected.Set(0)
+		c.connectedGauge.Set(0)
 	}
 }
