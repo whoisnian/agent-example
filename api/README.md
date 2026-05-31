@@ -170,6 +170,29 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 
 请求/响应契约见 [`openspec/specs/task-cost-ingest/spec.md`](../openspec/changes/add-cost-service/specs/task-cost-ingest/spec.md)。
 
+## 任务成本端点（`task-cost-api`）
+
+`add-task-cost-api` 在 `add-task-read-api` 之后再添四个只读端点，覆盖 ARCHITECTURE §5.1 的成本查询面。响应继续走统一 `{code, message, data, trace_id}` 信封；任务/版本未拥有时返回 `404 task_not_found` / `version_not_found`（不返回 `403`，不泄露存在性）。
+
+| 方法 | 路径 | 查询参数 | 说明 |
+|------|------|----------|------|
+| `GET` | `/api/v1/tasks/{task_id}/cost` | — | 任务级聚合 + 按版本拆分，`data = {task_id, total, by_version}`；尚未结算事件的版本以零成本出现（LEFT JOIN）。 |
+| `GET` | `/api/v1/versions/{version_id}/cost` | — | 单版本成本 + 归属 `task_id`，`data = {version_id, task_id, version_no, cost, updated_at}`；尚无 `task_costs` 行时 `updated_at = null` 且金额恒零。 |
+| `GET` | `/api/v1/me/cost` | `from`、`to`、`group_by ∈ {day, task_type, model}` | 无 `group_by` 时返回 `data = {total}`；有时返回 `data = {group_by, items[]}`，`key` 升序。 |
+| `GET` | `/api/v1/pricing` | — | 当前生效价格表，按 `(resource_kind, resource_name, unit)` 升序，`data = {items[]}`。**owner-agnostic**：所有调用者看到相同响应；只读，价格变更走 SQL 加新行（AGENTS.md §6）。 |
+
+要点：
+
+- **金额一律为十进制字符串**（如 `"1.72000000"`、`"0.01500000"`），保留 8 位小数，沿用 `numericToDecimalString`，避免 `float64` 丢精度。`amount_usd`、`unit_price_usd` 都是字符串。
+- **`/me/cost` 数据源是 `cost_events`**（不是 `task_costs`），按 `occurred_at` 过滤（事件时间，而非结算时间——避免回填事件落到错误的桶里）。逐列 SQL 镜像 cost-ingest 的 per-kind 聚合：`tool_calls = SUM(COALESCE(calls,1)) FILTER (kind='tool')`、`wall_time_ms = SUM(COALESCE(duration_ms,0)) FILTER (kind IN ('llm','tool'))`，`amount_usd` 跨 kind 全部累加。`amount_usd` 与 `task_costs` 的总和按位重合（Cost Service 单一事务写两边）。
+- **`day` 桶 UTC 锚定**：SQL 用 PG16+ 三参数 `date_trunc('day', occurred_at, 'UTC')`，桶边界不受连接会话 `TimeZone` 影响。
+- **窗口规则**：`group_by` 存在时若 `from`/`to` 均缺省则默认 `to = now()`、`from = to - 30d`；`group_by` 存在时强制 `to - from ≤ 366d`（防止单次请求展开成上千个桶）。无 `group_by` 时窗口是 unbounded passthrough。`?group_by=`（空值）等同 absent，沿用 `task-read-api` 的 `status` 过滤约定。
+- **400 失败规则**：非法 `group_by`、非法 RFC3339 `from`/`to`、`from >= to`、`group_by` 下窗口超 366d 均返回 `400 invalid_input`，错误信封带 `data.field` 指明出错字段。
+- **跨 kind seq=1 不冲突**：由 cost-ingest 的 `(run_id, kind, seq)` 索引保证；本读取层不感知，但事件历史的形状会反映在 `/me/cost?group_by=model` 的桶上。
+- **/me/cost 空结果不 404**：返回 `data = {total: zeroCost()}`（无 `group_by`）或 `data = {group_by, items: []}`（有 `group_by`）。
+
+请求/响应契约见 [`openspec/specs/task-cost-api/spec.md`](../openspec/changes/add-task-cost-api/specs/task-cost-api/spec.md)。
+
 ## 集成测试
 
 `make test-integration` 用 testcontainers 启 PostgreSQL 18.4，跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。

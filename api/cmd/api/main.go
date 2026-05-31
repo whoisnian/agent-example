@@ -253,12 +253,22 @@ func runServer(args []string) int {
 		DevUserID:   devUser,
 	}
 
+	// Task-cost-api wiring (queries-only, shares the dev identity).
+	appCostReadSvc := apptask.NewCostReadService(taskdomain.NewCostReadService(queries))
+	taskCostHandlers := &httpapi.TaskCostHandlers{
+		App:         appCostReadSvc,
+		Logger:      logger,
+		DevTenantID: devTenant,
+		DevUserID:   devUser,
+	}
+
 	engine := httpapi.NewEngine(httpapi.ServerDeps{
 		Logger:           logger,
 		Metrics:          metrics,
 		Probes:           probes,
 		TaskHandlers:     taskHandlers,
 		TaskReadHandlers: taskReadHandlers,
+		TaskCostHandlers: taskCostHandlers,
 	})
 	server := httpapi.NewServer(cfg.HTTPAddr, engine, logger)
 

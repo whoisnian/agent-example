@@ -525,10 +525,10 @@ CREATE INDEX ON outbox (status, next_retry_at);
 | GET    | `/versions/{version_id}/artifacts` | 产物列表 |
 | GET    | `/artifacts/{id}/presign` | 取临时下载链接 |
 | POST   | `/uploads/sts` | 颁发 OSS 上传临时凭证 |
-| GET    | `/tasks/{task_id}/cost` | 任务累计成本（按版本展开 + 合计） |
-| GET    | `/versions/{version_id}/cost` | 单版本成本（聚合 + 可选明细） |
-| GET    | `/me/cost?from=&to=&group_by=day\|task_type\|model` | 用户维度聚合成本 |
-| GET    | `/pricing` | 当前生效价格表（用于前端预估提示） |
+| GET    | `/tasks/{task_id}/cost` | 任务累计成本（按版本展开 + 合计） — capability `task-cost-api` |
+| GET    | `/versions/{version_id}/cost` | 单版本成本（聚合 + 可选明细） — capability `task-cost-api` |
+| GET    | `/me/cost?from=&to=&group_by=day\|task_type\|model` | 用户维度聚合成本 — capability `task-cost-api` |
+| GET    | `/pricing` | 当前生效价格表（用于前端预估提示） — capability `task-cost-api`，read-only |
 
 示例：
 
