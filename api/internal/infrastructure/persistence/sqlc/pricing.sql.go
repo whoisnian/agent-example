@@ -53,6 +53,45 @@ func (q *Queries) GetEffectivePricing(ctx context.Context, arg GetEffectivePrici
 	return i, err
 }
 
+const listCurrentPricing = `-- name: ListCurrentPricing :many
+SELECT id, resource_kind, resource_name, unit, unit_price_usd, effective_at, expires_at
+FROM pricing
+WHERE effective_at <= now()
+  AND (expires_at IS NULL OR expires_at > now())
+ORDER BY resource_kind, resource_name, unit
+`
+
+// All pricing rows in force at now() — the source for GET /api/v1/pricing.
+// Owner-agnostic; every authenticated caller receives the same body.
+// Ordering is stable so JSON byte-identity across callers holds (S15 test).
+func (q *Queries) ListCurrentPricing(ctx context.Context) ([]Pricing, error) {
+	rows, err := q.db.Query(ctx, listCurrentPricing)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Pricing
+	for rows.Next() {
+		var i Pricing
+		if err := rows.Scan(
+			&i.ID,
+			&i.ResourceKind,
+			&i.ResourceName,
+			&i.Unit,
+			&i.UnitPriceUsd,
+			&i.EffectiveAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEffectivePricings = `-- name: ListEffectivePricings :many
 SELECT id, resource_kind, resource_name, unit, unit_price_usd, effective_at, expires_at
 FROM pricing

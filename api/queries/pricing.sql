@@ -12,6 +12,16 @@ WHERE resource_kind = $1
 ORDER BY effective_at DESC
 LIMIT 1;
 
+-- name: ListCurrentPricing :many
+-- All pricing rows in force at now() — the source for GET /api/v1/pricing.
+-- Owner-agnostic; every authenticated caller receives the same body.
+-- Ordering is stable so JSON byte-identity across callers holds (S15 test).
+SELECT *
+FROM pricing
+WHERE effective_at <= now()
+  AND (expires_at IS NULL OR expires_at > now())
+ORDER BY resource_kind, resource_name, unit;
+
 -- name: ListEffectivePricings :many
 -- Returns every pricing row for (resource_kind, resource_name) whose
 -- effective window covers $3 (occurred_at), across all units. The Cost

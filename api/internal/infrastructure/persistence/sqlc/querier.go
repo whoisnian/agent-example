@@ -45,6 +45,14 @@ type Querier interface {
 	// aggregated values (zeros when no rows match — COALESCE keeps the API
 	// caller from special-casing NULLs).
 	GetTaskCost(ctx context.Context, taskID pgtype.UUID) (GetTaskCostRow, error)
+	// Task-level totals scoped to an owner. Drives FROM tasks (not task_costs)
+	// and LEFT JOINs the cost rows so an owned-but-empty task — one with no
+	// versions / no settled events yet — still returns a 1-row zero-aggregate.
+	// An unknown OR unowned task_id returns no rows; the caller maps pgx.ErrNoRows
+	// to ErrTaskNotFound (identical 404 regardless of cause). GROUP BY t.id is
+	// load-bearing: without it the aggregate would always return 1 row with zero
+	// sums regardless of the WHERE — breaking the owner check.
+	GetTaskCostWithOwner(ctx context.Context, arg GetTaskCostWithOwnerParams) (GetTaskCostWithOwnerRow, error)
 	GetTaskRunByID(ctx context.Context, id pgtype.UUID) (TaskRun, error)
 	GetTaskVersionByID(ctx context.Context, id pgtype.UUID) (TaskVersion, error)
 	// Look up a specific version inside a task. Used to validate that an
@@ -54,12 +62,35 @@ type Querier interface {
 	// One row per version. Returns no rows if the Cost Service hasn't yet
 	// upserted anything for the version (treat as "0 across the board").
 	GetVersionCost(ctx context.Context, versionID pgtype.UUID) (TaskCost, error)
+	// Single-version cost lookup with owner check + owning task_id for
+	// deep-linking. Drives FROM task_versions, JOIN tasks for the owner
+	// predicate, LEFT JOIN task_costs so versions with no settled events
+	// still return a row (cost columns NULL → mapper zero-fills, updated_at
+	// NULL becomes null in JSON). Unknown / unowned returns no rows;
+	// caller maps to ErrVersionNotFound.
+	GetVersionCostWithOwner(ctx context.Context, arg GetVersionCostWithOwnerParams) (GetVersionCostWithOwnerRow, error)
 	// Narrow lookup returning just the version's owning task_id. Used by the
 	// Cost Service to verify a worker-supplied (task_id, version_id) before
 	// the task_costs UPSERT, enforcing task-cost-data-model §"Task Costs
 	// task_id is Immutable Per version_id". Returns no rows if version_id is
 	// unknown (caller treats as DLQ-permanent).
 	GetVersionOwnerTaskID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
+	// Caller-scoped grouped rollups for /me/cost. Split into three queries
+	// (instead of one with `CASE sqlc.arg('group_by')`) because sqlc infers
+	// the CASE-expression result as `interface{}` — design D5 contingency
+	// triggered. Each query is otherwise identical in shape to SumOwnerCosts
+	// and emits a stable `string` key. ORDER BY key ASC keeps client
+	// rendering deterministic without a second sort.
+	// Day bucket; the PG16+ three-arg date_trunc pins UTC so the boundary
+	// doesn't drift with the connection's session TimeZone.
+	GroupOwnerCostsByDay(ctx context.Context, arg GroupOwnerCostsByDayParams) ([]GroupOwnerCostsByDayRow, error)
+	// Group by model. Llm events bucket by resource_name; tool/compute events
+	// collapse into a single 'other' bucket so the amount_usd sum still
+	// reconciles with SumOwnerCosts.
+	GroupOwnerCostsByModel(ctx context.Context, arg GroupOwnerCostsByModelParams) ([]GroupOwnerCostsByModelRow, error)
+	// Group by tasks.task_type. NULL is impossible (task_type is NOT NULL) so
+	// no COALESCE needed.
+	GroupOwnerCostsByTaskType(ctx context.Context, arg GroupOwnerCostsByTaskTypeParams) ([]GroupOwnerCostsByTaskTypeRow, error)
 	// Records a publish failure: bumps attempts and schedules a retry at next_retry_at.
 	IncrementOutboxAttempt(ctx context.Context, arg IncrementOutboxAttemptParams) error
 	// Idempotent insert keyed on (run_id, kind, seq) — the uniqueness boundary
@@ -79,6 +110,10 @@ type Querier interface {
 	// on Worker retries are silently dropped.
 	InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) error
 	ListArtifactsByVersion(ctx context.Context, versionID pgtype.UUID) ([]Artifact, error)
+	// All pricing rows in force at now() — the source for GET /api/v1/pricing.
+	// Owner-agnostic; every authenticated caller receives the same body.
+	// Ordering is stable so JSON byte-identity across callers holds (S15 test).
+	ListCurrentPricing(ctx context.Context) ([]Pricing, error)
 	// Returns every pricing row for (resource_kind, resource_name) whose
 	// effective window covers $3 (occurred_at), across all units. The Cost
 	// Service picks at most one row per `unit` in Go — the row with the latest
@@ -108,6 +143,13 @@ type Querier interface {
 	// tree (avoids a per-node GetVersionCost N+1). Versions without a row are
 	// zero-filled by the caller. Covered by the task_costs (task_id) index.
 	ListVersionCostsByTask(ctx context.Context, taskID pgtype.UUID) ([]TaskCost, error)
+	// Per-version breakdown for /tasks/{id}/cost. Drives FROM task_versions
+	// (LEFT JOIN task_costs) so a version whose Cost Service has nothing to
+	// UPSERT yet still appears in the breakdown with the cost columns as NULL
+	// (the caller zero-fills). Ownership predicate goes through tasks. Orders
+	// by version_no ASC so the breakdown renders chronologically without a
+	// second sort on the client.
+	ListVersionCostsForTask(ctx context.Context, arg ListVersionCostsForTaskParams) ([]ListVersionCostsForTaskRow, error)
 	// Version-scoped event backfill for the HTTP replay endpoint. Anchors on the
 	// existing (task_id, id) index (task_id equality + id range) and filters
 	// version_id as a residual predicate, so no new index is required. The caller
@@ -133,6 +175,18 @@ type Querier interface {
 	// The highest-step_seq checkpoint for a run, or zero rows if none. Workers
 	// use this on resume to find the resume point.
 	SelectLatestCheckpoint(ctx context.Context, runID pgtype.UUID) (TaskCheckpoint, error)
+	// Caller-scoped totals for /me/cost (no group_by branch). Aggregates
+	// cost_events directly so the time filter applies to occurred_at — settle-
+	// time would corrupt buckets when a backfill lands. Per-column FILTER
+	// clauses mirror the cost-ingest per-kind mapping so the resulting
+	// CostSummary shape matches task_costs' semantics:
+	//   * tool_calls bumps only for kind='tool' (NULL→1 default per worker contract)
+	//   * wall_time_ms bumps for kind IN ('llm','tool') (compute events have
+	//     their own aggregate, but CostSummary doesn't surface compute_seconds)
+	//   * token columns are plain SUM (NULL contributes 0)
+	// The inner JOIN to tasks is the owner gate AND defense-in-depth against
+	// orphaned cost_events.task_id rows (no FK on that column).
+	SumOwnerCosts(ctx context.Context, arg SumOwnerCostsParams) (SumOwnerCostsRow, error)
 	// Points `tasks.current_version` at the new version and stamps the task back
 	// to `pending`. Called by the iterate transaction after `createActiveVersion`
 	// succeeds.

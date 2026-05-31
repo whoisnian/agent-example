@@ -55,6 +55,62 @@ func (q *Queries) GetTaskCost(ctx context.Context, taskID pgtype.UUID) (GetTaskC
 	return i, err
 }
 
+const getTaskCostWithOwner = `-- name: GetTaskCostWithOwner :one
+SELECT
+    t.id                                                                            AS task_id,
+    COALESCE(SUM(tc.input_tokens), 0)::bigint                                       AS input_tokens,
+    COALESCE(SUM(tc.output_tokens), 0)::bigint                                      AS output_tokens,
+    COALESCE(SUM(tc.cached_tokens), 0)::bigint                                      AS cached_tokens,
+    COALESCE(SUM(tc.tool_calls), 0)::int                                            AS tool_calls,
+    COALESCE(SUM(tc.wall_time_ms), 0)::bigint                                       AS wall_time_ms,
+    COALESCE(SUM(tc.compute_seconds), 0)::bigint                                    AS compute_seconds,
+    COALESCE(SUM(tc.amount_usd), 0)::numeric                                        AS amount_usd
+FROM tasks t
+LEFT JOIN task_costs tc ON tc.task_id = t.id
+WHERE t.id = $1 AND t.tenant_id = $2 AND t.user_id = $3
+GROUP BY t.id
+`
+
+type GetTaskCostWithOwnerParams struct {
+	ID       pgtype.UUID `json:"id"`
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+type GetTaskCostWithOwnerRow struct {
+	TaskID         pgtype.UUID    `json:"task_id"`
+	InputTokens    int64          `json:"input_tokens"`
+	OutputTokens   int64          `json:"output_tokens"`
+	CachedTokens   int64          `json:"cached_tokens"`
+	ToolCalls      int32          `json:"tool_calls"`
+	WallTimeMs     int64          `json:"wall_time_ms"`
+	ComputeSeconds int64          `json:"compute_seconds"`
+	AmountUsd      pgtype.Numeric `json:"amount_usd"`
+}
+
+// Task-level totals scoped to an owner. Drives FROM tasks (not task_costs)
+// and LEFT JOINs the cost rows so an owned-but-empty task — one with no
+// versions / no settled events yet — still returns a 1-row zero-aggregate.
+// An unknown OR unowned task_id returns no rows; the caller maps pgx.ErrNoRows
+// to ErrTaskNotFound (identical 404 regardless of cause). GROUP BY t.id is
+// load-bearing: without it the aggregate would always return 1 row with zero
+// sums regardless of the WHERE — breaking the owner check.
+func (q *Queries) GetTaskCostWithOwner(ctx context.Context, arg GetTaskCostWithOwnerParams) (GetTaskCostWithOwnerRow, error) {
+	row := q.db.QueryRow(ctx, getTaskCostWithOwner, arg.ID, arg.TenantID, arg.UserID)
+	var i GetTaskCostWithOwnerRow
+	err := row.Scan(
+		&i.TaskID,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CachedTokens,
+		&i.ToolCalls,
+		&i.WallTimeMs,
+		&i.ComputeSeconds,
+		&i.AmountUsd,
+	)
+	return i, err
+}
+
 const getVersionCost = `-- name: GetVersionCost :one
 SELECT version_id, task_id, input_tokens, output_tokens, cached_tokens, tool_calls, wall_time_ms, compute_seconds, amount_usd, updated_at
 FROM task_costs
@@ -79,6 +135,291 @@ func (q *Queries) GetVersionCost(ctx context.Context, versionID pgtype.UUID) (Ta
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getVersionCostWithOwner = `-- name: GetVersionCostWithOwner :one
+SELECT
+    v.id                AS version_id,
+    v.task_id,
+    v.version_no,
+    tc.input_tokens,
+    tc.output_tokens,
+    tc.cached_tokens,
+    tc.tool_calls,
+    tc.wall_time_ms,
+    tc.compute_seconds,
+    tc.amount_usd,
+    tc.updated_at
+FROM task_versions v
+JOIN tasks t ON t.id = v.task_id
+LEFT JOIN task_costs tc ON tc.version_id = v.id
+WHERE v.id = $1 AND t.tenant_id = $2 AND t.user_id = $3
+`
+
+type GetVersionCostWithOwnerParams struct {
+	ID       pgtype.UUID `json:"id"`
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+type GetVersionCostWithOwnerRow struct {
+	VersionID      pgtype.UUID        `json:"version_id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	VersionNo      int32              `json:"version_no"`
+	InputTokens    *int64             `json:"input_tokens"`
+	OutputTokens   *int64             `json:"output_tokens"`
+	CachedTokens   *int64             `json:"cached_tokens"`
+	ToolCalls      *int32             `json:"tool_calls"`
+	WallTimeMs     *int64             `json:"wall_time_ms"`
+	ComputeSeconds *int64             `json:"compute_seconds"`
+	AmountUsd      pgtype.Numeric     `json:"amount_usd"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Single-version cost lookup with owner check + owning task_id for
+// deep-linking. Drives FROM task_versions, JOIN tasks for the owner
+// predicate, LEFT JOIN task_costs so versions with no settled events
+// still return a row (cost columns NULL → mapper zero-fills, updated_at
+// NULL becomes null in JSON). Unknown / unowned returns no rows;
+// caller maps to ErrVersionNotFound.
+func (q *Queries) GetVersionCostWithOwner(ctx context.Context, arg GetVersionCostWithOwnerParams) (GetVersionCostWithOwnerRow, error) {
+	row := q.db.QueryRow(ctx, getVersionCostWithOwner, arg.ID, arg.TenantID, arg.UserID)
+	var i GetVersionCostWithOwnerRow
+	err := row.Scan(
+		&i.VersionID,
+		&i.TaskID,
+		&i.VersionNo,
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CachedTokens,
+		&i.ToolCalls,
+		&i.WallTimeMs,
+		&i.ComputeSeconds,
+		&i.AmountUsd,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const groupOwnerCostsByDay = `-- name: GroupOwnerCostsByDay :many
+
+SELECT
+    to_char(date_trunc('day', ce.occurred_at, 'UTC'), 'YYYY-MM-DD')::text           AS key,
+    COALESCE(SUM(ce.input_tokens), 0)::bigint                                       AS input_tokens,
+    COALESCE(SUM(ce.output_tokens), 0)::bigint                                      AS output_tokens,
+    COALESCE(SUM(ce.cached_tokens), 0)::bigint                                      AS cached_tokens,
+    COALESCE(SUM(COALESCE(ce.calls, 1)) FILTER (WHERE ce.kind = 'tool'), 0)::int    AS tool_calls,
+    COALESCE(SUM(COALESCE(ce.duration_ms, 0)) FILTER (WHERE ce.kind IN ('llm','tool')), 0)::bigint AS wall_time_ms,
+    COALESCE(SUM(ce.amount_usd), 0)::numeric                                        AS amount_usd
+FROM cost_events ce
+JOIN tasks t ON t.id = ce.task_id
+WHERE t.tenant_id = $1
+  AND t.user_id   = $2
+  AND ($3::timestamptz IS NULL OR ce.occurred_at >= $3)
+  AND ($4::timestamptz   IS NULL OR ce.occurred_at <  $4)
+GROUP BY key
+ORDER BY key ASC
+`
+
+type GroupOwnerCostsByDayParams struct {
+	TenantID pgtype.UUID        `json:"tenant_id"`
+	UserID   pgtype.UUID        `json:"user_id"`
+	FromTs   pgtype.Timestamptz `json:"from_ts"`
+	ToTs     pgtype.Timestamptz `json:"to_ts"`
+}
+
+type GroupOwnerCostsByDayRow struct {
+	Key          string         `json:"key"`
+	InputTokens  int64          `json:"input_tokens"`
+	OutputTokens int64          `json:"output_tokens"`
+	CachedTokens int64          `json:"cached_tokens"`
+	ToolCalls    int32          `json:"tool_calls"`
+	WallTimeMs   int64          `json:"wall_time_ms"`
+	AmountUsd    pgtype.Numeric `json:"amount_usd"`
+}
+
+// Caller-scoped grouped rollups for /me/cost. Split into three queries
+// (instead of one with `CASE sqlc.arg('group_by')`) because sqlc infers
+// the CASE-expression result as `interface{}` — design D5 contingency
+// triggered. Each query is otherwise identical in shape to SumOwnerCosts
+// and emits a stable `string` key. ORDER BY key ASC keeps client
+// rendering deterministic without a second sort.
+// Day bucket; the PG16+ three-arg date_trunc pins UTC so the boundary
+// doesn't drift with the connection's session TimeZone.
+func (q *Queries) GroupOwnerCostsByDay(ctx context.Context, arg GroupOwnerCostsByDayParams) ([]GroupOwnerCostsByDayRow, error) {
+	rows, err := q.db.Query(ctx, groupOwnerCostsByDay,
+		arg.TenantID,
+		arg.UserID,
+		arg.FromTs,
+		arg.ToTs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GroupOwnerCostsByDayRow
+	for rows.Next() {
+		var i GroupOwnerCostsByDayRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.ToolCalls,
+			&i.WallTimeMs,
+			&i.AmountUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const groupOwnerCostsByModel = `-- name: GroupOwnerCostsByModel :many
+SELECT
+    CASE WHEN ce.kind = 'llm' THEN ce.resource_name ELSE 'other' END                AS key,
+    COALESCE(SUM(ce.input_tokens), 0)::bigint                                       AS input_tokens,
+    COALESCE(SUM(ce.output_tokens), 0)::bigint                                      AS output_tokens,
+    COALESCE(SUM(ce.cached_tokens), 0)::bigint                                      AS cached_tokens,
+    COALESCE(SUM(COALESCE(ce.calls, 1)) FILTER (WHERE ce.kind = 'tool'), 0)::int    AS tool_calls,
+    COALESCE(SUM(COALESCE(ce.duration_ms, 0)) FILTER (WHERE ce.kind IN ('llm','tool')), 0)::bigint AS wall_time_ms,
+    COALESCE(SUM(ce.amount_usd), 0)::numeric                                        AS amount_usd
+FROM cost_events ce
+JOIN tasks t ON t.id = ce.task_id
+WHERE t.tenant_id = $1
+  AND t.user_id   = $2
+  AND ($3::timestamptz IS NULL OR ce.occurred_at >= $3)
+  AND ($4::timestamptz   IS NULL OR ce.occurred_at <  $4)
+GROUP BY key
+ORDER BY key ASC
+`
+
+type GroupOwnerCostsByModelParams struct {
+	TenantID pgtype.UUID        `json:"tenant_id"`
+	UserID   pgtype.UUID        `json:"user_id"`
+	FromTs   pgtype.Timestamptz `json:"from_ts"`
+	ToTs     pgtype.Timestamptz `json:"to_ts"`
+}
+
+type GroupOwnerCostsByModelRow struct {
+	Key          string         `json:"key"`
+	InputTokens  int64          `json:"input_tokens"`
+	OutputTokens int64          `json:"output_tokens"`
+	CachedTokens int64          `json:"cached_tokens"`
+	ToolCalls    int32          `json:"tool_calls"`
+	WallTimeMs   int64          `json:"wall_time_ms"`
+	AmountUsd    pgtype.Numeric `json:"amount_usd"`
+}
+
+// Group by model. Llm events bucket by resource_name; tool/compute events
+// collapse into a single 'other' bucket so the amount_usd sum still
+// reconciles with SumOwnerCosts.
+func (q *Queries) GroupOwnerCostsByModel(ctx context.Context, arg GroupOwnerCostsByModelParams) ([]GroupOwnerCostsByModelRow, error) {
+	rows, err := q.db.Query(ctx, groupOwnerCostsByModel,
+		arg.TenantID,
+		arg.UserID,
+		arg.FromTs,
+		arg.ToTs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GroupOwnerCostsByModelRow
+	for rows.Next() {
+		var i GroupOwnerCostsByModelRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.ToolCalls,
+			&i.WallTimeMs,
+			&i.AmountUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const groupOwnerCostsByTaskType = `-- name: GroupOwnerCostsByTaskType :many
+SELECT
+    t.task_type                                                                     AS key,
+    COALESCE(SUM(ce.input_tokens), 0)::bigint                                       AS input_tokens,
+    COALESCE(SUM(ce.output_tokens), 0)::bigint                                      AS output_tokens,
+    COALESCE(SUM(ce.cached_tokens), 0)::bigint                                      AS cached_tokens,
+    COALESCE(SUM(COALESCE(ce.calls, 1)) FILTER (WHERE ce.kind = 'tool'), 0)::int    AS tool_calls,
+    COALESCE(SUM(COALESCE(ce.duration_ms, 0)) FILTER (WHERE ce.kind IN ('llm','tool')), 0)::bigint AS wall_time_ms,
+    COALESCE(SUM(ce.amount_usd), 0)::numeric                                        AS amount_usd
+FROM cost_events ce
+JOIN tasks t ON t.id = ce.task_id
+WHERE t.tenant_id = $1
+  AND t.user_id   = $2
+  AND ($3::timestamptz IS NULL OR ce.occurred_at >= $3)
+  AND ($4::timestamptz   IS NULL OR ce.occurred_at <  $4)
+GROUP BY key
+ORDER BY key ASC
+`
+
+type GroupOwnerCostsByTaskTypeParams struct {
+	TenantID pgtype.UUID        `json:"tenant_id"`
+	UserID   pgtype.UUID        `json:"user_id"`
+	FromTs   pgtype.Timestamptz `json:"from_ts"`
+	ToTs     pgtype.Timestamptz `json:"to_ts"`
+}
+
+type GroupOwnerCostsByTaskTypeRow struct {
+	Key          string         `json:"key"`
+	InputTokens  int64          `json:"input_tokens"`
+	OutputTokens int64          `json:"output_tokens"`
+	CachedTokens int64          `json:"cached_tokens"`
+	ToolCalls    int32          `json:"tool_calls"`
+	WallTimeMs   int64          `json:"wall_time_ms"`
+	AmountUsd    pgtype.Numeric `json:"amount_usd"`
+}
+
+// Group by tasks.task_type. NULL is impossible (task_type is NOT NULL) so
+// no COALESCE needed.
+func (q *Queries) GroupOwnerCostsByTaskType(ctx context.Context, arg GroupOwnerCostsByTaskTypeParams) ([]GroupOwnerCostsByTaskTypeRow, error) {
+	rows, err := q.db.Query(ctx, groupOwnerCostsByTaskType,
+		arg.TenantID,
+		arg.UserID,
+		arg.FromTs,
+		arg.ToTs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GroupOwnerCostsByTaskTypeRow
+	for rows.Next() {
+		var i GroupOwnerCostsByTaskTypeRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.ToolCalls,
+			&i.WallTimeMs,
+			&i.AmountUsd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listTaskCostsByTasks = `-- name: ListTaskCostsByTasks :many
@@ -177,6 +518,147 @@ func (q *Queries) ListVersionCostsByTask(ctx context.Context, taskID pgtype.UUID
 		return nil, err
 	}
 	return items, nil
+}
+
+const listVersionCostsForTask = `-- name: ListVersionCostsForTask :many
+SELECT
+    v.id                AS version_id,
+    v.version_no,
+    v.created_at,
+    tc.input_tokens,
+    tc.output_tokens,
+    tc.cached_tokens,
+    tc.tool_calls,
+    tc.wall_time_ms,
+    tc.compute_seconds,
+    tc.amount_usd,
+    tc.updated_at
+FROM task_versions v
+JOIN tasks t ON t.id = v.task_id
+LEFT JOIN task_costs tc ON tc.version_id = v.id
+WHERE v.task_id = $1 AND t.tenant_id = $2 AND t.user_id = $3
+ORDER BY v.version_no ASC
+`
+
+type ListVersionCostsForTaskParams struct {
+	TaskID   pgtype.UUID `json:"task_id"`
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+type ListVersionCostsForTaskRow struct {
+	VersionID      pgtype.UUID        `json:"version_id"`
+	VersionNo      int32              `json:"version_no"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	InputTokens    *int64             `json:"input_tokens"`
+	OutputTokens   *int64             `json:"output_tokens"`
+	CachedTokens   *int64             `json:"cached_tokens"`
+	ToolCalls      *int32             `json:"tool_calls"`
+	WallTimeMs     *int64             `json:"wall_time_ms"`
+	ComputeSeconds *int64             `json:"compute_seconds"`
+	AmountUsd      pgtype.Numeric     `json:"amount_usd"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Per-version breakdown for /tasks/{id}/cost. Drives FROM task_versions
+// (LEFT JOIN task_costs) so a version whose Cost Service has nothing to
+// UPSERT yet still appears in the breakdown with the cost columns as NULL
+// (the caller zero-fills). Ownership predicate goes through tasks. Orders
+// by version_no ASC so the breakdown renders chronologically without a
+// second sort on the client.
+func (q *Queries) ListVersionCostsForTask(ctx context.Context, arg ListVersionCostsForTaskParams) ([]ListVersionCostsForTaskRow, error) {
+	rows, err := q.db.Query(ctx, listVersionCostsForTask, arg.TaskID, arg.TenantID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVersionCostsForTaskRow
+	for rows.Next() {
+		var i ListVersionCostsForTaskRow
+		if err := rows.Scan(
+			&i.VersionID,
+			&i.VersionNo,
+			&i.CreatedAt,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CachedTokens,
+			&i.ToolCalls,
+			&i.WallTimeMs,
+			&i.ComputeSeconds,
+			&i.AmountUsd,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const sumOwnerCosts = `-- name: SumOwnerCosts :one
+SELECT
+    COALESCE(SUM(ce.input_tokens), 0)::bigint                                       AS input_tokens,
+    COALESCE(SUM(ce.output_tokens), 0)::bigint                                      AS output_tokens,
+    COALESCE(SUM(ce.cached_tokens), 0)::bigint                                      AS cached_tokens,
+    COALESCE(SUM(COALESCE(ce.calls, 1)) FILTER (WHERE ce.kind = 'tool'), 0)::int    AS tool_calls,
+    COALESCE(SUM(COALESCE(ce.duration_ms, 0)) FILTER (WHERE ce.kind IN ('llm','tool')), 0)::bigint AS wall_time_ms,
+    COALESCE(SUM(ce.amount_usd), 0)::numeric                                        AS amount_usd
+FROM cost_events ce
+JOIN tasks t ON t.id = ce.task_id
+WHERE t.tenant_id = $1
+  AND t.user_id   = $2
+  AND ($3::timestamptz IS NULL OR ce.occurred_at >= $3)
+  AND ($4::timestamptz   IS NULL OR ce.occurred_at <  $4)
+`
+
+type SumOwnerCostsParams struct {
+	TenantID pgtype.UUID        `json:"tenant_id"`
+	UserID   pgtype.UUID        `json:"user_id"`
+	FromTs   pgtype.Timestamptz `json:"from_ts"`
+	ToTs     pgtype.Timestamptz `json:"to_ts"`
+}
+
+type SumOwnerCostsRow struct {
+	InputTokens  int64          `json:"input_tokens"`
+	OutputTokens int64          `json:"output_tokens"`
+	CachedTokens int64          `json:"cached_tokens"`
+	ToolCalls    int32          `json:"tool_calls"`
+	WallTimeMs   int64          `json:"wall_time_ms"`
+	AmountUsd    pgtype.Numeric `json:"amount_usd"`
+}
+
+// Caller-scoped totals for /me/cost (no group_by branch). Aggregates
+// cost_events directly so the time filter applies to occurred_at — settle-
+// time would corrupt buckets when a backfill lands. Per-column FILTER
+// clauses mirror the cost-ingest per-kind mapping so the resulting
+// CostSummary shape matches task_costs' semantics:
+//   - tool_calls bumps only for kind='tool' (NULL→1 default per worker contract)
+//   - wall_time_ms bumps for kind IN ('llm','tool') (compute events have
+//     their own aggregate, but CostSummary doesn't surface compute_seconds)
+//   - token columns are plain SUM (NULL contributes 0)
+//
+// The inner JOIN to tasks is the owner gate AND defense-in-depth against
+// orphaned cost_events.task_id rows (no FK on that column).
+func (q *Queries) SumOwnerCosts(ctx context.Context, arg SumOwnerCostsParams) (SumOwnerCostsRow, error) {
+	row := q.db.QueryRow(ctx, sumOwnerCosts,
+		arg.TenantID,
+		arg.UserID,
+		arg.FromTs,
+		arg.ToTs,
+	)
+	var i SumOwnerCostsRow
+	err := row.Scan(
+		&i.InputTokens,
+		&i.OutputTokens,
+		&i.CachedTokens,
+		&i.ToolCalls,
+		&i.WallTimeMs,
+		&i.AmountUsd,
+	)
+	return i, err
 }
 
 const upsertVersionCost = `-- name: UpsertVersionCost :exec
