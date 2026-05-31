@@ -440,6 +440,7 @@ func (s *Service) createActiveVersion(
 		AggregateID: toPgUUID(versionID),
 		Topic:       topic,
 		Payload:     payload,
+		Exchange:    "task.exchange", // execute messages always route to the task exchange
 	}); err != nil {
 		return activeVersionResult{}, fmt.Errorf("insert outbox: %w", err)
 	}

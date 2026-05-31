@@ -14,6 +14,12 @@ import (
 // Per api-persistence spec, raw pgx access is permitted ONLY in the relayer
 // (this file) and the matching test fixtures. Everywhere else must go through
 // sqlc-generated code (see internal/infrastructure/persistence/sqlc/).
+//
+// `Exchange` was added by add-task-control-api migration 0006_outbox_exchange
+// so the relayer can publish each row to its destination exchange (per-row,
+// not per-instance). Reviewer S3 — this file is HAND-WRITTEN, not sqlc-
+// generated; the field must be added in three places: struct, SELECT list
+// in ScanPending, and the rows.Scan call.
 type OutboxRow struct {
 	ID           int64
 	Aggregate    string
@@ -24,6 +30,7 @@ type OutboxRow struct {
 	Attempts     int
 	NextRetryAt  *time.Time
 	CreatedAt    time.Time
+	Exchange     string
 }
 
 // OutboxStore is the relayer's persistence interface over outbox rows.
@@ -67,7 +74,7 @@ func (s *PgxOutboxStore) UnlockAdvisory(ctx context.Context, lockID int64) error
 // ScanPending fetches up to `limit` pending rows whose retry window has elapsed.
 func (s *PgxOutboxStore) ScanPending(ctx context.Context, limit int) ([]OutboxRow, error) {
 	const q = `
-		SELECT id, aggregate, aggregate_id, topic, payload, status, attempts, next_retry_at, created_at
+		SELECT id, aggregate, aggregate_id, topic, payload, status, attempts, next_retry_at, created_at, exchange
 		FROM outbox
 		WHERE status = 'pending'
 		  AND (next_retry_at IS NULL OR next_retry_at <= now())
@@ -82,7 +89,7 @@ func (s *PgxOutboxStore) ScanPending(ctx context.Context, limit int) ([]OutboxRo
 	var out []OutboxRow
 	for rows.Next() {
 		var r OutboxRow
-		if err := rows.Scan(&r.ID, &r.Aggregate, &r.AggregateID, &r.Topic, &r.Payload, &r.Status, &r.Attempts, &r.NextRetryAt, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Aggregate, &r.AggregateID, &r.Topic, &r.Payload, &r.Status, &r.Attempts, &r.NextRetryAt, &r.CreatedAt, &r.Exchange); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

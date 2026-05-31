@@ -43,9 +43,9 @@ func (q *Queries) IncrementOutboxAttempt(ctx context.Context, arg IncrementOutbo
 
 const insertOutbox = `-- name: InsertOutbox :one
 INSERT INTO outbox (
-    aggregate, aggregate_id, topic, payload
+    aggregate, aggregate_id, topic, payload, exchange
 ) VALUES (
-    $1, $2, $3, $4
+    $1, $2, $3, $4, $5
 )
 RETURNING id, status, created_at
 `
@@ -55,6 +55,7 @@ type InsertOutboxParams struct {
 	AggregateID pgtype.UUID `json:"aggregate_id"`
 	Topic       string      `json:"topic"`
 	Payload     []byte      `json:"payload"`
+	Exchange    string      `json:"exchange"`
 }
 
 type InsertOutboxRow struct {
@@ -65,14 +66,19 @@ type InsertOutboxRow struct {
 
 // Append a new outbox row inside the same transaction as the business write
 // it triggers. Returns id/status/created_at so the caller can correlate with
-// the publisher's metric output. Used by the task-write-api flow to enqueue
-// `execute.<task_type>.<lane>` messages.
+// the publisher's metric output.
+//
+// `exchange` was added by `add-task-control-api` so each row carries its
+// own destination exchange (the Relayer no longer keeps a constant).
+// Existing callers (createActiveVersion in domain/task/service.go) pass
+// `'task.exchange'` explicitly; control writers pass `'task.control'`.
 func (q *Queries) InsertOutbox(ctx context.Context, arg InsertOutboxParams) (InsertOutboxRow, error) {
 	row := q.db.QueryRow(ctx, insertOutbox,
 		arg.Aggregate,
 		arg.AggregateID,
 		arg.Topic,
 		arg.Payload,
+		arg.Exchange,
 	)
 	var i InsertOutboxRow
 	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
@@ -106,7 +112,7 @@ func (q *Queries) MarkOutboxSent(ctx context.Context, id int64) error {
 }
 
 const scanPendingOutbox = `-- name: ScanPendingOutbox :many
-SELECT id, aggregate, aggregate_id, topic, payload, status, attempts, next_retry_at, created_at
+SELECT id, aggregate, aggregate_id, topic, payload, status, attempts, next_retry_at, created_at, exchange
 FROM outbox
 WHERE status = 'pending'
   AND (next_retry_at IS NULL OR next_retry_at <= now())
@@ -135,6 +141,7 @@ func (q *Queries) ScanPendingOutbox(ctx context.Context, limit int32) ([]Outbox,
 			&i.Attempts,
 			&i.NextRetryAt,
 			&i.CreatedAt,
+			&i.Exchange,
 		); err != nil {
 			return nil, err
 		}

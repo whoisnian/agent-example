@@ -40,10 +40,26 @@ type binding struct {
 var (
 	exchanges = []exchangeDecl{
 		{ExchangeTask, "topic"},
-		{ExchangeControl, "direct"},
+		{ExchangeControl, "topic"}, // retyped from direct (add-task-control-api) so workers wildcard-bind by task_id
 		{ExchangeEvents, "topic"},
 		{ExchangeDLX, "direct"},
 		{ExchangeCost, "topic"},
+	}
+
+	// retypableExchanges names exchanges whose `kind` was changed by an
+	// OpenSpec change relative to their original declaration. `DeclareTopology`
+	// pre-deletes each before the declare loop so the broker's existing
+	// (potentially stale-type) entity is replaced cleanly without tripping the
+	// FAIL-FAST check.
+	//
+	// MUST be append-only across releases: once an exchange enters this list,
+	// future versions MUST keep its entry indefinitely. An operator rolling
+	// forward against a database whose corresponding exchange is still the
+	// OLD type (because they skipped this version) MUST still be able to
+	// recover. Removing entries silently regresses FAIL-FAST on stale envs.
+	// Reviewer S12 — bound in api-messaging spec.
+	retypableExchanges = []string{
+		ExchangeControl, // add-task-control-api: direct → topic
 	}
 
 	queues = []queueDecl{
@@ -57,6 +73,18 @@ var (
 // bindings. Per spec, queues are `quorum` type. The function fails fast on
 // incompatible existing entities so operators can spot drift early.
 func DeclareTopology(ch *amqp.Channel) error {
+	// Pre-delete any exchange whose type changed since its original declare.
+	// ExchangeDelete(name, ifUnused, noWait) — we pass ifUnused=false so the
+	// delete proceeds even if bindings exist, and noWait=false so the
+	// subsequent ExchangeDeclare sees a settled state. The amqp091-go API
+	// does NOT have an `ifEmpty` argument (that's queue-deletion semantics).
+	// Reviewer S2.
+	for _, name := range retypableExchanges {
+		if err := ch.ExchangeDelete(name, false /*ifUnused*/, false /*noWait*/); err != nil {
+			return fmt.Errorf("pre-delete exchange %s for retyping: %w", name, err)
+		}
+	}
+
 	// Exchanges: durable=true, autoDelete=false, internal=false.
 	for _, e := range exchanges {
 		if err := ch.ExchangeDeclare(e.name, e.kind, true, false, false, false, nil); err != nil {

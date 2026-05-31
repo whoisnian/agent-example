@@ -48,6 +48,7 @@ type Outbox struct {
 	Attempts    int32              `json:"attempts"`
 	NextRetryAt pgtype.Timestamptz `json:"next_retry_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	Exchange    string             `json:"exchange"`
 }
 
 type Pricing struct {

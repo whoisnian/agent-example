@@ -57,6 +57,30 @@ func (q *Queries) CreateTaskRun(ctx context.Context, arg CreateTaskRunParams) (T
 	return i, err
 }
 
+const getActiveRunIDForTask = `-- name: GetActiveRunIDForTask :one
+SELECT r.id
+FROM task_runs r
+JOIN tasks t ON t.current_version = r.version_id
+WHERE t.id = $1
+ORDER BY r.attempt_no DESC
+LIMIT 1
+`
+
+// Resolves the latest task_runs.id for the task's current version
+// (add-task-control-api). Returns no rows when current_version is NULL
+// or no attempts have been claimed yet (pre-claim state — the caller
+// writes the outbox row with run_id = null).
+//
+// "Latest" = highest attempt_no, NOT a status filter. A terminal run
+// (e.g. succeeded) may surface here; the worker is the authoritative
+// "is this run currently active in my process" filter. Reviewer S10.
+func (q *Queries) GetActiveRunIDForTask(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getActiveRunIDForTask, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const getRunByIdempotencyKey = `-- name: GetRunByIdempotencyKey :one
 SELECT id, version_id, attempt_no, worker_run_id, status, started_at, ended_at, last_heartbeat, error, idempotency_key
 FROM task_runs

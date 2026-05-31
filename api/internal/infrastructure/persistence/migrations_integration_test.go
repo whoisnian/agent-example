@@ -764,6 +764,103 @@ func TestSeedPricingDownPreservesReferencedRows(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 5.8 outbox.exchange column (0006_outbox_exchange) — add-task-control-api
+// ---------------------------------------------------------------------------
+
+func TestOutboxExchangeColumnPresent(t *testing.T) {
+	t.Parallel()
+	dsn := newPostgresContainer(t)
+	migrateUp(t, dsn)
+	conn := connect(t, dsn)
+	ctx := context.Background()
+
+	var colDefault string
+	if err := conn.QueryRow(ctx,
+		`SELECT column_default
+		 FROM information_schema.columns
+		 WHERE table_name = 'outbox' AND column_name = 'exchange'`,
+	).Scan(&colDefault); err != nil {
+		t.Fatalf("read outbox.exchange definition: %v", err)
+	}
+	// Postgres reports the default as a literal; both
+	// `'task.exchange'::text` and `'task.exchange'` are acceptable.
+	if !strings.Contains(colDefault, "task.exchange") {
+		t.Errorf("outbox.exchange default = %q, want to contain 'task.exchange'", colDefault)
+	}
+
+	// NOT NULL invariant.
+	var isNullable string
+	if err := conn.QueryRow(ctx,
+		`SELECT is_nullable
+		 FROM information_schema.columns
+		 WHERE table_name = 'outbox' AND column_name = 'exchange'`,
+	).Scan(&isNullable); err != nil {
+		t.Fatalf("read outbox.exchange nullability: %v", err)
+	}
+	if isNullable != "NO" {
+		t.Errorf("outbox.exchange is_nullable = %q, want NO", isNullable)
+	}
+}
+
+func TestOutboxExchangeDownIsNoOp(t *testing.T) {
+	t.Parallel()
+	dsn := newPostgresContainer(t)
+	migrateUp(t, dsn)
+	conn := connect(t, dsn)
+	ctx := context.Background()
+
+	// Insert a row carrying the new exchange so we can verify it survives
+	// down → up.
+	id := mustUUID(t)
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO outbox (aggregate, aggregate_id, topic, payload, exchange)
+		 VALUES ('task', $1, 'task.'||$1::text, '{}'::jsonb, 'task.control')`,
+		id,
+	); err != nil {
+		t.Fatalf("seed outbox row: %v", err)
+	}
+
+	// Down (one step) should be a no-op — the column stays, the row stays.
+	m, err := persistence.NewMigrator(migrationsDir(t), dsn)
+	if err != nil {
+		t.Fatalf("new migrator: %v", err)
+	}
+	defer func() { _ = m.Close() }()
+	if err := m.Down(); err != nil {
+		t.Fatalf("0006 down: %v", err)
+	}
+
+	var present int
+	if err := conn.QueryRow(ctx,
+		`SELECT 1 FROM information_schema.columns
+		 WHERE table_name = 'outbox' AND column_name = 'exchange'`,
+	).Scan(&present); err != nil {
+		t.Errorf("exchange column was dropped by down; expected no-op: %v", err)
+	}
+
+	// Row's exchange field survives unchanged.
+	var got string
+	if err := conn.QueryRow(ctx,
+		`SELECT exchange FROM outbox WHERE aggregate_id = $1`, id,
+	).Scan(&got); err != nil {
+		t.Errorf("seed row lost after 0006 down: %v", err)
+	} else if got != "task.control" {
+		t.Errorf("seed row.exchange = %q, want task.control (down should preserve)", got)
+	}
+
+	// dirty flag remains clean.
+	var dirty bool
+	if err := conn.QueryRow(ctx,
+		`SELECT dirty FROM schema_migrations`,
+	).Scan(&dirty); err != nil {
+		t.Fatalf("read schema_migrations: %v", err)
+	}
+	if dirty {
+		t.Errorf("schema_migrations.dirty = true after 0006 down")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
 

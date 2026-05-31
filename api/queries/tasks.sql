@@ -33,6 +33,19 @@ FROM tasks
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockTaskForControl :one
+-- Acquires a row-level lock AND verifies ownership in one round-trip
+-- (add-task-control-api). Concurrent control requests for the same task
+-- serialise on this lock; the second handler observes the first's tx
+-- outcome before reading task.status. Owner predicate is inline so
+-- unknown OR unowned tasks return no rows — the caller maps
+-- pgx.ErrNoRows to ErrTaskNotFound for the identical 404 regardless of
+-- cause (mirrors task-read-api / task-cost-api).
+SELECT id, status, current_version
+FROM tasks
+WHERE id = $1 AND tenant_id = $2 AND user_id = $3
+FOR UPDATE;
+
 -- name: UpdateTaskCurrentVersion :exec
 -- Points `tasks.current_version` at the new version and stamps the task back
 -- to `pending`. Called by the iterate transaction after `createActiveVersion`

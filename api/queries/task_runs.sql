@@ -27,3 +27,19 @@ SELECT *
 FROM task_runs
 WHERE version_id = $1
 ORDER BY attempt_no ASC;
+
+-- name: GetActiveRunIDForTask :one
+-- Resolves the latest task_runs.id for the task's current version
+-- (add-task-control-api). Returns no rows when current_version is NULL
+-- or no attempts have been claimed yet (pre-claim state — the caller
+-- writes the outbox row with run_id = null).
+--
+-- "Latest" = highest attempt_no, NOT a status filter. A terminal run
+-- (e.g. succeeded) may surface here; the worker is the authoritative
+-- "is this run currently active in my process" filter. Reviewer S10.
+SELECT r.id
+FROM task_runs r
+JOIN tasks t ON t.current_version = r.version_id
+WHERE t.id = $1
+ORDER BY r.attempt_no DESC
+LIMIT 1;

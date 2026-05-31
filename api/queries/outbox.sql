@@ -1,7 +1,7 @@
 -- name: ScanPendingOutbox :many
 -- Returns up to $1 pending rows whose next_retry_at has elapsed (or is unset),
 -- ordered by id for stable replay. Used by the Outbox Relayer scan step.
-SELECT id, aggregate, aggregate_id, topic, payload, status, attempts, next_retry_at, created_at
+SELECT id, aggregate, aggregate_id, topic, payload, status, attempts, next_retry_at, created_at, exchange
 FROM outbox
 WHERE status = 'pending'
   AND (next_retry_at IS NULL OR next_retry_at <= now())
@@ -36,11 +36,15 @@ SELECT count(*) FROM outbox WHERE status = 'pending';
 -- name: InsertOutbox :one
 -- Append a new outbox row inside the same transaction as the business write
 -- it triggers. Returns id/status/created_at so the caller can correlate with
--- the publisher's metric output. Used by the task-write-api flow to enqueue
--- `execute.<task_type>.<lane>` messages.
+-- the publisher's metric output.
+--
+-- `exchange` was added by `add-task-control-api` so each row carries its
+-- own destination exchange (the Relayer no longer keeps a constant).
+-- Existing callers (createActiveVersion in domain/task/service.go) pass
+-- `'task.exchange'` explicitly; control writers pass `'task.control'`.
 INSERT INTO outbox (
-    aggregate, aggregate_id, topic, payload
+    aggregate, aggregate_id, topic, payload, exchange
 ) VALUES (
-    $1, $2, $3, $4
+    $1, $2, $3, $4, $5
 )
 RETURNING id, status, created_at;

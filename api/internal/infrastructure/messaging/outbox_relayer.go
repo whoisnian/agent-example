@@ -29,15 +29,16 @@ type Relayer struct {
 	cfg       RelayerConfig
 	store     persistence.OutboxStore
 	publisher Publisher
-	exchange  string
 	logger    *slog.Logger
 	metrics   *observability.Metrics
 
 	stopped atomic.Bool
 }
 
-// NewRelayer constructs a Relayer. The default exchange is task.exchange; the
-// per-row routing key is taken from outbox.topic.
+// NewRelayer constructs a Relayer. Each outbox row carries its own destination
+// exchange in `outbox.exchange` (added by add-task-control-api migration
+// 0006_outbox_exchange); the relayer no longer holds an implicit constant.
+// The per-row routing key is still taken from outbox.topic.
 func NewRelayer(
 	cfg RelayerConfig,
 	store persistence.OutboxStore,
@@ -58,7 +59,6 @@ func NewRelayer(
 		cfg:       cfg,
 		store:     store,
 		publisher: pub,
-		exchange:  ExchangeTask,
 		logger:    logger,
 		metrics:   m,
 	}
@@ -135,7 +135,7 @@ func (r *Relayer) publishRow(ctx context.Context, row *persistence.OutboxRow) {
 		Payload:        row.Payload,
 		OccurredAt:     row.CreatedAt,
 	}
-	err := r.publisher.Publish(ctx, r.exchange, row.Topic, env)
+	err := r.publisher.Publish(ctx, row.Exchange, row.Topic, env)
 	if err == nil {
 		if uerr := r.store.MarkSent(ctx, row.ID); uerr != nil {
 			r.logger.Warn("outbox_mark_sent_failed",

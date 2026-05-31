@@ -30,6 +30,15 @@ type Querier interface {
 	// status raises SQLSTATE 23505 with that constraint name; callers translate
 	// the error to a 409 envelope (owned by add-task-create-api).
 	CreateTaskVersion(ctx context.Context, arg CreateTaskVersionParams) (TaskVersion, error)
+	// Resolves the latest task_runs.id for the task's current version
+	// (add-task-control-api). Returns no rows when current_version is NULL
+	// or no attempts have been claimed yet (pre-claim state — the caller
+	// writes the outbox row with run_id = null).
+	//
+	// "Latest" = highest attempt_no, NOT a status filter. A terminal run
+	// (e.g. succeeded) may surface here; the worker is the authoritative
+	// "is this run currently active in my process" filter. Reviewer S10.
+	GetActiveRunIDForTask(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	// Returns the (at most one) active version row for a task; used by the
 	// task-write-api 409 path to enrich the response envelope after the savepoint
 	// detects a mutex hit. The unique partial index `one_active_version_per_task`
@@ -103,8 +112,12 @@ type Querier interface {
 	InsertCostEvent(ctx context.Context, arg InsertCostEventParams) (InsertCostEventRow, error)
 	// Append a new outbox row inside the same transaction as the business write
 	// it triggers. Returns id/status/created_at so the caller can correlate with
-	// the publisher's metric output. Used by the task-write-api flow to enqueue
-	// `execute.<task_type>.<lane>` messages.
+	// the publisher's metric output.
+	//
+	// `exchange` was added by `add-task-control-api` so each row carries its
+	// own destination exchange (the Relayer no longer keeps a constant).
+	// Existing callers (createActiveVersion in domain/task/service.go) pass
+	// `'task.exchange'` explicitly; control writers pass `'task.control'`.
 	InsertOutbox(ctx context.Context, arg InsertOutboxParams) (InsertOutboxRow, error)
 	// Idempotent on (run_id, seq). Duplicate inserts from the Realtime Gateway
 	// on Worker retries are silently dropped.
@@ -158,6 +171,14 @@ type Querier interface {
 	// Returns all versions for a task ordered by version_no ascending so callers
 	// can rebuild the tree client-side.
 	ListVersionsByTask(ctx context.Context, taskID pgtype.UUID) ([]TaskVersion, error)
+	// Acquires a row-level lock AND verifies ownership in one round-trip
+	// (add-task-control-api). Concurrent control requests for the same task
+	// serialise on this lock; the second handler observes the first's tx
+	// outcome before reading task.status. Owner predicate is inline so
+	// unknown OR unowned tasks return no rows — the caller maps
+	// pgx.ErrNoRows to ErrTaskNotFound for the identical 404 regardless of
+	// cause (mirrors task-read-api / task-cost-api).
+	LockTaskForControl(ctx context.Context, arg LockTaskForControlParams) (LockTaskForControlRow, error)
 	// Acquires a row-level lock on a task and returns its id/status/current_version.
 	// Used by the iterate path so concurrent requests against the same task
 	// serialise behind one another inside the transaction.

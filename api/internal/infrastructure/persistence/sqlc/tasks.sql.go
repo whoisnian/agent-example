@@ -160,6 +160,39 @@ func (q *Queries) ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, e
 	return items, nil
 }
 
+const lockTaskForControl = `-- name: LockTaskForControl :one
+SELECT id, status, current_version
+FROM tasks
+WHERE id = $1 AND tenant_id = $2 AND user_id = $3
+FOR UPDATE
+`
+
+type LockTaskForControlParams struct {
+	ID       pgtype.UUID `json:"id"`
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+type LockTaskForControlRow struct {
+	ID             pgtype.UUID `json:"id"`
+	Status         string      `json:"status"`
+	CurrentVersion pgtype.UUID `json:"current_version"`
+}
+
+// Acquires a row-level lock AND verifies ownership in one round-trip
+// (add-task-control-api). Concurrent control requests for the same task
+// serialise on this lock; the second handler observes the first's tx
+// outcome before reading task.status. Owner predicate is inline so
+// unknown OR unowned tasks return no rows — the caller maps
+// pgx.ErrNoRows to ErrTaskNotFound for the identical 404 regardless of
+// cause (mirrors task-read-api / task-cost-api).
+func (q *Queries) LockTaskForControl(ctx context.Context, arg LockTaskForControlParams) (LockTaskForControlRow, error) {
+	row := q.db.QueryRow(ctx, lockTaskForControl, arg.ID, arg.TenantID, arg.UserID)
+	var i LockTaskForControlRow
+	err := row.Scan(&i.ID, &i.Status, &i.CurrentVersion)
+	return i, err
+}
+
 const lockTaskRow = `-- name: LockTaskRow :one
 SELECT id, status, current_version
 FROM tasks
