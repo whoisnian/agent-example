@@ -25,6 +25,13 @@ var ErrTaskNotFound = errors.New("task not found")
 // version_not_found.
 var ErrVersionNotFound = errors.New("version not found")
 
+// ErrInvalidState signals that a control request (pause / resume / cancel)
+// was rejected because the task's current `tasks.status` doesn't admit the
+// requested transition (add-task-control-api). The wrapped error message
+// MUST include the current status verbatim so the HTTP layer can pass it
+// through to the client in `message`. Maps to 409 invalid_state.
+var ErrInvalidState = errors.New("invalid state")
+
 // ErrActiveVersionExists carries the active version's id + status so the
 // 409 envelope can populate `data.active_version_id` / `data.active_version_status`
 // per design D2 / D7. The error is produced both by the app-level pre-check
