@@ -31,7 +31,10 @@ class ExpectedExchange:
 #: Exchanges that MUST already exist (declared by ``init-api-scaffold``).
 EXPECTED_EXCHANGES: Final[tuple[ExpectedExchange, ...]] = (
     ExpectedExchange("task.exchange", aio_pika.ExchangeType.TOPIC),
-    ExpectedExchange("task.control", aio_pika.ExchangeType.DIRECT),
+    # task.control was retyped direct→topic by add-task-control-api. The
+    # passive declare below MUST match or the worker fails startup against the
+    # API-current broker (design D4 / worker-messaging "Topology Assertion").
+    ExpectedExchange("task.control", aio_pika.ExchangeType.TOPIC),
     ExpectedExchange("task.events", aio_pika.ExchangeType.TOPIC),
     ExpectedExchange("task.dlx", aio_pika.ExchangeType.DIRECT),
     ExpectedExchange("cost.exchange", aio_pika.ExchangeType.TOPIC),
@@ -162,12 +165,21 @@ async def declare_worker_queues(
     *,
     lane: str,
     worker_id: str,
-) -> tuple[aio_pika.abc.AbstractQueue, aio_pika.abc.AbstractQueue]:
+) -> tuple[
+    aio_pika.abc.AbstractQueue,
+    aio_pika.abc.AbstractQueue,
+    aio_pika.abc.AbstractExchange,
+]:
     """Declare ``q.task.execute.<lane>`` and ``q.task.control.<worker_id>``.
 
-    Returns ``(execute_queue, control_queue)``. Both are quorum queues; the
-    control queue is bound auto-delete=True so it disappears when the worker
-    disconnects.
+    Returns ``(execute_queue, control_queue, control_exchange)``. The control
+    queue is declared auto-delete=True so it disappears when the worker
+    disconnects. Unlike the execute queue, the control queue is **not** bound
+    to its exchange here — bindings to ``task.control`` (now a *topic*
+    exchange) happen dynamically per claim via
+    ``ControlListener.bind_for``/``unbind_for`` with routing key
+    ``task.<task_id>`` (design D1). The exchange handle is returned so the
+    listener can bind against it without re-declaring.
     """
     execute_queue = await channel.declare_queue(
         f"q.task.execute.{lane}",
@@ -195,10 +207,9 @@ async def declare_worker_queues(
     )
     control_exchange = await channel.declare_exchange(
         "task.control",
-        type=aio_pika.ExchangeType.DIRECT,
+        type=aio_pika.ExchangeType.TOPIC,
         durable=True,
         passive=True,
     )
-    await control_queue.bind(control_exchange, routing_key=f"control.{worker_id}")
 
-    return execute_queue, control_queue
+    return execute_queue, control_queue, control_exchange

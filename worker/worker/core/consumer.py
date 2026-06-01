@@ -136,33 +136,57 @@ class TaskConsumer:
             idempotency_key=msg.idempotency_key,
             worker_run_id=msg.run_id,  # scaffold: tie worker_run_id to run_id
         )
-        claim = await self._persistence.claim_or_skip_run(run_row)
 
-        if claim.outcome in {
-            ClaimOutcome.ALREADY_SUCCEEDED,
-            ClaimOutcome.ALREADY_FAILED,
-            ClaimOutcome.ALREADY_CANCELLED,
-        }:
-            self._log.info(
-                "duplicate_run_skipped",
-                idempotency_key=msg.idempotency_key,
-                outcome=claim.outcome.value,
-            )
-            await delivery.ack()
-            self._metrics.messages_consumed_total.labels(outcome="duplicate").inc()
-            return
-
-        if claim.outcome == ClaimOutcome.RUNNING_BY_OTHER_RECENT:
-            self._log.info(
-                "owned_by_other_worker_nack",
-                idempotency_key=msg.idempotency_key,
-            )
+        # Bind the control queue to ``task.<task_id>`` BEFORE claiming (design
+        # D8 / reviewer S10). A bind failure after a successful claim would
+        # leave a ``running`` row that hot-loops other workers until the stale-
+        # heartbeat takeover fires. Bind is a pure, idempotent MQ op — do it
+        # first; on failure the claim never happened so a plain requeue is clean.
+        try:
+            await self._control.bind_for(msg.task_id)
+        except Exception as exc:  # noqa: BLE001 - broker may be recovering
+            self._log.error("control_bind_failed", task_id=str(msg.task_id), error=str(exc))
             await delivery.nack(requeue=True)
-            self._metrics.messages_consumed_total.labels(outcome="foreign_run").inc()
+            self._metrics.messages_consumed_total.labels(outcome="bind_failed").inc()
             return
 
-        # fresh | running_stale_takeover → execute
-        await self._execute(msg, delivery, claim_worker_run_id=run_row.worker_run_id)
+        try:
+            claim = await self._persistence.claim_or_skip_run(run_row)
+
+            if claim.outcome in {
+                ClaimOutcome.ALREADY_SUCCEEDED,
+                ClaimOutcome.ALREADY_FAILED,
+                ClaimOutcome.ALREADY_CANCELLED,
+            }:
+                self._log.info(
+                    "duplicate_run_skipped",
+                    idempotency_key=msg.idempotency_key,
+                    outcome=claim.outcome.value,
+                )
+                await delivery.ack()
+                self._metrics.messages_consumed_total.labels(outcome="duplicate").inc()
+                return
+
+            if claim.outcome == ClaimOutcome.RUNNING_BY_OTHER_RECENT:
+                self._log.info(
+                    "owned_by_other_worker_nack",
+                    idempotency_key=msg.idempotency_key,
+                )
+                await delivery.nack(requeue=True)
+                self._metrics.messages_consumed_total.labels(outcome="foreign_run").inc()
+                return
+
+            # fresh | running_stale_takeover → execute
+            await self._execute(msg, delivery, claim_worker_run_id=run_row.worker_run_id)
+        finally:
+            # Best-effort unbind on EVERY termination path (spec: "Unbind runs
+            # on every termination path"). Runs after ``_execute`` clears
+            # ``current_run`` in its own finally. Suppress BaseException so an
+            # in-flight drain-timeout cancellation (consumer_task.cancel()) does
+            # not escape the finally (reviewer S11); the queue auto-deletes on
+            # disconnect anyway.
+            with contextlib.suppress(BaseException):
+                await self._control.unbind_for(msg.task_id)
 
     async def _execute(
         self,

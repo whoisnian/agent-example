@@ -95,6 +95,7 @@ make run    # 或: uv run worker
 - 每个 step 结束写入 `task_checkpoints`，小状态 (≤ `CHECKPOINT_INLINE_BYTES`) 入 DB JSONB，大状态走 OSS。
 - Worker **唯一允许写入**的表见 `core/persistence.py::ALLOWED_WRITE_TABLES` —— `task_runs.last_heartbeat`、`task_checkpoints`、`artifacts`。其它状态翻转通过 `task.events` 让 API / Cost Service 处理。
 - 进程内单 in-flight 任务：channel `prefetch_count=1`。
+- **控制信号的动态绑定契约**（`core/control.py` + `core/consumer.py`，spec: worker-control-handling）：`task.control` 是 topic exchange，控制队列 `q.task.control.<worker_id>` 不在启动期静态绑定，而是**按 claim 动态绑定**——consumer claim run *之前* `bind_for(task_id)`（routing key `task.<task_id>`），run 在任何路径终止时 `unbind_for(task_id)`（best-effort，队列断连 auto-delete 兜底）。dispatcher 按 `current_run.run_id` 过滤投递，bind/unbind 竞态窗口内到达的陈旧消息被安全丢弃。listener 收到 pause/resume/cancel 时翻转内存 token *并*发出 `kind=status` 确认事件（`paused`/`running`/`cancelling`）让前端状态收敛；cancel 先 set cancel token 再 `pause_token.resume()` 以唤醒正阻塞在 `wait_if_paused()` 的 agent（cancel-during-pause race fix）。
 
 ## 插件目录约定
 

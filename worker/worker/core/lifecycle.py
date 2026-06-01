@@ -77,7 +77,7 @@ async def serve(settings: Settings) -> int:
         channel = await mq.channel()
 
         await assert_topology(channel)
-        execute_queue, _control_queue = await declare_worker_queues(
+        execute_queue, control_queue, control_exchange = await declare_worker_queues(
             channel, lane=settings.lane, worker_id=settings.worker_id
         )
         logger.info("topology_asserted_and_queues_declared")
@@ -111,6 +111,8 @@ async def serve(settings: Settings) -> int:
             mq=mq,
             redis_url=settings.redis_url,
             metrics=metrics,
+            control_queue=control_queue,
+            control_exchange=control_exchange,
             logger=logger,
         )
         consumer = TaskConsumer(

@@ -110,6 +110,11 @@ class RunContext:
     cost_seq_by_kind: dict[str, int] = field(default_factory=dict)
 
     def next_event_seq(self) -> int:
+        # MUST remain sync (no ``await``) — concurrent callers from the control
+        # listener and the agent loop rely on cooperative-multitasking
+        # atomicity (no yield point between read and write) to keep seq
+        # monotonic. A future refactor that makes this a coroutine would
+        # silently break that guarantee (reviewer S7).
         self.event_seq += 1
         return self.event_seq
 

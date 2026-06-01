@@ -41,6 +41,7 @@ class Metrics:
 
     # Control signals
     control_signals_total: Counter
+    control_emit_failed_total: Counter
 
     # Agent orchestration
     agent_runs_total: Counter
@@ -112,7 +113,13 @@ def build_metrics(registry: CollectorRegistry | None = None) -> Metrics:
         ),
         control_signals_total=Counter(
             "worker_control_signals_total",
-            "Control signals received (deduplicated across RMQ + Redis), by action.",
+            "Control signals received (deduplicated across RMQ + Redis), by action and outcome.",
+            labelnames=("action", "outcome"),
+            registry=reg,
+        ),
+        control_emit_failed_total=Counter(
+            "worker_control_emit_failed_total",
+            "Status-acknowledgement event emits that failed (token still flipped), by action.",
             labelnames=("action",),
             registry=reg,
         ),
