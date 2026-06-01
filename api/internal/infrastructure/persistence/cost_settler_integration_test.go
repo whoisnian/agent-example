@@ -119,7 +119,16 @@ func numericString(t *testing.T, n pgtype.Numeric) string {
 	if v == nil {
 		return "<nil>"
 	}
-	return v.(string)
+	// pgx renders a zero NUMERIC as "0" regardless of the column's declared
+	// scale, while non-zero values keep their dscale (e.g. "0.06750000").
+	// Normalize everything to the scale-8 decimal string the NUMERIC(18,8)
+	// column stores (matching the read-side numericToDecimalString convention)
+	// so a zero amount compares as "0.00000000" like every other amount.
+	r, ok := new(big.Rat).SetString(v.(string))
+	if !ok {
+		t.Fatalf("parse numeric %q", v)
+	}
+	return r.FloatString(8)
 }
 
 func i64p(v int64) *int64 { return &v }

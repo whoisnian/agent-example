@@ -812,10 +812,13 @@ func TestOutboxExchangeDownIsNoOp(t *testing.T) {
 	// Insert a row carrying the new exchange so we can verify it survives
 	// down → up.
 	id := mustUUID(t)
+	// $1 is the uuid aggregate_id; pass the topic as a separate text param so
+	// PostgreSQL doesn't have to deduce one type for $1 used as both uuid and
+	// text ("inconsistent types deduced for parameter $1").
 	if _, err := conn.Exec(ctx,
 		`INSERT INTO outbox (aggregate, aggregate_id, topic, payload, exchange)
-		 VALUES ('task', $1, 'task.'||$1::text, '{}'::jsonb, 'task.control')`,
-		id,
+		 VALUES ('task', $1, $2, '{}'::jsonb, 'task.control')`,
+		id, "task."+id.String(),
 	); err != nil {
 		t.Fatalf("seed outbox row: %v", err)
 	}
