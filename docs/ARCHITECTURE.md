@@ -522,9 +522,9 @@ CREATE INDEX ON outbox (status, next_retry_at);
 | GET    | `/tasks/{task_id}/versions` | 版本列表（树） |
 | GET    | `/versions/{version_id}` | 版本详情 |
 | GET    | `/versions/{version_id}/events?after_id=...` | 事件流（用于断线后补齐） |
-| GET    | `/versions/{version_id}/artifacts` | 产物列表 |
-| GET    | `/artifacts/{id}/presign` | 取临时下载链接 |
-| POST   | `/uploads/sts` | 颁发 OSS 上传临时凭证 |
+| GET    | `/versions/{version_id}/artifacts` | 产物列表（元数据；不含 `oss_key`） — capability `artifacts-api` |
+| GET    | `/artifacts/{id}/presign` | 取临时下载链接（S3 预签名 GET，单对象作用域，TTL 由 `OSS_PRESIGN_TTL` 控制） — capability `artifacts-api` |
+| POST   | `/uploads/sts` | 颁发 OSS 上传临时凭证 — **[Deferred]** 输入上传侧（SeaweedFS STS），与下载预签名机制不同；MVP 暂无文件上传流程，留到后续独立变更（见 `add-artifacts-api` design D5） |
 | GET    | `/tasks/{task_id}/cost` | 任务累计成本（按版本展开 + 合计） — capability `task-cost-api` |
 | GET    | `/versions/{version_id}/cost` | 单版本成本（聚合 + 可选明细） — capability `task-cost-api` |
 | GET    | `/me/cost?from=&to=&group_by=day\|task_type\|model` | 用户维度聚合成本 — capability `task-cost-api` |
