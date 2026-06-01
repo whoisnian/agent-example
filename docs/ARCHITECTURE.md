@@ -261,14 +261,14 @@ worker/
 | Exchange | 类型 | 用途 |
 |---|---|---|
 | `task.exchange` | topic | 任务调度主交换机 |
-| `task.control` | direct | 控制信号（暂停/取消） |
+| `task.control` | topic | 控制信号（暂停/取消）；由 `add-task-control-api` 从 direct 改型为 topic |
 | `task.events` | topic | 任务事件（状态变化、日志、产物） |
 | `task.dlx` | direct | 死信交换机 |
 
 | Queue | 绑定键 | 备注 |
 |---|---|---|
 | `q.task.execute.<lane>` | `execute.<task_type>.<lane>` | 按"任务类型 + lane"分流；lane 用于隔离大任务/小任务 |
-| `q.task.control.<worker_id>` | `control.<worker_id>` | 控制信号点对点投递到具体 worker |
+| `q.task.control.<worker_id>` | `task.<task_id>`（动态） | 控制信号；绑定**按 claim 动态建立**——claim run 时 bind `task.<task_id>`，run 结束时 unbind（非启动期静态绑定）。auto-delete |
 | `q.task.events` | `event.#` | Realtime Gateway 消费 |
 | `q.task.dlq` | — | 死信队列 |
 
@@ -645,11 +645,11 @@ Routing key: `execute.<task_type>.<lane>`
 ```
 
 #### 控制信号（API → 特定 Worker）
-Routing key: `control.<worker_id>` 或 fanout 到所有 Worker（订阅 task_id 维度）。
+Routing key: `task.<task_id>`（topic）。Worker 在 claim run 时按 task 动态 bind 到 `q.task.control.<worker_id>`，run 结束时 unbind；pre-claim 的控制消息无绑定时由 broker 丢弃（best-effort，见 `task-control-api`）。
 ```json
-{ "task_id": "...", "run_id": "...", "action": "pause|resume|cancel", "ts": "..." }
+{ "task_id": "...", "version_id": "...", "run_id": "...", "action": "pause|resume|cancel", "reason": "...", "issued_at": "..." }
 ```
-> 控制信号也通过 Redis Pub/Sub 走 fast-path，Worker 同时监听两路，取先到者，保证延迟与可靠并存。
+> 控制信号也通过 Redis Pub/Sub 走 fast-path，Worker 同时监听两路，取先到者（按 `(run_id, action, issued_at)` 去重），保证延迟与可靠并存。两路载荷同形。
 
 #### 事件上报（Worker → Realtime Gateway / DB）
 Routing key: `event.<task_type>.<kind>`
