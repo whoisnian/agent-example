@@ -44,6 +44,11 @@ type Querier interface {
 	// detects a mutex hit. The unique partial index `one_active_version_per_task`
 	// guarantees at most one match.
 	GetActiveVersionByTask(ctx context.Context, taskID pgtype.UUID) (TaskVersion, error)
+	// Resolves an artifact's storage key + owning identity in one round-trip
+	// (artifacts → task_versions → tasks). Selects only what the presign endpoint
+	// needs; id/kind/created_at are intentionally omitted so unused columns never
+	// reach DTO assembly (design D4 — defends the never-serialize-oss_key invariant).
+	GetArtifactWithOwner(ctx context.Context, id pgtype.UUID) (GetArtifactWithOwnerRow, error)
 	// Returns the pricing row in force at $4 for (resource_kind, resource_name,
 	// unit), or no rows if none. Used by the Cost Service when scoring a
 	// cost_event at write time.

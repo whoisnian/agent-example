@@ -66,6 +66,22 @@ type Config struct {
 	// the tenant/user fields the schema requires until JWT extraction lands.
 	DevTenantID string `env:"DEV_TENANT_ID" envDefault:"00000000-0000-0000-0000-000000000001" yaml:"dev_tenant_id"`
 	DevUserID   string `env:"DEV_USER_ID" envDefault:"00000000-0000-0000-0000-000000000002" yaml:"dev_user_id"`
+
+	// OSS / artifacts-api. The four credential/location keys REUSE the worker's
+	// exact env names (worker/worker/core/config.py) so a single shared config
+	// drives both processes — note OSS_ACCESS_KEY_SECRET, not the AWS-idiomatic
+	// OSS_SECRET_ACCESS_KEY. They are required:"true" (same fail-fast path as
+	// DATABASE_URL): the API refuses to boot without them rather than returning
+	// a per-request error. The remaining keys are API-only. Credentials MUST NOT
+	// be logged; the loader has no config-dump line, and if one is ever added it
+	// must redact OSSAccessKeyID / OSSAccessKeySecret.
+	OSSEndpoint        string        `env:"OSS_ENDPOINT" required:"true" yaml:"oss_endpoint"`
+	OSSBucket          string        `env:"OSS_BUCKET" required:"true" yaml:"oss_bucket"`
+	OSSAccessKeyID     string        `env:"OSS_ACCESS_KEY_ID" required:"true" yaml:"oss_access_key_id"`
+	OSSAccessKeySecret string        `env:"OSS_ACCESS_KEY_SECRET" required:"true" yaml:"oss_access_key_secret"`
+	OSSRegion          string        `env:"OSS_REGION" envDefault:"us-east-1" yaml:"oss_region"`
+	OSSUsePathStyle    bool          `env:"OSS_USE_PATH_STYLE" envDefault:"true" yaml:"oss_use_path_style"`
+	OSSPresignTTL      time.Duration `env:"OSS_PRESIGN_TTL" envDefault:"5m" yaml:"oss_presign_ttl"`
 }
 
 // Load builds Config by:

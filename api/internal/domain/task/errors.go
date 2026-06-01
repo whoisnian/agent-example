@@ -25,6 +25,11 @@ var ErrTaskNotFound = errors.New("task not found")
 // version_not_found.
 var ErrVersionNotFound = errors.New("version not found")
 
+// ErrArtifactNotFound signals that an artifact id either has no row or belongs
+// to a task the caller does not own. Both causes map to the same 404
+// artifact_not_found (never 403, never reveal existence — add-artifacts-api).
+var ErrArtifactNotFound = errors.New("artifact not found")
+
 // ErrInvalidState signals that a control request (pause / resume / cancel)
 // was rejected because the task's current `tasks.status` doesn't admit the
 // requested transition (add-task-control-api). The wrapped error message

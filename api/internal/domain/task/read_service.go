@@ -294,7 +294,16 @@ func (s *ReadService) ownedTask(ctx context.Context, owner Owner, taskID uuid.UU
 // makes it impossible), or an unowned task all to ErrVersionNotFound. A genuine
 // DB error on the task lookup propagates (→ 500), never masked.
 func (s *ReadService) ownedVersion(ctx context.Context, owner Owner, versionID uuid.UUID) (sqlc.TaskVersion, error) {
-	v, err := s.Queries.GetTaskVersionByID(ctx, toPgUUID(versionID))
+	return ownedVersion(ctx, s.Queries, owner, versionID)
+}
+
+// ownedVersion is the shared version-ownership probe used by every read
+// service (ReadService, ArtifactReadService). It is a package-level function
+// rather than a method so services that aren't the task ReadService can reuse
+// the exact same guard. It takes the sqlc.Querier interface so callers holding
+// either the concrete *sqlc.Queries or a fake can share it.
+func ownedVersion(ctx context.Context, q sqlc.Querier, owner Owner, versionID uuid.UUID) (sqlc.TaskVersion, error) {
+	v, err := q.GetTaskVersionByID(ctx, toPgUUID(versionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sqlc.TaskVersion{}, ErrVersionNotFound
 	}
@@ -302,7 +311,7 @@ func (s *ReadService) ownedVersion(ctx context.Context, owner Owner, versionID u
 		return sqlc.TaskVersion{}, err
 	}
 
-	t, terr := s.Queries.GetTaskByID(ctx, v.TaskID)
+	t, terr := q.GetTaskByID(ctx, v.TaskID)
 	if errors.Is(terr, pgx.ErrNoRows) {
 		return sqlc.TaskVersion{}, ErrVersionNotFound
 	}

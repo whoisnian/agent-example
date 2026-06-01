@@ -14,7 +14,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -32,6 +31,7 @@ import (
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/config"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/messaging"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
+	"github.com/whoisnian/agent-example/api/internal/infrastructure/oss"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence/sqlc"
 	httpapi "github.com/whoisnian/agent-example/api/internal/interfaces/http"
@@ -274,6 +274,29 @@ func runServer(args []string) int {
 		DevUserID:   devUser,
 	}
 
+	// Artifacts-api wiring (queries-only read service + OSS presigner). The OSS
+	// client mints presigned download URLs only — no object bytes flow through
+	// the API. Its required config is validated at boot via config.Load.
+	ossClient := oss.New(&oss.Config{
+		Endpoint:        cfg.OSSEndpoint,
+		Region:          cfg.OSSRegion,
+		Bucket:          cfg.OSSBucket,
+		AccessKeyID:     cfg.OSSAccessKeyID,
+		AccessKeySecret: cfg.OSSAccessKeySecret,
+		UsePathStyle:    cfg.OSSUsePathStyle,
+		PresignTTL:      cfg.OSSPresignTTL,
+	})
+	appArtifactSvc := apptask.NewArtifactReadService(
+		taskdomain.NewArtifactReadService(queries, ossClient),
+	)
+	artifactHandlers := &httpapi.ArtifactHandlers{
+		App:         appArtifactSvc,
+		Logger:      logger,
+		Metrics:     metrics,
+		DevTenantID: devTenant,
+		DevUserID:   devUser,
+	}
+
 	engine := httpapi.NewEngine(httpapi.ServerDeps{
 		Logger:              logger,
 		Metrics:             metrics,
@@ -282,6 +305,7 @@ func runServer(args []string) int {
 		TaskReadHandlers:    taskReadHandlers,
 		TaskCostHandlers:    taskCostHandlers,
 		TaskControlHandlers: taskControlHandlers,
+		ArtifactHandlers:    artifactHandlers,
 	})
 	server := httpapi.NewServer(cfg.HTTPAddr, engine, logger)
 
@@ -357,18 +381,15 @@ func runMigrate(args []string) int {
 	bootLogger := observability.NewLogger("info", os.Stderr)
 	cfg, err := config.Load("", os.LookupEnv)
 	if err != nil {
-		// Migrate only needs DATABASE_URL; tolerate missing others.
-		var mr *config.MissingRequiredError
-		if !errors.As(err, &mr) || !onlyMissing(mr, "DATABASE_URL") {
-			// We need DATABASE_URL specifically — re-check.
-			if dsn, ok := os.LookupEnv("DATABASE_URL"); ok && dsn != "" {
-				// build a minimal config struct for migrate use
-				cfg = &config.Config{DatabaseURL: dsn}
-			} else {
-				bootLogger.Error("config_load_failed", slog.String("err", err.Error()))
-				return 1
-			}
+		// Migrate only needs DATABASE_URL; tolerate any other missing required
+		// keys (RABBITMQ_URL, OSS_*, …) by falling back to a minimal config
+		// built from DATABASE_URL alone.
+		dsn, ok := os.LookupEnv("DATABASE_URL")
+		if !ok || dsn == "" {
+			bootLogger.Error("config_load_failed", slog.String("err", err.Error()))
+			return 1
 		}
+		cfg = &config.Config{DatabaseURL: dsn}
 	}
 
 	m, err := persistence.NewMigrator("migrations", cfg.DatabaseURL)
@@ -418,11 +439,4 @@ func runMigrate(args []string) int {
 		return 2
 	}
 	return 0
-}
-
-// onlyMissing reports true when the MissingRequiredError covers exactly the
-// given keys (and no others).
-func onlyMissing(e *config.MissingRequiredError, _ ...string) bool {
-	// We accept any subset for `migrate`; we only need DATABASE_URL upstream.
-	return len(e.Keys) > 0
 }

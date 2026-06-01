@@ -46,6 +46,10 @@ type Metrics struct {
 
 	// Task control metrics (add-task-control-api §"Observability")
 	TaskControlRequestsTotal *prometheus.CounterVec
+
+	// Artifacts-api metrics (add-artifacts-api §D8) — presign is an external
+	// (OSS) call, so it gets a counter for visibility into OSS-down / surges.
+	OSSPresignTotal *prometheus.CounterVec
 }
 
 // NewMetrics builds the registry and every collector.
@@ -178,6 +182,13 @@ func NewMetrics() *Metrics {
 			},
 			[]string{"action", "outcome"},
 		),
+		OSSPresignTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "oss_presign_total",
+				Help: "Artifact presign attempts that reached the OSS presigner. outcome ∈ {success,error}; a 404 (missing/unowned artifact) never reaches the presigner and is not counted.",
+			},
+			[]string{"outcome"},
+		),
 	}
 
 	reg.MustRegister(
@@ -203,6 +214,7 @@ func NewMetrics() *Metrics {
 		m.CostEventSettleDurationSeconds,
 		m.CostConsumerConnected,
 		m.TaskControlRequestsTotal,
+		m.OSSPresignTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

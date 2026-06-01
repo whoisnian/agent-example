@@ -17,6 +17,21 @@ func envMap(m map[string]string) func(string) (string, bool) {
 	}
 }
 
+// withOSS merges the four required OSS keys into m so tests that aren't about
+// OSS can satisfy the required-field validation. Keys already in m win.
+func withOSS(m map[string]string) map[string]string {
+	out := map[string]string{
+		"OSS_ENDPOINT":          "http://oss:9000",
+		"OSS_BUCKET":            "artifacts",
+		"OSS_ACCESS_KEY_ID":     "akid",
+		"OSS_ACCESS_KEY_SECRET": "secret",
+	}
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 func TestLoad_Defaults_FailsWhenRequiredMissing(t *testing.T) {
 	_, err := Load("", envMap(map[string]string{}))
 	if err == nil {
@@ -26,22 +41,70 @@ func TestLoad_Defaults_FailsWhenRequiredMissing(t *testing.T) {
 	if !errors.As(err, &mr) {
 		t.Fatalf("expected MissingRequiredError, got %T: %v", err, err)
 	}
-	hasDB, hasMQ := false, false
+	want := map[string]bool{
+		"DATABASE_URL": false, "RABBITMQ_URL": false,
+		"OSS_ENDPOINT": false, "OSS_BUCKET": false,
+		"OSS_ACCESS_KEY_ID": false, "OSS_ACCESS_KEY_SECRET": false,
+	}
 	for _, k := range mr.Keys {
-		switch k {
-		case "DATABASE_URL":
-			hasDB = true
-		case "RABBITMQ_URL":
-			hasMQ = true
+		if _, ok := want[k]; ok {
+			want[k] = true
 		}
 	}
-	if !hasDB || !hasMQ {
-		t.Fatalf("expected DATABASE_URL and RABBITMQ_URL in missing list, got %v", mr.Keys)
+	for k, seen := range want {
+		if !seen {
+			t.Errorf("expected %s in missing-required list, got %v", k, mr.Keys)
+		}
+	}
+}
+
+func TestLoad_OSS_RequiredAndDefaults(t *testing.T) {
+	// All four shared OSS keys present → loads, and the API-only keys take
+	// their documented defaults.
+	cfg, err := Load("", envMap(map[string]string{
+		"DATABASE_URL":          "postgres://x",
+		"RABBITMQ_URL":          "amqp://y",
+		"OSS_ENDPOINT":          "http://oss:9000",
+		"OSS_BUCKET":            "artifacts",
+		"OSS_ACCESS_KEY_ID":     "akid",
+		"OSS_ACCESS_KEY_SECRET": "secret",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.OSSEndpoint != "http://oss:9000" || cfg.OSSBucket != "artifacts" {
+		t.Errorf("OSS endpoint/bucket = %q / %q", cfg.OSSEndpoint, cfg.OSSBucket)
+	}
+	if cfg.OSSAccessKeyID != "akid" || cfg.OSSAccessKeySecret != "secret" {
+		t.Errorf("OSS creds not parsed")
+	}
+	if cfg.OSSRegion != "us-east-1" {
+		t.Errorf("OSSRegion default = %q, want us-east-1", cfg.OSSRegion)
+	}
+	if !cfg.OSSUsePathStyle {
+		t.Errorf("OSSUsePathStyle default = false, want true")
+	}
+	if cfg.OSSPresignTTL != 5*time.Minute {
+		t.Errorf("OSSPresignTTL default = %s, want 5m", cfg.OSSPresignTTL)
+	}
+
+	// Missing exactly one shared key → fails to load (fail-fast at boot).
+	_, err = Load("", envMap(map[string]string{
+		"DATABASE_URL":      "postgres://x",
+		"RABBITMQ_URL":      "amqp://y",
+		"OSS_ENDPOINT":      "http://oss:9000",
+		"OSS_BUCKET":        "artifacts",
+		"OSS_ACCESS_KEY_ID": "akid",
+		// OSS_ACCESS_KEY_SECRET intentionally absent
+	}))
+	var mr *MissingRequiredError
+	if !errors.As(err, &mr) {
+		t.Fatalf("expected MissingRequiredError, got %T: %v", err, err)
 	}
 }
 
 func TestLoad_EnvOnly_AppliesValues(t *testing.T) {
-	cfg, err := Load("", envMap(map[string]string{
+	cfg, err := Load("", envMap(withOSS(map[string]string{
 		"DATABASE_URL":          "postgres://x",
 		"RABBITMQ_URL":          "amqp://y",
 		"HTTP_ADDR":             ":9090",
@@ -49,7 +112,7 @@ func TestLoad_EnvOnly_AppliesValues(t *testing.T) {
 		"DB_MAX_CONNS":          "50",
 		"SHUTDOWN_DRAIN_TIMEOUT": "10s",
 		"DB_MIGRATE_ON_BOOT":    "true",
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,6 +142,10 @@ func TestLoad_YAMLOverlay_Then_EnvWins(t *testing.T) {
 	yaml := `
 database_url: postgres://from-yaml
 rabbitmq_url: amqp://from-yaml
+oss_endpoint: http://oss:9000
+oss_bucket: artifacts
+oss_access_key_id: akid
+oss_access_key_secret: secret
 http_addr: ":7000"
 log_level: warn
 db_max_conns: 33
@@ -119,10 +186,10 @@ func TestLoad_BadYAMLPath_Errors(t *testing.T) {
 }
 
 func TestLoad_EventConsumerPrefetch_DefaultAndOverride(t *testing.T) {
-	cfg, err := Load("", envMap(map[string]string{
+	cfg, err := Load("", envMap(withOSS(map[string]string{
 		"DATABASE_URL": "postgres://x",
 		"RABBITMQ_URL": "amqp://y",
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -130,11 +197,11 @@ func TestLoad_EventConsumerPrefetch_DefaultAndOverride(t *testing.T) {
 		t.Errorf("EventConsumerPrefetch default = %d, want 16", cfg.EventConsumerPrefetch)
 	}
 
-	cfg, err = Load("", envMap(map[string]string{
+	cfg, err = Load("", envMap(withOSS(map[string]string{
 		"DATABASE_URL":            "postgres://x",
 		"RABBITMQ_URL":            "amqp://y",
 		"EVENT_CONSUMER_PREFETCH": "64",
-	}))
+	})))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

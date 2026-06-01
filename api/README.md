@@ -49,6 +49,17 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 | `DEFAULT_TASK_DEADLINE` | `60m` | execute payload 中 `deadline_ts` 与 `now()` 的偏移量 |
 | `DEV_TENANT_ID` / `DEV_USER_ID` | 占位 UUID | 鉴权中间件接入前，task 表 `tenant_id` / `user_id` 的兜底写入值；接入 JWT 后由 middleware 注入并废弃 |
 | `EVENT_CONSUMER_PREFETCH` | 16 | 事件消费者（`q.task.events`）的 AMQP prefetch（QoS）；多副本竞争同一队列，无需选主 |
+| `OSS_ENDPOINT` | — | S3 兼容对象存储端点，**必填**；与 worker 共用同名变量（SeaweedFS/MinIO 均走 path-style） |
+| `OSS_BUCKET` | — | 产物 bucket 名，**必填** |
+| `OSS_ACCESS_KEY_ID` | — | OSS access key id，**必填** |
+| `OSS_ACCESS_KEY_SECRET` | — | OSS access key secret，**必填**（注意是 `..._KEY_SECRET`，与 worker 一致，非 AWS 习惯的 `..._SECRET_ACCESS_KEY`） |
+| `OSS_REGION` | `us-east-1` | 签名用 region |
+| `OSS_USE_PATH_STYLE` | `true` | path-style 寻址（SeaweedFS/MinIO 必须为 true） |
+| `OSS_PRESIGN_TTL` | `5m` | 产物下载预签名 URL 有效期；泄露的链接在此之后过期 |
+
+> 上述四个 `OSS_*` 必填项与 worker 共用同一套配置（见 `worker/worker/core/config.py`）；API 仅用它们签发产物下载的预签名 URL（不经 API 传输字节）。缺失任一项会在启动时 fail-fast（与 `DATABASE_URL` 同路径），`api migrate` 子命令例外（只需 `DATABASE_URL`）。凭据不会写入日志或响应。
+>
+> 本地 `make run` 对接 `docker-compose.dev.yml` 的 seaweedfs：`OSS_ENDPOINT=http://localhost:9000 OSS_BUCKET=worker-bucket OSS_ACCESS_KEY_ID=dev-access-key OSS_ACCESS_KEY_SECRET=dev-secret-key`（仅 dev 凭据）。
 
 ## 常用命令
 

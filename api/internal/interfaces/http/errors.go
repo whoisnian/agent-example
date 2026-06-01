@@ -58,6 +58,8 @@ func MapError(err error) (status int, code, message string) {
 		return http.StatusNotFound, "task_not_found", "task not found"
 	case errors.Is(err, taskdomain.ErrVersionNotFound):
 		return http.StatusNotFound, "version_not_found", "version not found"
+	case errors.Is(err, taskdomain.ErrArtifactNotFound):
+		return http.StatusNotFound, "artifact_not_found", "artifact not found"
 	case errors.Is(err, taskdomain.ErrInvalidState):
 		// add-task-control-api §"State-Machine Preconditions": the wrapped
 		// error message carries the current status verbatim so the front-end

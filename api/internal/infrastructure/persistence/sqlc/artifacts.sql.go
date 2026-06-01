@@ -11,6 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getArtifactWithOwner = `-- name: GetArtifactWithOwner :one
+SELECT a.oss_key, a.bytes, a.mime, a.sha256, t.tenant_id, t.user_id
+FROM artifacts a
+JOIN task_versions v ON v.id = a.version_id
+JOIN tasks t ON t.id = v.task_id
+WHERE a.id = $1
+`
+
+type GetArtifactWithOwnerRow struct {
+	OssKey   string      `json:"oss_key"`
+	Bytes    *int64      `json:"bytes"`
+	Mime     *string     `json:"mime"`
+	Sha256   *string     `json:"sha256"`
+	TenantID pgtype.UUID `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+// Resolves an artifact's storage key + owning identity in one round-trip
+// (artifacts → task_versions → tasks). Selects only what the presign endpoint
+// needs; id/kind/created_at are intentionally omitted so unused columns never
+// reach DTO assembly (design D4 — defends the never-serialize-oss_key invariant).
+func (q *Queries) GetArtifactWithOwner(ctx context.Context, id pgtype.UUID) (GetArtifactWithOwnerRow, error) {
+	row := q.db.QueryRow(ctx, getArtifactWithOwner, id)
+	var i GetArtifactWithOwnerRow
+	err := row.Scan(
+		&i.OssKey,
+		&i.Bytes,
+		&i.Mime,
+		&i.Sha256,
+		&i.TenantID,
+		&i.UserID,
+	)
+	return i, err
+}
+
 const listArtifactsByVersion = `-- name: ListArtifactsByVersion :many
 SELECT id, version_id, kind, oss_key, mime, bytes, sha256, created_at
 FROM artifacts

@@ -1,0 +1,46 @@
+package task
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// --- /versions/{id}/artifacts ----------------------------------------------
+
+// VersionArtifacts is the payload of GET /api/v1/versions/{version_id}/artifacts.
+// Artifacts is ordered created_at ASC, id ASC and is always a non-nil slice
+// (empty `[]` when the version has produced nothing yet).
+type VersionArtifacts struct {
+	VersionID uuid.UUID      `json:"version_id"`
+	Artifacts []ArtifactMeta `json:"artifacts"`
+}
+
+// ArtifactMeta is one artifact's public metadata. It deliberately omits
+// oss_key — the internal storage layout is never part of the contract (design
+// D6); clients reach bytes only through the presign endpoint. Mime / Bytes /
+// Sha256 are nullable in the table and render as JSON null (present, never
+// omitted) when absent.
+type ArtifactMeta struct {
+	ID        uuid.UUID `json:"id"`
+	Kind      string    `json:"kind"`
+	Mime      *string   `json:"mime"`
+	Bytes     *int64    `json:"bytes"`
+	Sha256    *string   `json:"sha256"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// --- /artifacts/{id}/presign -----------------------------------------------
+
+// PresignResult is the payload of GET /api/v1/artifacts/{artifact_id}/presign.
+// URL is a short-lived presigned GET URL for one object; ExpiresAt is the
+// advisory expiry (mint-time + configured TTL, UTC — OSS is the authority on
+// actual expiry). Bytes / Mime / Sha256 echo the row so the client can label
+// the download, following the same nullable rule as ArtifactMeta.
+type PresignResult struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Bytes     *int64    `json:"bytes"`
+	Mime      *string   `json:"mime"`
+	Sha256    *string   `json:"sha256"`
+}
