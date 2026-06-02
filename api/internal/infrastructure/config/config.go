@@ -82,6 +82,19 @@ type Config struct {
 	OSSRegion          string        `env:"OSS_REGION" envDefault:"us-east-1" yaml:"oss_region"`
 	OSSUsePathStyle    bool          `env:"OSS_USE_PATH_STYLE" envDefault:"true" yaml:"oss_use_path_style"`
 	OSSPresignTTL      time.Duration `env:"OSS_PRESIGN_TTL" envDefault:"5m" yaml:"oss_presign_ttl"`
+
+	// Realtime gateway (add-realtime-gateway). WSAllowedOrigins is a
+	// comma-separated CSWSH allowlist (design D9); empty = same-origin only.
+	// The fan-out queue is ephemeral (declared at runtime), so there is no
+	// durable-topology config — only per-connection limits and the consumer
+	// prefetch. WSReadDeadline MUST exceed the web client's 25s ping interval.
+	WSAllowedOrigins     string        `env:"WS_ALLOWED_ORIGINS" envDefault:"" yaml:"ws_allowed_origins"`
+	WSSendBuffer         int           `env:"WS_SEND_BUFFER" envDefault:"128" yaml:"ws_send_buffer"`
+	WSReadDeadline       time.Duration `env:"WS_READ_DEADLINE" envDefault:"60s" yaml:"ws_read_deadline"`
+	WSReadLimit          int64         `env:"WS_READ_LIMIT" envDefault:"32768" yaml:"ws_read_limit"`
+	WSMaxTopicsPerConn   int           `env:"WS_MAX_TOPICS_PER_CONN" envDefault:"64" yaml:"ws_max_topics_per_conn"`
+	WSMaxSubscribeTopics int           `env:"WS_MAX_SUBSCRIBE_TOPICS" envDefault:"32" yaml:"ws_max_subscribe_topics"`
+	WSFanoutPrefetch     int           `env:"WS_FANOUT_PREFETCH" envDefault:"32" yaml:"ws_fanout_prefetch"`
 }
 
 // Load builds Config by:

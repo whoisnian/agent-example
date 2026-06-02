@@ -50,6 +50,14 @@ type Metrics struct {
 	// Artifacts-api metrics (add-artifacts-api §D8) — presign is an external
 	// (OSS) call, so it gets a counter for visibility into OSS-down / surges.
 	OSSPresignTotal *prometheus.CounterVec
+
+	// Realtime-gateway metrics (add-realtime-gateway §"Realtime Observability").
+	WSConnectionsActive       prometheus.Gauge
+	WSSubscriptionsActive     prometheus.Gauge
+	WSEventsFannedTotal       *prometheus.CounterVec
+	WSClientDroppedTotal      *prometheus.CounterVec
+	WSFanoutConsumerConnected prometheus.Gauge
+	WSFanoutMalformedTotal    prometheus.Counter
 }
 
 // NewMetrics builds the registry and every collector.
@@ -189,6 +197,36 @@ func NewMetrics() *Metrics {
 			},
 			[]string{"outcome"},
 		),
+		WSConnectionsActive: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "ws_connections_active",
+			Help: "Live realtime-gateway WebSocket connections on this instance.",
+		}),
+		WSSubscriptionsActive: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "ws_subscriptions_active",
+			Help: "Active (connection, topic) subscriptions on this instance.",
+		}),
+		WSEventsFannedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "ws_events_fanned_total",
+				Help: "Per-frame fan-out outcomes. outcome ∈ {delivered,dropped} (dropped = slow-client eviction on a full send buffer).",
+			},
+			[]string{"outcome"},
+		),
+		WSClientDroppedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "ws_client_dropped_total",
+				Help: "Connections evicted by the gateway. reason ∈ {slow,read_deadline}.",
+			},
+			[]string{"reason"},
+		),
+		WSFanoutConsumerConnected: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "ws_fanout_consumer_connected",
+			Help: "1 when the per-instance fan-out consumer's exclusive queue is bound + consuming, else 0. Mirrors event_consumer_connected so an exclusive-queue drop is observable.",
+		}),
+		WSFanoutMalformedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "ws_fanout_malformed_total",
+			Help: "Fan-out deliveries dropped as undecodable. The drop never affects any connection.",
+		}),
 	}
 
 	reg.MustRegister(
@@ -215,6 +253,12 @@ func NewMetrics() *Metrics {
 		m.CostConsumerConnected,
 		m.TaskControlRequestsTotal,
 		m.OSSPresignTotal,
+		m.WSConnectionsActive,
+		m.WSSubscriptionsActive,
+		m.WSEventsFannedTotal,
+		m.WSClientDroppedTotal,
+		m.WSFanoutConsumerConnected,
+		m.WSFanoutMalformedTotal,
 		collectors.NewGoCollector(),
 		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
 	)

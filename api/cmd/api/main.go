@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence/sqlc"
 	httpapi "github.com/whoisnian/agent-example/api/internal/interfaces/http"
+	wsgateway "github.com/whoisnian/agent-example/api/internal/interfaces/ws"
 )
 
 func main() {
@@ -244,8 +246,10 @@ func runServer(args []string) int {
 		)
 	}
 
-	// Task-read-api wiring (queries-only read service, same dev identity).
-	appReadSvc := apptask.NewReadService(taskdomain.NewReadService(queries))
+	// Task-read-api wiring (queries-only read service, same dev identity). The
+	// domain read service is shared with the realtime-gateway ownership port.
+	domainReadSvc := taskdomain.NewReadService(queries)
+	appReadSvc := apptask.NewReadService(domainReadSvc)
 	taskReadHandlers := &httpapi.TaskReadHandlers{
 		App:         appReadSvc,
 		Logger:      logger,
@@ -297,6 +301,36 @@ func runServer(args []string) int {
 		DevUserID:   devUser,
 	}
 
+	// Realtime-gateway wiring (add-realtime-gateway). The Hub fans worker events
+	// from the per-instance fan-out consumer to subscribed connections; the
+	// OwnershipChecker authorizes subscriptions through the shared domain read
+	// service (never importing domain/task into the gateway). The fan-out
+	// consumer's exclusive queue is independent of the q.task.events ingest path.
+	wsHub := wsgateway.NewHub(metrics)
+	wsOwnership := apptask.NewOwnershipChecker(domainReadSvc)
+	wsGateway := wsgateway.NewGateway(wsHub, wsOwnership, wsgateway.Config{
+		AllowedOrigins:     splitCSV(cfg.WSAllowedOrigins),
+		SendBuffer:         cfg.WSSendBuffer,
+		ReadDeadline:       cfg.WSReadDeadline,
+		ReadLimit:          cfg.WSReadLimit,
+		MaxTopicsPerConn:   cfg.WSMaxTopicsPerConn,
+		MaxSubscribeTopics: cfg.WSMaxSubscribeTopics,
+	}, logger, metrics, devTenant, devUser)
+	fanoutConsumer := messaging.NewFanoutConsumer(
+		mqConn,
+		cfg.WSFanoutPrefetch,
+		wsHub.Fanout,
+		logger,
+		metrics.WSFanoutConsumerConnected,
+		metrics.WSFanoutMalformedTotal,
+	)
+	fanoutCtx, stopFanout := context.WithCancel(ctx)
+	fanoutDone := make(chan struct{})
+	go func() {
+		defer close(fanoutDone)
+		fanoutConsumer.Run(fanoutCtx)
+	}()
+
 	engine := httpapi.NewEngine(httpapi.ServerDeps{
 		Logger:              logger,
 		Metrics:             metrics,
@@ -306,6 +340,7 @@ func runServer(args []string) int {
 		TaskCostHandlers:    taskCostHandlers,
 		TaskControlHandlers: taskControlHandlers,
 		ArtifactHandlers:    artifactHandlers,
+		WSGateway:           wsGateway,
 	})
 	server := httpapi.NewServer(cfg.HTTPAddr, engine, logger)
 
@@ -325,9 +360,16 @@ func runServer(args []string) int {
 		}
 	}
 
-	// Ordered shutdown: HTTP → Relayer → MQ → DB → tracer (per spec Task 5.3).
+	// Ordered shutdown: WS → HTTP → Relayer → MQ → DB → tracer (per spec Task
+	// 5.3 + add-realtime-gateway D7). The gateway is torn down FIRST: its
+	// connections are long-lived in-flight requests, so closing them with 1001
+	// up front lets the subsequent HTTP drain complete instead of blocking on
+	// them until the drain timeout. The fan-out consumer stops with the other
+	// consumers (before the MQ connection closes).
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
+
+	wsGateway.Shutdown()
 
 	forced, err := server.Shutdown(shutdownCtx, cfg.ShutdownDrainTimeout)
 	if err != nil {
@@ -353,6 +395,10 @@ func runServer(args []string) int {
 	stopCostConsumer()
 	<-costConsumerDone
 
+	fanoutConsumer.Stop()
+	stopFanout()
+	<-fanoutDone
+
 	if err := publisher.Close(); err != nil {
 		logger.Warn("publisher_close_error", slog.String("err", err.Error()))
 	}
@@ -369,6 +415,23 @@ func runServer(args []string) int {
 
 	logger.Info("api_shutdown_complete")
 	return 0
+}
+
+// splitCSV parses a comma-separated config value into a trimmed, non-empty
+// slice. An empty/blank input yields nil so the WS origin allowlist defaults to
+// same-origin only.
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // runMigrate handles `api migrate ...` subcommands.

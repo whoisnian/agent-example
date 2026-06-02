@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
+	wsgateway "github.com/whoisnian/agent-example/api/internal/interfaces/ws"
 )
 
 // ServerDeps groups the wiring inputs for the HTTP server. Keeping them in a
@@ -24,6 +25,7 @@ type ServerDeps struct {
 	TaskCostHandlers    *TaskCostHandlers    // optional; nil disables the cost-read routes
 	TaskControlHandlers *TaskControlHandlers // optional; nil disables the control route
 	ArtifactHandlers    *ArtifactHandlers    // optional; nil disables the artifact-read routes
+	WSGateway           *wsgateway.Gateway   // optional; nil disables the /ws route
 }
 
 // NewEngine assembles the gin engine and the documented middleware chain:
@@ -56,7 +58,7 @@ func NewEngine(deps ServerDeps) *gin.Engine {
 	// Business routes under /api/v1. Each handler set stays optional so tests
 	// can spin up an engine with only the write or only the read side; the v1
 	// group is created once and shared so both register on the same prefix.
-	if deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil || deps.TaskControlHandlers != nil || deps.ArtifactHandlers != nil {
+	if deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil || deps.TaskControlHandlers != nil || deps.ArtifactHandlers != nil || deps.WSGateway != nil {
 		v1 := e.Group("/api/v1")
 		if deps.TaskHandlers != nil {
 			deps.TaskHandlers.Register(v1)
@@ -72,6 +74,10 @@ func NewEngine(deps ServerDeps) *gin.Engine {
 		}
 		if deps.ArtifactHandlers != nil {
 			deps.ArtifactHandlers.Register(v1)
+		}
+		if deps.WSGateway != nil {
+			// Raw WebSocket upgrade — not wrapped in the REST envelope.
+			deps.WSGateway.Register(v1)
 		}
 	}
 
