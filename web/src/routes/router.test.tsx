@@ -10,7 +10,7 @@ import { RootLayout } from "@/routes/root-layout";
 import { TaskList } from "@/routes/TaskList";
 import { TaskCreate } from "@/routes/TaskCreate";
 import { TaskDetail } from "@/routes/TaskDetail";
-import { CostDashboardPlaceholder } from "@/routes/placeholders/CostDashboardPlaceholder";
+import { CostDashboard } from "@/routes/CostDashboard";
 import { SettingsPlaceholder } from "@/routes/placeholders/SettingsPlaceholder";
 import { LoginPlaceholder } from "@/routes/placeholders/LoginPlaceholder";
 import { NotFoundPlaceholder } from "@/routes/placeholders/NotFoundPlaceholder";
@@ -40,7 +40,7 @@ function TestApp({ path }: { path: string }): JSX.Element {
             <Route path="tasks" element={<TaskList />} />
             <Route path="tasks/new" element={<TaskCreate />} />
             <Route path="tasks/:id" element={<TaskDetail />} />
-            <Route path="cost" element={<CostDashboardPlaceholder />} />
+            <Route path="cost" element={<CostDashboard />} />
             <Route path="settings" element={<SettingsPlaceholder />} />
           </Route>
           <Route path="*" element={<NotFoundPlaceholder />} />

@@ -4,7 +4,7 @@ import { RequireAuth } from "@/routes/require-auth";
 import { TaskList } from "@/routes/TaskList";
 import { TaskCreate } from "@/routes/TaskCreate";
 import { TaskDetail } from "@/routes/TaskDetail";
-import { CostDashboardPlaceholder } from "@/routes/placeholders/CostDashboardPlaceholder";
+import { CostDashboard } from "@/routes/CostDashboard";
 import { SettingsPlaceholder } from "@/routes/placeholders/SettingsPlaceholder";
 import { LoginPlaceholder } from "@/routes/placeholders/LoginPlaceholder";
 import { NotFoundPlaceholder } from "@/routes/placeholders/NotFoundPlaceholder";
@@ -23,7 +23,7 @@ export const routes: RouteObject[] = [
       { path: "tasks", element: <TaskList /> },
       { path: "tasks/new", element: <TaskCreate /> },
       { path: "tasks/:id", element: <TaskDetail /> },
-      { path: "cost", element: <CostDashboardPlaceholder /> },
+      { path: "cost", element: <CostDashboard /> },
       { path: "settings", element: <SettingsPlaceholder /> },
     ],
   },
