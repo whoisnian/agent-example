@@ -119,4 +119,130 @@ describe("TaskDetail", () => {
     render(wrap("missing"));
     expect(await screen.findByTestId("task-not-found")).toBeInTheDocument();
   });
+
+  // --- control bar (add-web-control-bar) ---
+
+  function controlEnvelope(action: string, effective: "queued" | "best_effort"): object {
+    return {
+      code: 0,
+      message: "ok",
+      data: { accepted: true, action, task_id: "task-1", effective },
+      trace_id: "t",
+    };
+  }
+
+  it("issues a pause control, confirms, and does not flip status optimistically", async () => {
+    let posted: { action?: string } | null = null;
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id", ({ params }) =>
+        HttpResponse.json(detailEnvelope(String(params["id"]), "running")),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/control", async ({ request }) => {
+        posted = (await request.json()) as { action?: string };
+        return HttpResponse.json(controlEnvelope("pause", "queued"), { status: 202 });
+      }),
+    );
+    render(wrap("task-1"));
+    const pause = await screen.findByTestId("control-pause");
+    await userEvent.click(pause);
+
+    await waitFor(() => expect(posted).toEqual({ action: "pause" }));
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "success" && t.message.includes("pause"))).toBe(true);
+    });
+    // Status must remain the server-reported value — never optimistically "paused".
+    // The header badge is the first status-badge in DOM (version nodes render their own).
+    expect(screen.getAllByTestId("status-badge")[0]).toHaveAttribute("data-status", "running");
+  });
+
+  it("surfaces a 409 invalid_state with the server message and does not retry", async () => {
+    let posts = 0;
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id", ({ params }) =>
+        HttpResponse.json(detailEnvelope(String(params["id"]), "running")),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/control", () => {
+        posts += 1;
+        return HttpResponse.json(
+          {
+            code: "invalid_state",
+            message: 'cannot pause task in status "paused"',
+            data: null,
+            trace_id: "t",
+          },
+          { status: 409 },
+        );
+      }),
+    );
+    render(wrap("task-1"));
+    await userEvent.click(await screen.findByTestId("control-pause"));
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "warning" && t.message.includes("paused"))).toBe(true);
+    });
+    // mutations.retry is false → exactly one POST.
+    expect(posts).toBe(1);
+  });
+
+  it("flags a best_effort cancel as possibly not-yet-effective", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id", ({ params }) =>
+        HttpResponse.json(detailEnvelope(String(params["id"]), "pending")),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/control", () =>
+        HttpResponse.json(controlEnvelope("cancel", "best_effort"), { status: 202 }),
+      ),
+    );
+    render(wrap("task-1"));
+    await userEvent.click(await screen.findByTestId("control-cancel"));
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "info" && /claimed/i.test(t.message))).toBe(true);
+    });
+  });
+
+  it("surfaces a generic error toast on an unexpected control error", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id", ({ params }) =>
+        HttpResponse.json(detailEnvelope(String(params["id"]), "running")),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/control", () =>
+        HttpResponse.json(
+          { code: "internal_error", message: "boom", data: null, trace_id: "t" },
+          { status: 500 },
+        ),
+      ),
+    );
+    render(wrap("task-1"));
+    await userEvent.click(await screen.findByTestId("control-pause"));
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "error" && t.message.includes("boom"))).toBe(true);
+    });
+  });
+
+  it("re-derives the bar to all-disabled after the task settles to a terminal status", async () => {
+    let gets = 0;
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id", ({ params }) => {
+        gets += 1;
+        // First render: running (cancel enabled). After the control settles, the
+        // onSettled invalidation refetches and the worker has finished → succeeded.
+        const status = gets <= 1 ? "running" : "succeeded";
+        return HttpResponse.json(detailEnvelope(String(params["id"]), status));
+      }),
+      http.post("http://localhost/api/v1/tasks/:id/control", () =>
+        HttpResponse.json(controlEnvelope("cancel", "queued"), { status: 202 }),
+      ),
+    );
+    render(wrap("task-1"));
+    const cancel = await screen.findByTestId("control-cancel");
+    expect(cancel).toBeEnabled();
+    await userEvent.click(cancel);
+    // The onSettled refetch returns succeeded → all controls disabled.
+    await waitFor(() => expect(screen.getByTestId("control-cancel")).toBeDisabled());
+    expect(screen.getByTestId("control-pause")).toBeDisabled();
+    expect(screen.getByTestId("control-resume")).toBeDisabled();
+  });
 });

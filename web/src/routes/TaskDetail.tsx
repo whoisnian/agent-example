@@ -5,13 +5,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/primitives/Button";
 import { StatusBadge } from "@/components/tasks/StatusBadge";
 import { CostBadge } from "@/components/tasks/CostBadge";
+import { ControlBar } from "@/components/tasks/ControlBar";
 import { VersionTree } from "@/components/tasks/VersionTree";
 import { EventLog } from "@/components/tasks/EventLog";
 import { ApiError } from "@/services/http";
 import { useUiStore } from "@/features/ui/store";
 import { useTaskQuery, useVersionsQuery, useVersionEventsQuery } from "@/features/tasks/queries";
-import { useIterateTaskMutation } from "@/features/tasks/mutations";
-import { isActiveStatus, type ActiveVersionConflict } from "@/features/tasks/types";
+import { useControlTaskMutation, useIterateTaskMutation } from "@/features/tasks/mutations";
+import {
+  isActiveStatus,
+  type ActiveVersionConflict,
+  type ControlAction,
+} from "@/features/tasks/types";
 import { useTaskLive, liveRefetchInterval } from "@/features/tasks/use-task-live";
 
 function isConflictData(x: unknown): x is ActiveVersionConflict {
@@ -40,8 +45,37 @@ export function TaskDetail(): JSX.Element {
   useTaskLive(id, currentVersionId, queryClient);
 
   const iterate = useIterateTaskMutation();
+  const control = useControlTaskMutation();
   const [showIterate, setShowIterate] = useState(false);
   const [iteratePrompt, setIteratePrompt] = useState("");
+
+  // Issue a pause/resume/cancel control. The 202 is NOT a status change — the
+  // worker flips status asynchronously and the new value arrives via useTaskLive
+  // (live) / the onSettled refetch — so we only confirm, never mutate status here.
+  const onControl = (action: ControlAction): void => {
+    control.mutate(
+      { taskId: id, body: { action } },
+      {
+        onSuccess: (data) => {
+          pushToast({ level: "success", message: `${action} requested` });
+          if (action === "cancel" && data.effective === "best_effort") {
+            pushToast({
+              level: "info",
+              message: "No active run yet — cancel will take effect once the task is claimed.",
+            });
+          }
+        },
+        onError: (err) => {
+          if (err instanceof ApiError && err.code === "invalid_state") {
+            // message names the current status, e.g. cannot pause task in status "paused".
+            pushToast({ level: "warning", message: err.message });
+          } else if (err instanceof ApiError) {
+            pushToast({ level: "error", message: err.message });
+          }
+        },
+      },
+    );
+  };
 
   // 404 → not-found render state (the query is configured not to retry/toast it).
   if (taskQuery.error instanceof ApiError && taskQuery.error.status === 404) {
@@ -101,15 +135,13 @@ export function TaskDetail(): JSX.Element {
         <StatusBadge status={loadedTask.status} />
         <span className="text-sm text-text-muted">{loadedTask.task_type}</span>
         <CostBadge cost={detail.cost} />
+        <ControlBar status={loadedTask.status} pending={control.isPending} onAction={onControl} />
       </div>
 
       <div className="mb-6">
         <h2 className="mb-2 text-lg font-medium text-text">Versions</h2>
         {versionsQuery.data ? (
-          <VersionTree
-            versions={versionsQuery.data.items}
-            currentVersionId={currentVersionId}
-          />
+          <VersionTree versions={versionsQuery.data.items} currentVersionId={currentVersionId} />
         ) : (
           <p className="text-sm text-text-muted">Loading versions…</p>
         )}
