@@ -56,6 +56,13 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 | `OSS_REGION` | `us-east-1` | 签名用 region |
 | `OSS_USE_PATH_STYLE` | `true` | path-style 寻址（SeaweedFS/MinIO 必须为 true） |
 | `OSS_PRESIGN_TTL` | `5m` | 产物下载预签名 URL 有效期；泄露的链接在此之后过期 |
+| `WS_ALLOWED_ORIGINS` | 空（同源） | 实时网关握手的 `Origin` 允许列表（逗号分隔），关闭 CSWSH；空表示仅允许同源。dev SPA 形如 `http://localhost:5173` |
+| `WS_SEND_BUFFER` | 128 | 每连接出站缓冲帧数；满则驱逐慢客户端（不阻塞 fan-out），客户端重连并按 `seq` 回补 |
+| `WS_READ_DEADLINE` | `60s` | 服务端读超时，**必须 > 客户端 25s 心跳间隔**；超时未收到任何帧的半开连接被回收 |
+| `WS_READ_LIMIT` | 32768 | 单条入站消息字节上限 |
+| `WS_MAX_TOPICS_PER_CONN` | 64 | 单连接可订阅 topic 上限 |
+| `WS_MAX_SUBSCRIBE_TOPICS` | 32 | 单个 `subscribe` 帧 `topics` 数组上限（每个 topic = 一次归属探测，防止放大 DB 查询） |
+| `WS_FANOUT_PREFETCH` | 32 | 每实例 fan-out 消费者的 AMQP prefetch |
 
 > 上述四个 `OSS_*` 必填项与 worker 共用同一套配置（见 `worker/worker/core/config.py`）；API 仅用它们签发产物下载的预签名 URL（不经 API 传输字节）。缺失任一项会在启动时 fail-fast（与 `DATABASE_URL` 同路径），`api migrate` 子命令例外（只需 `DATABASE_URL`）。凭据不会写入日志或响应。
 >
@@ -233,9 +240,29 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 
 请求/响应契约见 [`openspec/specs/task-control-api/spec.md`](../openspec/changes/add-task-control-api/specs/task-control-api/spec.md)。
 
+## 实时网关（`realtime-gateway`）
+
+`add-realtime-gateway` 落地了 WebSocket 实时通道的服务端：`GET /api/v1/ws`，Web 客户端（`web/src/services/ws.ts`）零改动接入。连接 URL 用 `?token=<jwt>` 携带令牌；缺失/为空则以 close code **4001**（客户端"鉴权过期"信号）关闭。鉴权身份仍走 stub（`DEV_TENANT_ID` / `DEV_USER_ID`），直到 JWT 落地。
+
+协议（客户端 → 服务端文本帧）：`{op:"subscribe"|"unsubscribe", topics:[...]}` 与 `{op:"ping"}`；topic 形如 `task:<uuid>` / `version:<uuid>`。服务端 → 客户端事件帧固定为 `{topic, kind, seq, ts, payload}`（`kind ∈ {status,log,step,artifact,error}`）。`{op:"ping"}` 回 **应用层** `{op:"pong"}` 文本帧（协议级 pong 不触发浏览器 `onmessage`，空闲连接会误重连）。
+
+要点：
+
+- **每实例 fan-out**：每个网关进程声明自己的 **exclusive / auto-delete / 非持久** 队列，绑定 `task.events`（`event.#`，匹配 worker 的 3 段 key `event.<task_type>.<kind>`），独立于做 DB ingest 的共享 `q.task.events`。该队列随 AMQP **连接**销毁，故消费者在每次（重）连接时 **重新声明 + 重新绑定**（区别于持久队列的 `Consumer`）。网关 **只读**，不写任何表。
+- **归属作用域订阅**：`subscribe` 在订阅时按 `(tenant_id, user_id)` 经应用层 `OwnershipChecker` 端口校验（网关不 import `domain/task`）。不存在 ≡ 不属于（都返回 `error` 帧，不泄露存在性）。订阅时校验一次，fan-out 热路径不再查 DB。
+- **`ts` 透传**：转发 worker 在事件上盖的权威 `ts`（仅当缺失才回退到接收时间）；客户端按 `seq` 排序，`ts` 仅用于展示。
+- **背压**：每连接出站缓冲有界（`WS_SEND_BUFFER`），满则服务端主动关闭慢客户端；客户端重连并经 `GET /versions/{id}/events?after_id=` 按 `seq` 回补，驱逐对用户无损。
+- **CSWSH**：因 token 在查询串，握手对 `Origin` 做允许列表校验（`WS_ALLOWED_ORIGINS`）。另设读上限、单帧 topic 数上限、单连接 topic 上限、读超时（回收半开连接）。
+- **优雅关停**：关停时先停 fan-out 消费者并以 **1001（going away）** 关闭所有连接（在 drain 窗口内），客户端重连到下一个实例。
+- **指标**：`ws_connections_active`、`ws_subscriptions_active`（gauge）、`ws_events_fanned_total{outcome}`、`ws_client_dropped_total{reason}`、`ws_fanout_consumer_connected`（gauge，镜像 `event_consumer_connected`）。token 永不写日志（标准中间件只记 `URL.Path`；网关自身也不记 `RawQuery`）。
+
+> **负载均衡器**：`/ws` 需要 WebSocket 升级透传——放行 `Connection` / `Upgrade` 头、调大空闲超时（要长于 25s 心跳）、**不要把完整 `/ws` URL（含 `?token=`）写进访问日志**。
+
+契约见 [`openspec/specs/realtime-gateway/spec.md`](../openspec/changes/add-realtime-gateway/specs/realtime-gateway/spec.md)。
+
 ## 集成测试
 
-`make test-integration` 用 testcontainers 启 PostgreSQL 18.4，跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。
+`make test-integration` 用 testcontainers 启 PostgreSQL 18.4（artifacts 另起 MinIO、realtime-gateway 另起 RabbitMQ），跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量、产物 presign 字节往返、WS fan-out 投递 / 归属隔离 / 连接断开后重声明等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。
 
 ## 目录结构
 

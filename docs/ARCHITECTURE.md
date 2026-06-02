@@ -728,12 +728,17 @@ User ─► Web ─► API: POST /tasks
 ### 6.2 实时状态推送
 
 ```
-Worker ─► RMQ.event.* ─► Realtime Gateway 消费
-                            ├── 写入 task_events (run_id, seq 幂等)
-                            └── 按订阅 fanout 给 WS clients
+Worker ─► task.events (topic, key=event.<task_type>.<kind>)
+            ├── q.task.events（共享持久工作队列，竞争消费）──► task-event-ingest
+            │       写入 task_events (run_id, seq 幂等) + 翻转 status【状态唯一写者】
+            └── 每实例 exclusive/auto-delete 队列（event.#）──► Realtime Gateway
+                    解码后按订阅 fanout 给本实例的 WS clients（只读，不写任何表）
 ```
 
-- Gateway 间通过 Redis Pub/Sub 协调，避免某个 Gateway 拥有连接但事件被另一个实例收到 —— 简化设计：所有 Gateway 都消费同一 fanout exchange，自己判断"是否有匹配连接"再发，避免跨实例转发。
+- **两条独立消费链**：DB ingest（`q.task.events`，竞争消费，每事件只到一个副本，是 `tasks.status` / `task_versions.status` 的唯一写者）与 fan-out（每个网关实例 **自己的** exclusive 队列，`event.#` 绑定，每实例都收到全量事件）。后者不写库，只推 socket；二者互不影响。
+- Gateway 实例 **不** 跨实例转发，也不用 Redis 协调：每个实例消费同一 `task.events` 上自己的 fanout 队列，只把事件发给本地有匹配订阅的连接（ARCHITECTURE 既定的 MVP 简化）。
+- exclusive/auto-delete 队列绑定在 AMQP **连接**上，连接断开即销毁，故 fan-out 消费者在每次（重）连接时 **重新声明 + 重新绑定**（不同于持久队列只需重新 `Consume`）。
+- 订阅在 **订阅时** 按 owner 校验（不存在 ≡ 不属于），fan-out 热路径不再查库；详见 `realtime-gateway` 能力规格。
 
 ### 6.3 暂停 / 恢复 / 取消
 
