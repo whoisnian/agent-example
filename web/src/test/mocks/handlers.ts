@@ -103,6 +103,45 @@ export const handlers = [
       202,
     );
   }),
+
+  // --- task-cost-api (default happy-path fixtures) ---
+  // `/me/cost` discriminates on `group_by`: absent → {total}; present →
+  // {group_by, items}. The `model` fixture includes an "other" bucket.
+  http.get("http://localhost/api/v1/me/cost", ({ request }) => {
+    const groupBy = new URL(request.url).searchParams.get("group_by");
+    if (!groupBy) return ok({ total: costFixture("0.42000000") });
+    if (groupBy === "model") {
+      return ok({
+        group_by: "model",
+        items: [
+          { key: "claude-opus-4-7", totals: costFixture("0.30000000") },
+          { key: "other", totals: costFixture("0.12000000") },
+        ],
+      });
+    }
+    return ok({
+      group_by: groupBy,
+      items: [
+        { key: "2026-05-29", totals: costFixture("0.10000000") },
+        { key: "2026-05-30", totals: costFixture("0.32000000") },
+      ],
+    });
+  }),
+
+  http.get("http://localhost/api/v1/tasks/:id/cost", ({ params }) =>
+    ok({
+      task_id: String(params["id"]),
+      total: costFixture("1.72000000"),
+      by_version: [
+        {
+          version_id: "ver-1",
+          version_no: 1,
+          created_at: "2026-05-26T00:00:00Z",
+          cost: zeroCost(),
+        },
+      ],
+    }),
+  ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -121,6 +160,18 @@ export function zeroCost(): Record<string, unknown> {
     cached_tokens: 0,
     tool_calls: 0,
     wall_time_ms: 0,
+  };
+}
+
+/** A non-zero CostSummary with the given decimal-string amount. */
+export function costFixture(amountUsd: string): Record<string, unknown> {
+  return {
+    amount_usd: amountUsd,
+    input_tokens: 1200,
+    output_tokens: 340,
+    cached_tokens: 80,
+    tool_calls: 3,
+    wall_time_ms: 4500,
   };
 }
 
