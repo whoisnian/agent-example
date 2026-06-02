@@ -274,9 +274,20 @@ func (s *ReadService) ListVersionEvents(ctx context.Context, owner Owner, versio
 }
 
 // ownedTask loads a task and enforces ownership, mapping missing/unowned to
-// ErrTaskNotFound.
+// ErrTaskNotFound. It delegates to the package-level ownedTask so non-ReadService
+// callers (the realtime-gateway ownership port) can share the exact guard,
+// mirroring how ownedVersion is structured.
 func (s *ReadService) ownedTask(ctx context.Context, owner Owner, taskID uuid.UUID) (sqlc.Task, error) {
-	t, err := s.Queries.GetTaskByID(ctx, toPgUUID(taskID))
+	return ownedTask(ctx, s.Queries, owner, taskID)
+}
+
+// ownedTask is the shared task-ownership probe (package-level so callers that
+// aren't the task ReadService can reuse the same guard, mirroring ownedVersion).
+// It takes the sqlc.Querier interface so a concrete *sqlc.Queries or a fake both
+// work. Missing/unowned both map to ErrTaskNotFound; a genuine DB error
+// propagates unmasked.
+func ownedTask(ctx context.Context, q sqlc.Querier, owner Owner, taskID uuid.UUID) (sqlc.Task, error) {
+	t, err := q.GetTaskByID(ctx, toPgUUID(taskID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return sqlc.Task{}, ErrTaskNotFound
 	}
@@ -287,6 +298,23 @@ func (s *ReadService) ownedTask(ctx context.Context, owner Owner, taskID uuid.UU
 		return sqlc.Task{}, ErrTaskNotFound
 	}
 	return t, nil
+}
+
+// OwnsTask reports whether the owner owns taskID: nil when owned, ErrTaskNotFound
+// when missing OR unowned (indistinguishable — no existence leak), or a genuine
+// DB error. It is the exported seam the application-layer ownership port wraps
+// so the realtime gateway can authorize subscriptions without importing the
+// row-returning read methods.
+func (s *ReadService) OwnsTask(ctx context.Context, owner Owner, taskID uuid.UUID) error {
+	_, err := ownedTask(ctx, s.Queries, owner, taskID)
+	return err
+}
+
+// OwnsVersion reports whether the owner owns versionID, with the same
+// nil / ErrVersionNotFound / DB-error contract as OwnsTask.
+func (s *ReadService) OwnsVersion(ctx context.Context, owner Owner, versionID uuid.UUID) error {
+	_, err := ownedVersion(ctx, s.Queries, owner, versionID)
+	return err
 }
 
 // ownedVersion loads a version, resolves its owning task, and enforces
