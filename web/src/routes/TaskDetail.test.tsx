@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
@@ -220,6 +220,40 @@ describe("TaskDetail", () => {
       const toasts = useUiStore.getState().toasts;
       expect(toasts.some((t) => t.level === "error" && t.message.includes("boom"))).toBe(true);
     });
+  });
+
+  // --- cost panel (add-web-cost-views) ---
+
+  it("renders the cost panel token breakdown from /tasks/{id}/cost", async () => {
+    render(wrap("task-1"));
+    const panel = await screen.findByTestId("task-cost-panel");
+    // Default fixture total is 1.72000000 → "$1.7200".
+    expect(within(panel).getByTestId("token-bar-amount")).toHaveTextContent("$1.7200");
+  });
+
+  it("renders an all-zero panel for a zero-cost task (not an error)", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id/cost", ({ params }) =>
+        HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: { task_id: String(params["id"]), total: zeroCost(), by_version: [] },
+          trace_id: "t",
+        }),
+      ),
+    );
+    render(wrap("task-1"));
+    const panel = await screen.findByTestId("task-cost-panel");
+    expect(within(panel).getByTestId("token-bar-amount")).toHaveTextContent("$0.0000");
+  });
+
+  it("shows the inline badge and the cost panel together", async () => {
+    render(wrap("task-1"));
+    const page = await screen.findByTestId("task-detail-page");
+    // The header badge (plus per-version badges in the tree) and the panel coexist.
+    expect(screen.getAllByTestId("cost-badge").length).toBeGreaterThan(0);
+    const panel = await within(page).findByTestId("task-cost-panel");
+    expect(panel).toBeInTheDocument();
   });
 
   it("re-derives the bar to all-disabled after the task settles to a terminal status", async () => {

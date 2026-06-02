@@ -8,9 +8,11 @@ import { CostBadge } from "@/components/tasks/CostBadge";
 import { ControlBar } from "@/components/tasks/ControlBar";
 import { VersionTree } from "@/components/tasks/VersionTree";
 import { EventLog } from "@/components/tasks/EventLog";
+import { TokenBar } from "@/components/costs/TokenBar";
 import { ApiError } from "@/services/http";
 import { useUiStore } from "@/features/ui/store";
 import { useTaskQuery, useVersionsQuery, useVersionEventsQuery } from "@/features/tasks/queries";
+import { useTaskCostQuery } from "@/features/costs/queries";
 import { useControlTaskMutation, useIterateTaskMutation } from "@/features/tasks/mutations";
 import {
   isActiveStatus,
@@ -41,6 +43,9 @@ export function TaskDetail(): JSX.Element {
   // Re-run the queries with polling now that we know active/version state.
   const versionsQuery = useVersionsQuery(id, interval);
   const eventsQuery = useVersionEventsQuery(currentVersionId, interval);
+  // Cost panel source of truth (the dedicated endpoint). The inline CostBadge
+  // keeps using the read DTO's cost; the two converge on refetch.
+  const costQuery = useTaskCostQuery(id);
 
   useTaskLive(id, currentVersionId, queryClient);
 
@@ -136,6 +141,19 @@ export function TaskDetail(): JSX.Element {
         <span className="text-sm text-text-muted">{loadedTask.task_type}</span>
         <CostBadge cost={detail.cost} />
         <ControlBar status={loadedTask.status} pending={control.isPending} onAction={onControl} />
+      </div>
+
+      <div data-testid="task-cost-panel" className="mb-6">
+        <h2 className="mb-2 text-lg font-medium text-text">Cost</h2>
+        {costQuery.data ? (
+          <TokenBar cost={costQuery.data.total} />
+        ) : costQuery.isPending ? (
+          <p className="text-sm text-text-muted">Loading cost…</p>
+        ) : (
+          // A 404 here is a defensive no-op (the page is already gated by the
+          // task query); render nothing rather than a second not-found screen.
+          <p className="text-sm text-text-muted">Cost unavailable.</p>
+        )}
       </div>
 
       <div className="mb-6">
