@@ -37,13 +37,7 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
  * reachable active set is effectively {pending, running, paused}. The extra
  * two are kept only to match the constant verbatim.
  */
-const ACTIVE_STATUSES = new Set<string>([
-  "pending",
-  "queued",
-  "running",
-  "paused",
-  "cancelling",
-]);
+const ACTIVE_STATUSES = new Set<string>(["pending", "queued", "running", "paused", "cancelling"]);
 
 export function isActiveStatus(status: string): boolean {
   return ACTIVE_STATUSES.has(status);
@@ -189,4 +183,51 @@ export interface ActiveVersionConflict {
 export interface InvalidInputData {
   field: string;
   reason: string;
+}
+
+// ---- control DTOs (task-control-api) ----
+
+export type ControlAction = "pause" | "resume" | "cancel";
+
+export interface ControlRequest {
+  action: ControlAction;
+  /** Optional free-form note (≤200 chars). Not collected by the UI this round. */
+  reason?: string;
+}
+
+/** `data` of the 202 control response. `effective` discriminates "an active run
+ *  was resolved so the worker will receive this" (queued) from "no active run,
+ *  the broker may drop the message" (best_effort, i.e. pre-claim cancel). */
+export interface ControlResponse {
+  accepted: boolean;
+  action: ControlAction;
+  task_id: string;
+  effective: "queued" | "best_effort";
+}
+
+/** Which control actions are valid for a given task status. Encoded POSITIVELY
+ *  over the reachable task statuses (mirroring the task-control-api advisory
+ *  preconditions): pause∈{pending,running}, resume={paused}, cancel∈
+ *  {pending,running,paused}. Any unknown status — including the version-only
+ *  `queued`/`cancelling` that never reach `task.status` — yields all-false, so a
+ *  typo can never enable an action. The API stays authoritative (a 409 is still
+ *  handled by the caller). */
+export interface ControlAvailability {
+  canPause: boolean;
+  canResume: boolean;
+  canCancel: boolean;
+}
+
+export function controlAvailability(status: string): ControlAvailability {
+  switch (status) {
+    case "pending":
+      return { canPause: true, canResume: false, canCancel: true };
+    case "running":
+      return { canPause: true, canResume: false, canCancel: true };
+    case "paused":
+      return { canPause: false, canResume: true, canCancel: true };
+    default:
+      // succeeded / failed / cancelled / unknown → no control possible.
+      return { canPause: false, canResume: false, canCancel: false };
+  }
 }

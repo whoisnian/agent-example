@@ -1,6 +1,8 @@
 /** Thin `apiFetch` wrappers for the task read+write endpoints. */
 import { apiFetch } from "@/services/http";
 import type {
+  ControlRequest,
+  ControlResponse,
   CreateTaskRequest,
   CreateTaskResponse,
   EventPage,
@@ -46,7 +48,10 @@ export function listVersionEvents(
   signal?: AbortSignal,
 ): Promise<EventPage> {
   const q = new URLSearchParams({ after_id: String(afterId), limit: String(limit) });
-  return apiFetch<EventPage>(`/api/v1/versions/${versionId}/events?${q.toString()}`, signal ? { signal } : {});
+  return apiFetch<EventPage>(
+    `/api/v1/versions/${versionId}/events?${q.toString()}`,
+    signal ? { signal } : {},
+  );
 }
 
 export function createTask(body: CreateTaskRequest): Promise<CreateTaskResponse> {
@@ -66,6 +71,16 @@ export function iterateTask(
     method: "POST",
     body: JSON.stringify(body),
     // 409 conflict is surfaced in-page (toast naming the active version).
+    toastOnError: false,
+  });
+}
+
+export function controlTask(taskId: string, body: ControlRequest): Promise<ControlResponse> {
+  return apiFetch<ControlResponse>(`/api/v1/tasks/${taskId}/control`, {
+    method: "POST",
+    body: JSON.stringify(body),
+    // 409 invalid_state / best_effort are surfaced in-page; suppress the
+    // transport toast (the mutation also sets meta.silent for the cache layer).
     toastOnError: false,
   });
 }

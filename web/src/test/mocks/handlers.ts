@@ -88,6 +88,21 @@ export const handlers = [
   http.post("http://localhost/api/v1/tasks/:id/iterate", () =>
     ok({ version_id: "ver-2", version_no: 2, status: "pending" }, 201),
   ),
+
+  // task-control-api default: 202 accepted, effective=queued (echoes the action).
+  // Tests server.use() the best_effort / 409 invalid_state / 404 variants.
+  http.post("http://localhost/api/v1/tasks/:id/control", async ({ params, request }) => {
+    const body = (await request.json()) as { action?: string };
+    return ok(
+      {
+        accepted: true,
+        action: body.action ?? "pause",
+        task_id: String(params["id"]),
+        effective: "queued",
+      },
+      202,
+    );
+  }),
 ];
 
 // ---------------------------------------------------------------------------
