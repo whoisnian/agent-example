@@ -9,9 +9,44 @@ import { http, HttpResponse, delay } from "msw";
  * - GET  /api/v1/__scaffold/slow       → 200, but holds for 5s (used by timeout tests)
  * - GET  /api/v1/__scaffold/error      → 409 with `code:"active_version_exists"` envelope
  * - GET  /api/v1/__scaffold/unauth     → 401
+ * - POST /api/v1/auth/login            → 200 for the dev creds, else 401 invalid_credentials
  */
+
+/** Dev credentials the default login handler accepts (tests type these). */
+export const DEV_LOGIN = { email: "dev@example.com", password: "dev-password" } as const;
+
+export function loginUserFixture(): Record<string, unknown> {
+  return {
+    id: "00000000-0000-0000-0000-000000000002",
+    tenant_id: "00000000-0000-0000-0000-000000000001",
+    email: DEV_LOGIN.email,
+  };
+}
+
 export const handlers = [
   http.get("http://localhost/healthz", () => HttpResponse.json({ status: "ok" })),
+
+  // api-auth login. Default: 200 for the configured dev creds, else 401
+  // `invalid_credentials`. Tests server.use() the invalid_input (400) variant.
+  http.post("http://localhost/api/v1/auth/login", async ({ request }) => {
+    const body = (await request.json()) as { email?: string; password?: string };
+    if (body.email === DEV_LOGIN.email && body.password === DEV_LOGIN.password) {
+      return ok({
+        token: "test-jwt-token",
+        expires_at: "2026-06-05T00:00:00Z",
+        user: loginUserFixture(),
+      });
+    }
+    return HttpResponse.json(
+      {
+        code: "invalid_credentials",
+        message: "invalid credentials",
+        data: null,
+        trace_id: "trace-login",
+      },
+      { status: 401 },
+    );
+  }),
 
   http.post("http://localhost/api/v1/__scaffold/echo", async ({ request }) => {
     const body = (await request.json()) as unknown;

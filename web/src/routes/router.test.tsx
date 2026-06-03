@@ -12,7 +12,7 @@ import { TaskCreate } from "@/routes/TaskCreate";
 import { TaskDetail } from "@/routes/TaskDetail";
 import { CostDashboard } from "@/routes/CostDashboard";
 import { SettingsPlaceholder } from "@/routes/placeholders/SettingsPlaceholder";
-import { LoginPlaceholder } from "@/routes/placeholders/LoginPlaceholder";
+import { LoginPage } from "@/routes/LoginPage";
 import { NotFoundPlaceholder } from "@/routes/placeholders/NotFoundPlaceholder";
 
 /**
@@ -27,7 +27,7 @@ function TestApp({ path }: { path: string }): JSX.Element {
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/login" element={<LoginPlaceholder />} />
+          <Route path="/login" element={<LoginPage />} />
           <Route
             path="/"
             element={
@@ -62,7 +62,7 @@ describe("router skeleton", () => {
 
   it("redirects unauthenticated /tasks to /login", () => {
     renderAt("/tasks");
-    expect(screen.getByTestId("placeholder-login")).toBeInTheDocument();
+    expect(screen.getByTestId("login-page")).toBeInTheDocument();
   });
 
   it("renders the shell + TaskList page when authenticated", () => {

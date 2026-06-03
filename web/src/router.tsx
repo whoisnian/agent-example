@@ -6,11 +6,11 @@ import { TaskCreate } from "@/routes/TaskCreate";
 import { TaskDetail } from "@/routes/TaskDetail";
 import { CostDashboard } from "@/routes/CostDashboard";
 import { SettingsPlaceholder } from "@/routes/placeholders/SettingsPlaceholder";
-import { LoginPlaceholder } from "@/routes/placeholders/LoginPlaceholder";
+import { LoginPage } from "@/routes/LoginPage";
 import { NotFoundPlaceholder } from "@/routes/placeholders/NotFoundPlaceholder";
 
 export const routes: RouteObject[] = [
-  { path: "/login", element: <LoginPlaceholder /> },
+  { path: "/login", element: <LoginPage /> },
   {
     path: "/",
     element: (
