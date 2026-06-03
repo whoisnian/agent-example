@@ -180,7 +180,7 @@ An empty pricing table MUST return `data.items = []` (HTTP `200`, NOT 404).
 
 Cost-detail endpoints MUST treat "unknown id" and "unowned id" identically — both return HTTP `404` with the unified envelope (`code = "task_not_found"` for `/tasks/{id}/cost`, `code = "version_not_found"` for `/versions/{id}/cost`). No `403 forbidden`, no list-leaking via differential response, no different error code. This MUST mirror `task-read-api` §"Owner-Scoped Reads Hide Unowned Resources".
 
-The owner identity is `(tenant_id, user_id)` resolved from the request (the MVP dev-mode middleware fills these from env). A row counts as "owned" iff `tasks.tenant_id = $tenant AND tasks.user_id = $user`; for versions, ownership is resolved through `task_versions.task_id → tasks`.
+The owner identity is the authenticated `Principal{tenant_id, user_id}` resolved from the request context, which the Bearer-token middleware populates from the validated JWT claims (see `api-auth` §"Bearer Token Authentication" / §"Authenticated Principal Drives Ownership"). A row counts as "owned" iff `tasks.tenant_id = $tenant AND tasks.user_id = $user`; for versions, ownership is resolved through `task_versions.task_id → tasks`. The scoping behavior is unchanged — only the source of `(tenant_id, user_id)` moves from the dev-mode env constant to the per-request token principal.
 
 #### Scenario: Same tenant, different user, returns 404
 - **GIVEN** a task owned by `(tenant_id=T, user_id=U1)`

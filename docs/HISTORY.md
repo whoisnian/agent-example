@@ -84,3 +84,4 @@ seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-c
 12. 2026-06-02-add-web-control-bar
 13. 2026-06-03-add-web-cost-views
 14. 2026-06-03-add-web-artifacts-views
+15. 2026-06-03-add-api-auth-jwt
