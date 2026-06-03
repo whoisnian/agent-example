@@ -47,7 +47,11 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 | `SHUTDOWN_DRAIN_TIMEOUT` | `30s` | 优雅关停 in-flight 请求等待时长 |
 | `DEFAULT_LANE` | `default` | 创建/迭代任务时，请求未提供 `lane` 字段时回退使用的 lane（写入 `outbox.topic = execute.<task_type>.<lane>`） |
 | `DEFAULT_TASK_DEADLINE` | `60m` | execute payload 中 `deadline_ts` 与 `now()` 的偏移量 |
-| `DEV_TENANT_ID` / `DEV_USER_ID` | 占位 UUID | 鉴权中间件接入前，task 表 `tenant_id` / `user_id` 的兜底写入值；接入 JWT 后由 middleware 注入并废弃 |
+| `DEV_TENANT_ID` / `DEV_USER_ID` | 占位 UUID | `/auth/login` 成功后签发 token 所用的 principal（真实用户表落地前的单一身份，见 `add-api-user-store`）；运行期身份由 JWT claims 经中间件注入 context |
+| `AUTH_JWT_SECRET` | — | HS256 签名/校验密钥，**必填**（fail-fast，与 `OSS_*` 同路径）；**绝不写入日志/响应** |
+| `AUTH_JWT_TTL` | `24h` | 签发 token 的有效期；`exp` 与 `expires_at` = 签发时刻 + TTL |
+| `AUTH_DEV_EMAIL` | `dev@example.com` | MVP 登录凭证邮箱 |
+| `AUTH_DEV_PASSWORD` | — | MVP 登录凭证口令，**必填**（无默认，避免出厂弱口令后门）；**绝不写入日志/响应** |
 | `EVENT_CONSUMER_PREFETCH` | 16 | 事件消费者（`q.task.events`）的 AMQP prefetch（QoS）；多副本竞争同一队列，无需选主 |
 | `OSS_ENDPOINT` | — | S3 兼容对象存储端点，**必填**；与 worker 共用同名变量（SeaweedFS/MinIO 均走 path-style） |
 | `OSS_BUCKET` | — | 产物 bucket 名，**必填** |
@@ -67,6 +71,16 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 > 上述四个 `OSS_*` 必填项与 worker 共用同一套配置（见 `worker/worker/core/config.py`）；API 仅用它们签发产物下载的预签名 URL（不经 API 传输字节）。缺失任一项会在启动时 fail-fast（与 `DATABASE_URL` 同路径），`api migrate` 子命令例外（只需 `DATABASE_URL`）。凭据不会写入日志或响应。
 >
 > 本地 `make run` 对接 `docker-compose.dev.yml` 的 seaweedfs：`OSS_ENDPOINT=http://localhost:9000 OSS_BUCKET=worker-bucket OSS_ACCESS_KEY_ID=dev-access-key OSS_ACCESS_KEY_SECRET=dev-secret-key`（仅 dev 凭据）。
+
+> **鉴权（`api-auth`）**：除 `/healthz`、`/readyz`、`/metrics`、`POST /api/v1/auth/login` 外，所有 `/api/v1/*` 路由都要求 `Authorization: Bearer <jwt>`，无效/过期 token 返回 `401 unauthenticated`；WS 的 `?token=<jwt>` 同样被校验，失败关闭 `4001`。本地登录拿 token：
+> ```sh
+> curl -sX POST localhost:8080/api/v1/auth/login \
+>   -H 'content-type: application/json' \
+>   -d '{"email":"dev@example.com","password":"'"$AUTH_DEV_PASSWORD"'"}'
+> # → {"code":0,"data":{"token":"<jwt>","expires_at":"...","user":{...}}}
+> curl -s localhost:8080/api/v1/tasks -H "authorization: Bearer <jwt>"
+> ```
+> MVP 仅校验配置的单一 dev 凭证（`AUTH_DEV_EMAIL`/`AUTH_DEV_PASSWORD`）；真实用户表/口令哈希/refresh token/SSO 是后续工作（`add-api-user-store` 等）。
 
 ## 常用命令
 

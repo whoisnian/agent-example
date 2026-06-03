@@ -513,6 +513,7 @@ CREATE INDEX ON outbox (status, next_retry_at);
 
 | Method | Path | 描述 |
 |---|---|---|
+| POST   | `/auth/login` | 校验凭证并签发短期 JWT（HS256）→ `{token, expires_at, user}` — capability `api-auth`，**公开路由**（无需 token）；MVP 凭证源为配置 dev 账号（`AUTH_DEV_EMAIL`/`AUTH_DEV_PASSWORD`），真实用户表见后续 `add-api-user-store` |
 | POST   | `/tasks` | 创建任务（隐式创建首版本） |
 | GET    | `/tasks` | 列表（分页 + 过滤，含累计成本） |
 | GET    | `/tasks/{task_id}` | 详情（含当前版本摘要 + 成本摘要） |
