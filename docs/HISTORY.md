@@ -1,7 +1,7 @@
 # project history
 
 ## coding with agent
-* Claude Code with `Claude Opus 4.7`
+* Claude Code with `Claude Opus 4.7/4.8`
 * Copilot Chat Agent with `Claude Sonnet 4.6`
 
 ### 2026-05-17-init-project
@@ -85,3 +85,4 @@ seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-c
 13. 2026-06-03-add-web-cost-views
 14. 2026-06-03-add-web-artifacts-views
 15. 2026-06-03-add-api-auth-jwt
+16. 2026-06-04-add-web-auth-login
