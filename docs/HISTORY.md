@@ -60,147 +60,27 @@ seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-c
 先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
 ```
 
-### 2026-05-20-add-task-create-api
+### 常规迭代
 ```md
-用 openspec 发起 add-task-create-api 提案
-review 当前提案，并整理意见到 suggestions.md，改进当前提案
-整理 commit 并提交到远端仓库
-
-/opsx:apply add-task-create-api
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-05-25-add-worker-code-agent
-```md
-用 openspec 发起 add-worker-code-agent 提案
-review 当前 openspec/changes/add-worker-code-agent/ 目录下的提案，并整理改进意见到 suggestions.md
-判断 openspec/changes/add-worker-code-agent/suggestions.md 中的意见是否有效，改进当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-worker-code-agent
-使用 langchain-openai 替代 langchain-anthropic，以提供更加广泛的模型支持
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-05-26-add-task-read-api
-```md
-用 openspec 发起 add-task-read-api 提案
+用 openspec 发起 {PROPOSAL_NAME} 提案
 新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
 整理当前改动 commit 并提交到远端仓库
 
-/opsx:apply add-task-read-api
+/opsx:apply {PROPOSAL_NAME}
 
 先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
 ```
-
-### 2026-05-26-add-event-ingest-status-sync
-```md
-用 openspec 发起 add-event-ingest-status-sync 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-event-ingest-status-sync
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-05-26-add-web-tasks-pages
-```md
-用 openspec 发起 add-web-tasks-pages 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-web-tasks-pages
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-05-30-add-cost-service
-```md
-用 openspec 发起 add-cost-service 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-cost-service
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-05-31-add-task-cost-api
-```md
-用 openspec 发起 add-task-cost-api 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-task-cost-api
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-05-31-add-task-control-api
-```md
-用 openspec 发起 add-task-control-api 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-task-control-api
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-06-01-add-worker-control-handling
-```md
-用 openspec 发起 add-worker-control-handling 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-worker-control-handling
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-06-02-add-artifacts-api
-```md
-用 openspec 发起 add-artifacts-api 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-artifacts-api
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-06-02-add-realtime-gateway
-```md
-用 openspec 发起 add-realtime-gateway 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-realtime-gateway
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-06-02-add-web-control-bar
-```md
-用 openspec 发起 add-web-control-bar 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-web-control-bar
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
-
-### 2026-06-03-add-web-cost-views
-```md
-用 openspec 发起 add-web-cost-views 提案
-新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
-整理当前改动 commit 并提交到远端仓库
-
-/opsx:apply add-web-cost-views
-
-先执行 /opsx:archive，然后整理所有未提交的代码变更，按需拆分 commit 进行提交
-```
+1. 2026-05-20-add-task-create-api
+2. 2026-05-25-add-worker-code-agent
+3. 2026-05-26-add-task-read-api
+4. 2026-05-26-add-event-ingest-status-sync
+5. 2026-05-26-add-web-tasks-pages
+6. 2026-05-30-add-cost-service
+7. 2026-05-31-add-task-cost-api
+8. 2026-05-31-add-task-control-api
+9. 2026-06-01-add-worker-control-handling
+10. 2026-06-02-add-artifacts-api
+11. 2026-06-02-add-realtime-gateway
+12. 2026-06-02-add-web-control-bar
+13. 2026-06-03-add-web-cost-views
+14. 2026-06-03-add-web-artifacts-views
