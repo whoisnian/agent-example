@@ -45,6 +45,14 @@ export interface ApiFetchInit extends RequestInit {
   timeoutMs?: number;
   /** If false, suppress the global error toast for non-401 errors. Default true. */
   toastOnError?: boolean;
+  /**
+   * If false, a 401 is NOT treated as a session expiry: the session is left
+   * untouched, no redirect happens, and the promise rejects with the response
+   * envelope's own `code`/`message`/`data` (e.g. `invalid_credentials`) at
+   * `status:401`. Default true (clear session + redirect to `/login`). The
+   * login flow opts out so credential errors surface inline.
+   */
+  interceptUnauthorized?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -98,7 +106,7 @@ function uuidv4(): string {
  * `/login`, and let the caller see `code:"unauthenticated"`.
  */
 function handleUnauthorized(): void {
-  useAuthStore.getState().setToken(null);
+  useAuthStore.getState().logout();
   if (injectedNavigator) injectedNavigator("/login");
 }
 
@@ -118,7 +126,13 @@ function emitErrorToast(err: ApiError): void {
  * Higher-level concerns (retry, dedupe, refetch) belong to React Query.
  */
 export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
-  const { timeoutMs = DEFAULT_TIMEOUT_MS, toastOnError = true, signal: callerSignal, ...rest } = init;
+  const {
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    toastOnError = true,
+    interceptUnauthorized = true,
+    signal: callerSignal,
+    ...rest
+  } = init;
 
   const url = path.startsWith("http") ? path : `${getBaseUrl()}${path}`;
   const headers = new Headers(rest.headers);
@@ -173,7 +187,10 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
   clearTimeout(timer);
   if (callerSignal) callerSignal.removeEventListener("abort", onCallerAbort);
 
-  if (response.status === 401) {
+  // A 401 is a session expiry by default (clear + redirect). When the caller
+  // opts out (login), fall through to the generic envelope parse below so the
+  // real code (e.g. `invalid_credentials`) surfaces at status 401, untouched.
+  if (response.status === 401 && interceptUnauthorized) {
     handleUnauthorized();
     // Still try to read envelope for trace id, but tolerate empty bodies.
     let traceId: string | undefined;

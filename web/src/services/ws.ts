@@ -291,7 +291,7 @@ export class RealtimeClient {
     this.socket = null;
     if (ev.code === 4001) {
       // Auth expired. Clear and stop. Don't reconnect.
-      useAuthStore.getState().setToken(null);
+      useAuthStore.getState().logout();
       if (this.navigator) this.navigator("/login");
       this.state = "closed";
       return;

@@ -9,7 +9,7 @@ const BASE = "http://localhost";
 
 describe("apiFetch — envelope", () => {
   beforeEach(() => {
-    useAuthStore.setState({ token: null });
+    useAuthStore.setState({ token: null, user: null });
     setNavigator(null);
   });
 
@@ -42,7 +42,7 @@ describe("apiFetch — envelope", () => {
   });
 
   it("injects Authorization header when a token is present", async () => {
-    useAuthStore.getState().setToken("token-xyz");
+    useAuthStore.setState({ token: "token-xyz" });
     const observed: { v: string | null } = { v: null };
     server.use(
       http.get(`${BASE}/api/v1/__scaffold/probe`, ({ request }) => {
@@ -69,8 +69,13 @@ describe("apiFetch — envelope", () => {
 });
 
 describe("apiFetch — 401 handling", () => {
-  it("clears token, navigates to /login, rejects with unauthenticated", async () => {
-    useAuthStore.getState().setToken("stale");
+  afterEach(() => setNavigator(null));
+
+  it("clears the session, navigates to /login, rejects with unauthenticated", async () => {
+    useAuthStore.setState({
+      token: "stale",
+      user: { id: "u", tenant_id: "t", email: "e@x" },
+    });
     const nav = vi.fn();
     setNavigator(nav);
 
@@ -80,7 +85,37 @@ describe("apiFetch — 401 handling", () => {
     });
 
     expect(useAuthStore.getState().token).toBeNull();
+    expect(useAuthStore.getState().user).toBeNull();
     expect(nav).toHaveBeenCalledWith("/login");
+  });
+
+  it("with interceptUnauthorized:false, surfaces the envelope code and touches nothing", async () => {
+    useAuthStore.setState({
+      token: "keep",
+      user: { id: "u", tenant_id: "t", email: "e@x" },
+    });
+    const nav = vi.fn();
+    setNavigator(nav);
+    server.use(
+      http.post(`${BASE}/api/v1/auth/login`, () =>
+        HttpResponse.json(
+          { code: "invalid_credentials", message: "bad creds", data: null, trace_id: "t" },
+          { status: 401 },
+        ),
+      ),
+    );
+
+    await expect(
+      apiFetch(`${BASE}/api/v1/auth/login`, {
+        method: "POST",
+        body: JSON.stringify({ email: "a", password: "b" }),
+        toastOnError: false,
+        interceptUnauthorized: false,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_credentials", status: 401 });
+
+    expect(useAuthStore.getState().token).toBe("keep");
+    expect(nav).not.toHaveBeenCalled();
   });
 });
 
