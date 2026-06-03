@@ -142,6 +142,32 @@ export const handlers = [
       ],
     }),
   ),
+
+  // --- artifacts-api (default happy-path fixtures) ---
+  // List: two artifacts in created_at ASC, id ASC order; the second has all-null
+  // metadata to exercise the placeholder path. Tests server.use() the empty-list
+  // and version_not_found (404) variants.
+  http.get("http://localhost/api/v1/versions/:id/artifacts", ({ params }) =>
+    ok({
+      version_id: String(params["id"]),
+      artifacts: [
+        artifactFixture("art-1", { mime: "text/markdown", bytes: 12_288 }),
+        artifactFixture("art-2", { mime: null, bytes: null, sha256: null }),
+      ],
+    }),
+  ),
+
+  // Presign: a fake single-object GET URL + advisory expiry + echoed metadata.
+  // Tests server.use() the artifact_not_found (404) and internal_error (500) variants.
+  http.get("http://localhost/api/v1/artifacts/:id/presign", ({ params }) =>
+    ok({
+      url: `https://oss.test/download/${String(params["id"])}?sig=stub`,
+      expires_at: "2026-05-26T00:05:00Z",
+      bytes: 12_288,
+      mime: "text/markdown",
+      sha256: "a".repeat(64),
+    }),
+  ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -221,6 +247,30 @@ export function versionNodeFixture(
     artifact_root: null,
     created_at: "2026-05-26T00:00:00Z",
     cost: zeroCost(),
+  };
+}
+
+/** An ArtifactMeta-shaped fixture. `mime`/`bytes`/`sha256` are present-and-
+ *  nullable; override per case (e.g. `{mime:null, bytes:null}` for the
+ *  placeholder path). */
+export function artifactFixture(
+  id: string,
+  overrides: Partial<{
+    kind: string;
+    mime: string | null;
+    bytes: number | null;
+    sha256: string | null;
+    created_at: string;
+  }> = {},
+): Record<string, unknown> {
+  return {
+    id,
+    kind: "file",
+    mime: "text/markdown",
+    bytes: 1024,
+    sha256: "f".repeat(64),
+    created_at: "2026-05-26T00:00:00Z",
+    ...overrides,
   };
 }
 
