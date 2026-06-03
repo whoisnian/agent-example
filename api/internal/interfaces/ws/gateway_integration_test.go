@@ -40,6 +40,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/messaging"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
@@ -220,7 +221,7 @@ func buildGateway(t *testing.T, pool *pgxpool.Pool, mqConn *messaging.Connection
 	queries := sqlc.New(pool)
 	ownership := apptask.NewOwnershipChecker(taskdomain.NewReadService(queries))
 	hub := NewHub(m)
-	g := NewGateway(hub, ownership, Config{}, logger, m, devTenant, devUser)
+	g := NewGateway(hub, ownership, Config{}, logger, m, auth.NewVerifier(wsTestSecret))
 
 	consumer := messaging.NewFanoutConsumer(mqConn, 16, hub.Fanout, logger,
 		m.WSFanoutConsumerConnected, m.WSFanoutMalformedTotal)
@@ -335,7 +336,7 @@ func TestIntegration_FanoutDeliveryAndOwnership(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	c, _, err := websocket.Dial(ctx, wsURL+"?token=x", nil)
+	c, _, err := websocket.Dial(ctx, wsURL+"?token="+mintTokenFor(t, devTenant, devUser), nil)
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
 	}
@@ -377,7 +378,7 @@ func TestIntegration_FanoutResumesAfterConnectionDrop(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	c, _, err := websocket.Dial(ctx, wsURL+"?token=x", nil)
+	c, _, err := websocket.Dial(ctx, wsURL+"?token="+mintTokenFor(t, devTenant, devUser), nil)
 	if err != nil {
 		t.Fatalf("ws dial: %v", err)
 	}

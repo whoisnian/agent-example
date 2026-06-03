@@ -20,8 +20,8 @@ func newTestEngine(t *testing.T) (*ServerDeps, http.Handler) {
 	logger := observability.NewLogger("error", nil) // suppress noise during tests
 	m := observability.NewMetrics()
 	probes := NewProbeRegistry(0)
-	deps := ServerDeps{Logger: logger, Metrics: m, Probes: probes}
-	return &deps, NewEngine(deps)
+	deps := ServerDeps{Logger: logger, Metrics: m, Probes: probes, Verifier: testVerifier()}
+	return &deps, NewEngine(&deps)
 }
 
 func TestHealthz_AlwaysOK(t *testing.T) {
@@ -79,9 +79,10 @@ func TestMetrics_Exposes_RequestsTotal(t *testing.T) {
 
 func TestPanicRecovery_Returns500Envelope(t *testing.T) {
 	deps, _ := newTestEngine(t)
-	engine := NewEngine(*deps)
+	engine := NewEngine(deps)
 	engine.GET("/boom", func(_ *gin.Context) { panic("kaboom") })
 	req := httptest.NewRequest(http.MethodGet, "/boom", http.NoBody)
+	req.Header.Set("Authorization", testAuthHeader(t)) // /boom is a protected route
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, req)
 	if rec.Code != http.StatusInternalServerError {
@@ -101,11 +102,12 @@ func TestPanicRecovery_Returns500Envelope(t *testing.T) {
 
 func TestEnvelope_SuccessShape(t *testing.T) {
 	deps, _ := newTestEngine(t)
-	engine := NewEngine(*deps)
+	engine := NewEngine(deps)
 	engine.GET("/ok", func(c *gin.Context) {
 		OK(c, map[string]int{"v": 1})
 	})
 	req := httptest.NewRequest(http.MethodGet, "/ok", http.NoBody)
+	req.Header.Set("Authorization", testAuthHeader(t)) // /ok is a protected route
 	rec := httptest.NewRecorder()
 	engine.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {

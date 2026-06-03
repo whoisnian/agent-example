@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 	wsgateway "github.com/whoisnian/agent-example/api/internal/interfaces/ws"
 )
@@ -17,9 +18,11 @@ import (
 // ServerDeps groups the wiring inputs for the HTTP server. Keeping them in a
 // struct keeps the constructor signature stable as we add dependencies.
 type ServerDeps struct {
-	Logger           *slog.Logger
-	Metrics          *observability.Metrics
-	Probes           *ProbeRegistry
+	Logger              *slog.Logger
+	Metrics             *observability.Metrics
+	Probes              *ProbeRegistry
+	Verifier            *auth.Verifier       // validates Bearer tokens (nil ⇒ panics on a protected request)
+	AuthHandlers        *AuthHandlers        // optional; nil disables the public login route
 	TaskHandlers        *TaskHandlers        // optional; nil disables the write routes
 	TaskReadHandlers    *TaskReadHandlers    // optional; nil disables the read routes
 	TaskCostHandlers    *TaskCostHandlers    // optional; nil disables the cost-read routes
@@ -30,27 +33,30 @@ type ServerDeps struct {
 
 // NewEngine assembles the gin engine and the documented middleware chain:
 //
-//	request_id → tracing → metrics → access-log → recovery → auth (no-op stub) → handler
+//	request_id → tracing → metrics → access-log → recovery → auth (Bearer JWT) → handler
 //
 // Routes registered here are scaffold-only: /healthz, /readyz, /metrics.
 // Business routes attach later in feature proposals via the returned engine.
-func NewEngine(deps ServerDeps) *gin.Engine {
+func NewEngine(deps *ServerDeps) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	e := gin.New()
 
 	// Middleware order matters: request_id first so every downstream layer can
 	// log it; tracing before metrics so spans wrap the histogram observation;
-	// recovery sits inside auth so a panicking handler still gets a 500.
+	// recovery sits inside auth so a panicking handler still gets a 500. Auth is
+	// last so it runs with a resolved route template (c.FullPath) for the public
+	// allowlist; it injects the Principal the business handlers read.
 	e.Use(
 		requestIDMiddleware(),
 		tracingMiddleware(),
 		metricsMiddleware(deps.Metrics),
 		accessLogMiddleware(deps.Logger),
 		recoveryMiddleware(deps.Logger, deps.Metrics),
-		authMiddleware(),
+		authMiddleware(deps.Verifier),
 	)
 
-	// Health & metrics endpoints — exempt from the business envelope per spec.
+	// Health & metrics endpoints — exempt from the business envelope per spec,
+	// and allowlisted out of auth.
 	e.GET("/healthz", healthzHandler())
 	e.GET("/readyz", readyzHandler(deps.Probes))
 	e.GET("/metrics", gin.WrapH(promhttp.HandlerFor(deps.Metrics.Registry, promhttp.HandlerOpts{})))
@@ -58,8 +64,11 @@ func NewEngine(deps ServerDeps) *gin.Engine {
 	// Business routes under /api/v1. Each handler set stays optional so tests
 	// can spin up an engine with only the write or only the read side; the v1
 	// group is created once and shared so both register on the same prefix.
-	if deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil || deps.TaskControlHandlers != nil || deps.ArtifactHandlers != nil || deps.WSGateway != nil {
+	if deps.AuthHandlers != nil || deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil || deps.TaskControlHandlers != nil || deps.ArtifactHandlers != nil || deps.WSGateway != nil {
 		v1 := e.Group("/api/v1")
+		if deps.AuthHandlers != nil {
+			deps.AuthHandlers.Register(v1)
+		}
 		if deps.TaskHandlers != nil {
 			deps.TaskHandlers.Register(v1)
 		}

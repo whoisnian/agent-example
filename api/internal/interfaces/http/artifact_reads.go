@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
@@ -17,11 +16,9 @@ import (
 // Mirrors TaskReadHandlers / TaskCostHandlers — owner-scoped 404, unified
 // envelope — and carries Metrics because presign is an external (OSS) call.
 type ArtifactHandlers struct {
-	App         *apptask.ArtifactReadService
-	Logger      *slog.Logger
-	Metrics     *observability.Metrics
-	DevTenantID uuid.UUID
-	DevUserID   uuid.UUID
+	App     *apptask.ArtifactReadService
+	Logger  *slog.Logger
+	Metrics *observability.Metrics
 }
 
 // Register mounts the two owner-scoped GET routes. The `:version_id` /
@@ -37,7 +34,11 @@ func (h *ArtifactHandlers) listVersionArtifacts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.App.ListVersionArtifacts(c.Request.Context(), h.DevTenantID, h.DevUserID, versionID)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.ListVersionArtifacts(c.Request.Context(), p.TenantID, p.UserID, versionID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -55,7 +56,11 @@ func (h *ArtifactHandlers) presignArtifact(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.App.PresignArtifact(c.Request.Context(), h.DevTenantID, h.DevUserID, artifactID)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.PresignArtifact(c.Request.Context(), p.TenantID, p.UserID, artifactID)
 	if err != nil {
 		if !errors.Is(err, taskdomain.ErrArtifactNotFound) {
 			h.Metrics.OSSPresignTotal.WithLabelValues("error").Inc()

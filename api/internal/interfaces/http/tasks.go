@@ -57,11 +57,9 @@ type activeVersionConflictData struct {
 
 // TaskHandlers groups dependencies for the two write endpoints.
 type TaskHandlers struct {
-	App           *apptask.Service
-	Logger        *slog.Logger
-	Metrics       *observability.Metrics
-	DevTenantID   uuid.UUID
-	DevUserID     uuid.UUID
+	App     *apptask.Service
+	Logger  *slog.Logger
+	Metrics *observability.Metrics
 }
 
 // RegisterTaskRoutes mounts POST /api/v1/tasks and POST /api/v1/tasks/{task_id}/iterate.
@@ -78,9 +76,14 @@ func (h *TaskHandlers) createTask(c *gin.Context) {
 		return
 	}
 
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+
 	cmd := apptask.CreateTaskCommand{
-		TenantID: h.DevTenantID,
-		UserID:   h.DevUserID,
+		TenantID: p.TenantID,
+		UserID:   p.UserID,
 		Title:    req.Title,
 		TaskType: req.TaskType,
 		Prompt:   req.Prompt,

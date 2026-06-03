@@ -18,9 +18,31 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/messaging"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
+
+// wsTestSecret signs valid tokens for the gateway unit tests; the gateway is
+// built with a Verifier over the same secret. fakeOwnership keys on the topic
+// id alone, so the token's principal is arbitrary.
+const wsTestSecret = "ws-unit-test-secret"
+
+// mintTokenFor returns a valid HS256 token for a specific principal (so the
+// integration ownership probe resolves to the seeded rows).
+func mintTokenFor(t *testing.T, tenant, user uuid.UUID) string {
+	t.Helper()
+	tok, _, err := auth.NewIssuer(wsTestSecret, time.Hour).Issue(tenant, user)
+	if err != nil {
+		t.Fatalf("mint token: %v", err)
+	}
+	return tok
+}
+
+// mintToken returns a valid HS256 token for an arbitrary principal.
+func mintToken(t *testing.T) string {
+	return mintTokenFor(t, uuid.New(), uuid.New())
+}
 
 // fakeOwnership owns exactly the ids in `owned`; everything else is
 // ErrTaskNotFound / ErrVersionNotFound (not-found ≡ not-owned). It counts probes
@@ -84,7 +106,7 @@ func testGateway(t *testing.T, cfg Config, own *fakeOwnership) (*Gateway, string
 	logger := observability.NewLogger("info", buf)
 	m := observability.NewMetrics()
 	hub := NewHub(m)
-	g := NewGateway(hub, own, cfg, logger, m, uuid.New(), uuid.New())
+	g := NewGateway(hub, own, cfg, logger, m, auth.NewVerifier(wsTestSecret))
 
 	e := gin.New()
 	v1 := e.Group("/api/v1")
@@ -148,8 +170,8 @@ func TestGateway_TokenNeverLogged(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	const secret = "super-secret-token-value"
-	c, err := dial(t, ctx, wsURL+"?token="+secret, nil)
+	token := mintToken(t)
+	c, err := dial(t, ctx, wsURL+"?token="+token, nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -158,8 +180,27 @@ func TestGateway_TokenNeverLogged(t *testing.T) {
 	_ = readFrame(t, ctx, c)
 	_ = c.Close(websocket.StatusNormalClosure, "")
 
-	if strings.Contains(buf.String(), secret) {
+	if strings.Contains(buf.String(), token) {
 		t.Fatalf("token leaked into logs:\n%s", buf.String())
+	}
+}
+
+func TestGateway_InvalidTokenRejected4001(t *testing.T) {
+	_, wsURL, _, _ := testGateway(t, Config{}, &fakeOwnership{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// A non-empty but bogus (wrong-signature/garbage) token is rejected the same
+	// as a missing one: close 4001, no registration.
+	c, err := dial(t, ctx, wsURL+"?token=not-a-valid-jwt", nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer c.CloseNow()
+
+	_, _, err = c.Read(ctx)
+	if got := websocket.CloseStatus(err); got != 4001 {
+		t.Fatalf("close status = %v, want 4001", got)
 	}
 }
 
@@ -169,7 +210,7 @@ func TestGateway_CrossOriginRejected(t *testing.T) {
 	defer cancel()
 
 	opts := &websocket.DialOptions{HTTPHeader: http.Header{"Origin": []string{"http://evil.example.com"}}}
-	c, err := dial(t, ctx, wsURL+"?token=x", opts)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), opts)
 	if err == nil {
 		c.CloseNow()
 		t.Fatal("cross-origin handshake should have been rejected")
@@ -181,7 +222,7 @@ func TestGateway_PingElicitsPong(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := dial(t, ctx, wsURL+"?token=x", nil)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -199,7 +240,7 @@ func TestGateway_UnknownOpErrorStaysOpen(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := dial(t, ctx, wsURL+"?token=x", nil)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -222,7 +263,7 @@ func TestGateway_MalformedTopicRejected(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := dial(t, ctx, wsURL+"?token=x", nil)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -241,7 +282,7 @@ func TestGateway_OwnershipScopedSubscriptions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := dial(t, ctx, wsURL+"?token=x", nil)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -277,7 +318,7 @@ func TestGateway_OversizedSubscribeNoProbes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := dial(t, ctx, wsURL+"?token=x", nil)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -298,7 +339,7 @@ func TestGateway_IdleReadDeadlineReaped(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := dial(t, ctx, wsURL+"?token=x", nil)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -323,7 +364,7 @@ func TestGateway_ShutdownClosesWith1001(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	c, err := dial(t, ctx, wsURL+"?token=x", nil)
+	c, err := dial(t, ctx, wsURL+"?token="+mintToken(t), nil)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}

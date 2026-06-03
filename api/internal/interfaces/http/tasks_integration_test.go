@@ -33,12 +33,36 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/persistence/sqlc"
 	httpapi "github.com/whoisnian/agent-example/api/internal/interfaces/http"
 )
+
+// intgJWTSecret signs tokens for the integration server's Bearer middleware.
+// intgAuthHeader mints a token for the fixed dev principal the suite seeds
+// against, so owner-scoped reads resolve to the seeded rows.
+const intgJWTSecret = "intg-test-secret"
+
+// intgAuthHeaderFor mints a Bearer header for an arbitrary principal, signed
+// with intgJWTSecret so the integration server's Verifier accepts it.
+func intgAuthHeaderFor(tenant, user uuid.UUID) string {
+	tok, _, err := auth.NewIssuer(intgJWTSecret, time.Hour).Issue(tenant, user)
+	if err != nil {
+		panic(err)
+	}
+	return "Bearer " + tok
+}
+
+// intgAuthHeader is the header for the fixed dev principal the task suite seeds.
+func intgAuthHeader() string {
+	return intgAuthHeaderFor(
+		uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+	)
+}
 
 // ---------------------------------------------------------------------------
 // fixtures
@@ -133,35 +157,28 @@ func newSuite(t *testing.T) *suite {
 	)
 
 	probes := httpapi.NewProbeRegistry(time.Second)
-	engine := httpapi.NewEngine(httpapi.ServerDeps{
-		Logger:  logger,
-		Metrics: metrics,
-		Probes:  probes,
+	engine := httpapi.NewEngine(&httpapi.ServerDeps{
+		Logger:   logger,
+		Metrics:  metrics,
+		Probes:   probes,
+		Verifier: auth.NewVerifier(intgJWTSecret),
 		TaskHandlers: &httpapi.TaskHandlers{
-			App:         appSvc,
-			Logger:      logger,
-			Metrics:     metrics,
-			DevTenantID: devTenantID,
-			DevUserID:   devUserID,
+			App:     appSvc,
+			Logger:  logger,
+			Metrics: metrics,
 		},
 		TaskReadHandlers: &httpapi.TaskReadHandlers{
-			App:         appReadSvc,
-			Logger:      logger,
-			DevTenantID: devTenantID,
-			DevUserID:   devUserID,
+			App:    appReadSvc,
+			Logger: logger,
 		},
 		TaskCostHandlers: &httpapi.TaskCostHandlers{
-			App:         appCostReadSvc,
-			Logger:      logger,
-			DevTenantID: devTenantID,
-			DevUserID:   devUserID,
+			App:    appCostReadSvc,
+			Logger: logger,
 		},
 		TaskControlHandlers: &httpapi.TaskControlHandlers{
-			App:         appControlSvc,
-			Logger:      logger,
-			Metrics:     metrics,
-			DevTenantID: devTenantID,
-			DevUserID:   devUserID,
+			App:     appControlSvc,
+			Logger:  logger,
+			Metrics: metrics,
 		},
 	})
 
@@ -196,7 +213,13 @@ func postJSON(t *testing.T, ts *httptest.Server, path string, body any) (int, en
 			t.Fatalf("encode body: %v", err)
 		}
 	}
-	resp, err := http.Post(ts.URL+path, "application/json", &buf)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+path, &buf)
+	if err != nil {
+		t.Fatalf("build POST %s: %v", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", intgAuthHeader())
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}

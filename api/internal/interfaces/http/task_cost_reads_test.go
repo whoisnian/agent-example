@@ -36,13 +36,12 @@ func newCostTestEngine(t *testing.T, svc *apptask.CostReadService, nowFn func() 
 	e.Use(gin.Recovery())
 	tenantID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
 	userID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	e.Use(injectPrincipal(tenantID, userID))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := &TaskCostHandlers{
-		App:         svc,
-		Logger:      logger,
-		DevTenantID: tenantID,
-		DevUserID:   userID,
-		NowFn:       nowFn,
+		App:    svc,
+		Logger: logger,
+		NowFn:  nowFn,
 	}
 	v1 := e.Group("/api/v1")
 	h.Register(v1)

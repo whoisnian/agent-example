@@ -26,10 +26,8 @@ const (
 // the write-side TaskHandlers but depends on the application ReadService and
 // carries no Metrics (reads are not state transitions; see design D10).
 type TaskReadHandlers struct {
-	App         *apptask.ReadService
-	Logger      *slog.Logger
-	DevTenantID uuid.UUID
-	DevUserID   uuid.UUID
+	App    *apptask.ReadService
+	Logger *slog.Logger
 }
 
 // Register mounts the five owner-scoped GET routes. Paths share the `:task_id`
@@ -44,6 +42,10 @@ func (h *TaskReadHandlers) Register(r *gin.RouterGroup) {
 
 // listTasks handles GET /api/v1/tasks.
 func (h *TaskReadHandlers) listTasks(c *gin.Context) {
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
 	page, ok := parseIntQuery(c, "page", defaultListPage)
 	if !ok {
 		writeInvalidInputField(c, "page", "must be an integer")
@@ -63,7 +65,7 @@ func (h *TaskReadHandlers) listTasks(c *gin.Context) {
 		status = &raw
 	}
 
-	res, err := h.App.ListTasks(c.Request.Context(), h.DevTenantID, h.DevUserID, page, pageSize, status)
+	res, err := h.App.ListTasks(c.Request.Context(), p.TenantID, p.UserID, page, pageSize, status)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -77,7 +79,11 @@ func (h *TaskReadHandlers) getTask(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.App.GetTask(c.Request.Context(), h.DevTenantID, h.DevUserID, taskID)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.GetTask(c.Request.Context(), p.TenantID, p.UserID, taskID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -91,7 +97,11 @@ func (h *TaskReadHandlers) listVersions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.App.ListVersions(c.Request.Context(), h.DevTenantID, h.DevUserID, taskID)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.ListVersions(c.Request.Context(), p.TenantID, p.UserID, taskID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -105,7 +115,11 @@ func (h *TaskReadHandlers) getVersion(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.App.GetVersion(c.Request.Context(), h.DevTenantID, h.DevUserID, versionID)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.GetVersion(c.Request.Context(), p.TenantID, p.UserID, versionID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -129,8 +143,12 @@ func (h *TaskReadHandlers) listVersionEvents(c *gin.Context) {
 		writeInvalidInputField(c, "limit", "must be an integer")
 		return
 	}
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
 
-	res, err := h.App.ListVersionEvents(c.Request.Context(), h.DevTenantID, h.DevUserID, versionID, afterID, limit)
+	res, err := h.App.ListVersionEvents(c.Request.Context(), p.TenantID, p.UserID, versionID, afterID, limit)
 	if err != nil {
 		h.handleError(c, err)
 		return

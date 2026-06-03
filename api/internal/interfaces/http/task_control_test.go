@@ -46,6 +46,10 @@ func newControlTestEngine(t *testing.T) (*gin.Engine, *observability.Metrics) {
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	e.Use(gin.Recovery()) // surface stub panics as 500 (handler tests stay short-circuit)
+	e.Use(injectPrincipal(
+		uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+	))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	m := observability.NewMetrics()
 	// Build an app service backed by a domain service with a nil pool;
@@ -53,11 +57,9 @@ func newControlTestEngine(t *testing.T) (*gin.Engine, *observability.Metrics) {
 	// validation-only tests below; the integration tests cover the SQL.
 	app := apptask.NewControlService(taskdomain.NewControlService(nil, nil, taskdomain.SystemClock{}))
 	h := &TaskControlHandlers{
-		App:         app,
-		Logger:      logger,
-		Metrics:     m,
-		DevTenantID: uuid.MustParse("00000000-0000-0000-0000-000000000001"),
-		DevUserID:   uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+		App:     app,
+		Logger:  logger,
+		Metrics: m,
 	}
 	v1 := e.Group("/api/v1")
 	h.Register(v1)

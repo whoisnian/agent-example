@@ -32,6 +32,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/oss"
@@ -138,25 +139,42 @@ func seedArtifact(t *testing.T, pool *pgxpool.Pool, tenant, user uuid.UUID) (ver
 	return versionID, artifactID, key
 }
 
-func newArtifactEngine(t *testing.T, pool *pgxpool.Pool, ossClient *oss.Client, tenant, user uuid.UUID) *httptest.Server {
+// newArtifactEngine stands up the artifact read server authenticating as
+// (tenant, user); it returns the server plus the Bearer header for that
+// principal so callers can authenticate their requests.
+func newArtifactEngine(t *testing.T, pool *pgxpool.Pool, ossClient *oss.Client, tenant, user uuid.UUID) (*httptest.Server, string) {
 	t.Helper()
 	queries := sqlc.New(pool)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	engine := httpapi.NewEngine(httpapi.ServerDeps{
-		Logger:  logger,
-		Metrics: observability.NewMetrics(),
-		Probes:  httpapi.NewProbeRegistry(time.Second),
+	engine := httpapi.NewEngine(&httpapi.ServerDeps{
+		Logger:   logger,
+		Metrics:  observability.NewMetrics(),
+		Probes:   httpapi.NewProbeRegistry(time.Second),
+		Verifier: auth.NewVerifier(intgJWTSecret),
 		ArtifactHandlers: &httpapi.ArtifactHandlers{
-			App:         apptask.NewArtifactReadService(taskdomain.NewArtifactReadService(queries, ossClient)),
-			Logger:      logger,
-			Metrics:     observability.NewMetrics(),
-			DevTenantID: tenant,
-			DevUserID:   user,
+			App:     apptask.NewArtifactReadService(taskdomain.NewArtifactReadService(queries, ossClient)),
+			Logger:  logger,
+			Metrics: observability.NewMetrics(),
 		},
 	})
 	ts := httptest.NewServer(engine)
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, intgAuthHeaderFor(tenant, user)
+}
+
+// authGet issues a GET carrying the Bearer header.
+func authGet(t *testing.T, url, authHeader string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		t.Fatalf("build GET %s: %v", url, err)
+	}
+	req.Header.Set("Authorization", authHeader)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET %s: %v", url, err)
+	}
+	return resp
 }
 
 func TestArtifactPresignRoundTrip(t *testing.T) {
@@ -185,13 +203,10 @@ func TestArtifactPresignRoundTrip(t *testing.T) {
 		AccessKeyID: akid, AccessKeySecret: secret, UsePathStyle: true,
 		PresignTTL: 5 * time.Minute,
 	})
-	ts := newArtifactEngine(t, pool, ossClient, tenant, user)
+	ts, hdr := newArtifactEngine(t, pool, ossClient, tenant, user)
 
 	// 1) list endpoint — 200, one artifact, no oss_key in the body.
-	listResp, err := http.Get(ts.URL + "/api/v1/versions/" + versionID.String() + "/artifacts")
-	if err != nil {
-		t.Fatalf("GET list: %v", err)
-	}
+	listResp := authGet(t, ts.URL+"/api/v1/versions/"+versionID.String()+"/artifacts", hdr)
 	listBody, _ := io.ReadAll(listResp.Body)
 	listResp.Body.Close()
 	if listResp.StatusCode != http.StatusOK {
@@ -202,10 +217,7 @@ func TestArtifactPresignRoundTrip(t *testing.T) {
 	}
 
 	// 2) presign endpoint — 200, then GET the URL and round-trip the bytes.
-	presignResp, err := http.Get(ts.URL + "/api/v1/artifacts/" + artifactID.String() + "/presign")
-	if err != nil {
-		t.Fatalf("GET presign: %v", err)
-	}
+	presignResp := authGet(t, ts.URL+"/api/v1/artifacts/"+artifactID.String()+"/presign", hdr)
 	var env struct {
 		Data struct {
 			URL       string `json:"url"`
@@ -252,12 +264,9 @@ func TestArtifactPresignUnownedReturns404(t *testing.T) {
 		AccessKeyID: akid, AccessKeySecret: secret, UsePathStyle: true, PresignTTL: time.Minute,
 	})
 	// Engine runs as a DIFFERENT user → the seeded artifact is unowned.
-	ts := newArtifactEngine(t, pool, ossClient, tenant, other)
+	ts, hdr := newArtifactEngine(t, pool, ossClient, tenant, other)
 
-	resp, err := http.Get(ts.URL + "/api/v1/artifacts/" + artifactID.String() + "/presign")
-	if err != nil {
-		t.Fatalf("GET presign: %v", err)
-	}
+	resp := authGet(t, ts.URL+"/api/v1/artifacts/"+artifactID.String()+"/presign", hdr)
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound || !bytes.Contains(body, []byte("artifact_not_found")) {

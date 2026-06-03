@@ -28,6 +28,7 @@ import (
 
 	appcost "github.com/whoisnian/agent-example/api/internal/application/cost"
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/config"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/messaging"
@@ -84,6 +85,12 @@ func runServer(args []string) int {
 		logger.Error("dev_user_id_invalid", slog.String("err", err.Error()))
 		return 1
 	}
+
+	// JWT signer/verifier (add-api-auth-jwt). The verifier authenticates every
+	// protected request via the auth middleware; the issuer mints tokens at
+	// /auth/login. The secret is required:"true" (validated in config.Load).
+	jwtIssuer := auth.NewIssuer(cfg.AuthJWTSecret, cfg.AuthJWTTTL)
+	jwtVerifier := auth.NewVerifier(cfg.AuthJWTSecret)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -183,9 +190,18 @@ func runServer(args []string) int {
 	)
 	appSvc := apptask.NewService(domainSvc)
 	taskHandlers := &httpapi.TaskHandlers{
-		App:         appSvc,
+		App:     appSvc,
+		Logger:  logger,
+		Metrics: metrics,
+	}
+
+	// Auth-login wiring (add-api-auth-jwt). The public POST /auth/login verifies
+	// the configured dev credentials and issues a token for the dev principal.
+	authHandlers := &httpapi.AuthHandlers{
+		Issuer:      jwtIssuer,
 		Logger:      logger,
-		Metrics:     metrics,
+		DevEmail:    cfg.AuthDevEmail,
+		DevPassword: cfg.AuthDevPassword,
 		DevTenantID: devTenant,
 		DevUserID:   devUser,
 	}
@@ -251,19 +267,15 @@ func runServer(args []string) int {
 	domainReadSvc := taskdomain.NewReadService(queries)
 	appReadSvc := apptask.NewReadService(domainReadSvc)
 	taskReadHandlers := &httpapi.TaskReadHandlers{
-		App:         appReadSvc,
-		Logger:      logger,
-		DevTenantID: devTenant,
-		DevUserID:   devUser,
+		App:    appReadSvc,
+		Logger: logger,
 	}
 
 	// Task-cost-api wiring (queries-only, shares the dev identity).
 	appCostReadSvc := apptask.NewCostReadService(taskdomain.NewCostReadService(queries))
 	taskCostHandlers := &httpapi.TaskCostHandlers{
-		App:         appCostReadSvc,
-		Logger:      logger,
-		DevTenantID: devTenant,
-		DevUserID:   devUser,
+		App:    appCostReadSvc,
+		Logger: logger,
 	}
 
 	// Task-control-api wiring (writes outbox; worker drives state via events).
@@ -271,11 +283,9 @@ func runServer(args []string) int {
 		taskdomain.NewControlService(pool.Pool, queries, taskdomain.SystemClock{}),
 	)
 	taskControlHandlers := &httpapi.TaskControlHandlers{
-		App:         appControlSvc,
-		Logger:      logger,
-		Metrics:     metrics,
-		DevTenantID: devTenant,
-		DevUserID:   devUser,
+		App:     appControlSvc,
+		Logger:  logger,
+		Metrics: metrics,
 	}
 
 	// Artifacts-api wiring (queries-only read service + OSS presigner). The OSS
@@ -294,11 +304,9 @@ func runServer(args []string) int {
 		taskdomain.NewArtifactReadService(queries, ossClient),
 	)
 	artifactHandlers := &httpapi.ArtifactHandlers{
-		App:         appArtifactSvc,
-		Logger:      logger,
-		Metrics:     metrics,
-		DevTenantID: devTenant,
-		DevUserID:   devUser,
+		App:     appArtifactSvc,
+		Logger:  logger,
+		Metrics: metrics,
 	}
 
 	// Realtime-gateway wiring (add-realtime-gateway). The Hub fans worker events
@@ -315,7 +323,7 @@ func runServer(args []string) int {
 		ReadLimit:          cfg.WSReadLimit,
 		MaxTopicsPerConn:   cfg.WSMaxTopicsPerConn,
 		MaxSubscribeTopics: cfg.WSMaxSubscribeTopics,
-	}, logger, metrics, devTenant, devUser)
+	}, logger, metrics, jwtVerifier)
 	fanoutConsumer := messaging.NewFanoutConsumer(
 		mqConn,
 		cfg.WSFanoutPrefetch,
@@ -331,10 +339,12 @@ func runServer(args []string) int {
 		fanoutConsumer.Run(fanoutCtx)
 	}()
 
-	engine := httpapi.NewEngine(httpapi.ServerDeps{
+	engine := httpapi.NewEngine(&httpapi.ServerDeps{
 		Logger:              logger,
 		Metrics:             metrics,
 		Probes:              probes,
+		Verifier:            jwtVerifier,
+		AuthHandlers:        authHandlers,
 		TaskHandlers:        taskHandlers,
 		TaskReadHandlers:    taskReadHandlers,
 		TaskCostHandlers:    taskCostHandlers,

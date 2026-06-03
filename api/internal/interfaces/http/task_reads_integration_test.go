@@ -23,7 +23,12 @@ import (
 
 func getJSON(t *testing.T, url string) (int, envelope) {
 	t.Helper()
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		t.Fatalf("build GET %s: %v", url, err)
+	}
+	req.Header.Set("Authorization", intgAuthHeader())
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}

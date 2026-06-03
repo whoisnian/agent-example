@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
@@ -17,10 +16,8 @@ import (
 // Mirrors TaskReadHandlers structurally — owner-scoped 404, decimal-string
 // money, unified envelope.
 type TaskCostHandlers struct {
-	App         *apptask.CostReadService
-	Logger      *slog.Logger
-	DevTenantID uuid.UUID
-	DevUserID   uuid.UUID
+	App    *apptask.CostReadService
+	Logger *slog.Logger
 	// NowFn lets tests inject a fixed clock for the /me/cost default window
 	// (S7). Production wires time.Now.
 	NowFn func() time.Time
@@ -40,7 +37,11 @@ func (h *TaskCostHandlers) getTaskCost(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.App.GetTaskCost(c.Request.Context(), h.DevTenantID, h.DevUserID, taskID)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.GetTaskCost(c.Request.Context(), p.TenantID, p.UserID, taskID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -54,7 +55,11 @@ func (h *TaskCostHandlers) getVersionCost(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.App.GetVersionCost(c.Request.Context(), h.DevTenantID, h.DevUserID, versionID)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.GetVersionCost(c.Request.Context(), p.TenantID, p.UserID, versionID)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -92,9 +97,14 @@ func (h *TaskCostHandlers) getOwnerCost(c *gin.Context) {
 
 	from, to = taskdomain.ApplyWindowDefaults(groupBy, from, to, h.now)
 
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+
 	ctx := c.Request.Context()
 	if groupBy == "" {
-		res, err := h.App.GetOwnerCostTotal(ctx, h.DevTenantID, h.DevUserID, from, to)
+		res, err := h.App.GetOwnerCostTotal(ctx, p.TenantID, p.UserID, from, to)
 		if err != nil {
 			h.handleError(c, err)
 			return
@@ -103,7 +113,7 @@ func (h *TaskCostHandlers) getOwnerCost(c *gin.Context) {
 		return
 	}
 
-	res, err := h.App.GetOwnerCostGrouped(ctx, h.DevTenantID, h.DevUserID, groupBy, from, to)
+	res, err := h.App.GetOwnerCostGrouped(ctx, p.TenantID, p.UserID, groupBy, from, to)
 	if err != nil {
 		h.handleError(c, err)
 		return
@@ -112,8 +122,7 @@ func (h *TaskCostHandlers) getOwnerCost(c *gin.Context) {
 }
 
 // listPricing handles GET /api/v1/pricing. Owner-agnostic — does not consult
-// h.DevTenantID / h.DevUserID. Every authenticated caller receives the same
-// body.
+// the caller principal. Every authenticated caller receives the same body.
 func (h *TaskCostHandlers) listPricing(c *gin.Context) {
 	res, err := h.App.ListPricing(c.Request.Context())
 	if err != nil {

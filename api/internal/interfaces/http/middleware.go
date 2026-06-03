@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"log/slog"
+	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -12,13 +14,14 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
 
 const (
-	headerRequestID  = "X-Request-ID"
+	headerRequestID   = "X-Request-ID"
 	headerTraceParent = "traceparent"
-	tracerName       = "github.com/whoisnian/agent-example/api/http"
+	tracerName        = "github.com/whoisnian/agent-example/api/http"
 )
 
 // requestIDMiddleware extracts or generates a request id, stores it in
@@ -103,11 +106,69 @@ func accessLogMiddleware(logger *slog.Logger) gin.HandlerFunc {
 	}
 }
 
-// authMiddleware is the pass-through stub reserved by design. Real auth
-// arrives via the `add-api-auth` proposal; placing the slot here keeps the
-// chain order stable.
-func authMiddleware() gin.HandlerFunc {
+// publicRoute is a (method, route-template) pair the auth middleware lets
+// through without a token.
+type publicRoute struct{ method, path string }
+
+// publicRoutes is the fixed allowlist: the health/metrics probes and the login
+// endpoint (a caller has no token yet). Keyed on the route TEMPLATE
+// (c.FullPath()) + method so only the intended verb is public and trailing-
+// slash / query tricks can't widen it.
+var publicRoutes = map[publicRoute]bool{
+	{http.MethodGet, "/healthz"}:            true,
+	{http.MethodGet, "/readyz"}:             true,
+	{http.MethodGet, "/metrics"}:            true,
+	{http.MethodPost, "/api/v1/auth/login"}: true,
+}
+
+// authMiddleware authenticates every non-public request via a Bearer JWT. On
+// success it injects the resolved Principal into the request context; on a
+// missing / malformed / bad-signature / expired token it writes a 401
+// `unauthenticated` envelope (the shape the web client's clear-token-and-
+// redirect path expects) and aborts. Public routes bypass the token check.
+func authMiddleware(verifier *auth.Verifier) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if publicRoutes[publicRoute{c.Request.Method, c.FullPath()}] {
+			c.Next()
+			return
+		}
+		tok, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok {
+			Error(c, http.StatusUnauthorized, "unauthenticated", "missing or malformed authorization header")
+			return
+		}
+		p, err := verifier.Parse(tok)
+		if err != nil {
+			Error(c, http.StatusUnauthorized, "unauthenticated", "invalid or expired token")
+			return
+		}
+		c.Request = c.Request.WithContext(auth.WithPrincipal(c.Request.Context(), p))
 		c.Next()
 	}
+}
+
+// bearerToken extracts the token from an `Authorization: Bearer <token>` header
+// (scheme is case-insensitive), returning ok=false when absent/malformed.
+func bearerToken(header string) (string, bool) {
+	const prefix = "Bearer "
+	if len(header) < len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
+		return "", false
+	}
+	if tok := strings.TrimSpace(header[len(prefix):]); tok != "" {
+		return tok, true
+	}
+	return "", false
+}
+
+// principalOrAbort returns the authenticated principal placed by authMiddleware.
+// On a protected route the middleware guarantees one; its absence is a
+// programming error (a route mistakenly off the chain), so we fail CLOSED with
+// 500 — never fall back to a zero-UUID owner.
+func principalOrAbort(c *gin.Context) (auth.Principal, bool) {
+	p, ok := auth.PrincipalFromContext(c.Request.Context())
+	if !ok {
+		Error(c, http.StatusInternalServerError, "internal_error", "missing authenticated principal")
+		return auth.Principal{}, false
+	}
+	return p, true
 }

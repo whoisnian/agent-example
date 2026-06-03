@@ -77,13 +77,12 @@ func newArtEngine(t *testing.T, q sqlc.Querier, pre taskdomain.ArtifactPresigner
 	gin.SetMode(gin.TestMode)
 	e := gin.New()
 	e.Use(gin.Recovery())
+	e.Use(injectPrincipal(artTenant, artUser))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := &ArtifactHandlers{
-		App:         apptask.NewArtifactReadService(taskdomain.NewArtifactReadService(q, pre)),
-		Logger:      logger,
-		Metrics:     m,
-		DevTenantID: artTenant,
-		DevUserID:   artUser,
+		App:     apptask.NewArtifactReadService(taskdomain.NewArtifactReadService(q, pre)),
+		Logger:  logger,
+		Metrics: m,
 	}
 	v1 := e.Group("/api/v1")
 	h.Register(v1)
@@ -224,4 +223,4 @@ func TestHTTP_Presign_400BeforeAnyLookup(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
-func i64(n int64) *int64    { return &n }
+func i64(n int64) *int64   { return &n }

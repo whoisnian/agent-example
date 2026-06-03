@@ -13,12 +13,16 @@ import (
 	"github.com/google/uuid"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
 
 // closeAuthMissing is the client's "auth expired" signal (web-realtime-client).
-// It gates token PRESENCE only — the real access boundary is the subscribe-time
-// ownership check.
+// The same code 4001 is used for EVERY auth failure reason (missing / malformed
+// / bad-signature / expired) so the client's single "4001 → re-login" handler
+// applies regardless of why. Token validity is necessary but not the full
+// boundary — the real per-topic access control is the subscribe-time ownership
+// check, which now resolves against the connection's token-derived principal.
 const closeAuthMissing websocket.StatusCode = 4001
 
 // ownershipProbeTimeout bounds a single subscribe-time ownership DB probe so a
@@ -48,16 +52,15 @@ type Config struct {
 
 // Gateway is the /ws endpoint. It handles the handshake (origin + token),
 // per-connection read loop, and subscribe authorization, wiring accepted
-// connections into the Hub for fan-out. Identity resolves through the existing
-// Dev stub, like every REST handler today.
+// connections into the Hub for fan-out. The connection identity is resolved
+// from the validated `?token=<jwt>` claims, like every REST handler.
 type Gateway struct {
 	hub       *Hub
 	ownership OwnershipChecker
 	cfg       Config
 	logger    *slog.Logger
 	metrics   *observability.Metrics
-	devTenant uuid.UUID
-	devUser   uuid.UUID
+	verifier  *auth.Verifier
 }
 
 // NewGateway builds the gateway, filling in sane defaults for any unset limit.
@@ -67,7 +70,7 @@ func NewGateway(
 	cfg Config,
 	logger *slog.Logger,
 	metrics *observability.Metrics,
-	devTenant, devUser uuid.UUID,
+	verifier *auth.Verifier,
 ) *Gateway {
 	if cfg.SendBuffer <= 0 {
 		cfg.SendBuffer = 128
@@ -90,8 +93,7 @@ func NewGateway(
 		cfg:       cfg,
 		logger:    logger,
 		metrics:   metrics,
-		devTenant: devTenant,
-		devUser:   devUser,
+		verifier:  verifier,
 	}
 }
 
@@ -126,18 +128,21 @@ func (g *Gateway) handle(c *gin.Context) {
 		return
 	}
 
-	// Token PRESENCE gate (4001). Read via c.Query so the token never enters a
-	// log field; RawQuery is likewise never logged.
-	if c.Query("token") == "" {
-		_ = wsConn.Close(closeAuthMissing, "missing token")
-		g.logger.LogAttrs(c.Request.Context(), slog.LevelInfo, "ws_auth_missing",
+	// Token validation (4001 on any failure: missing/malformed/bad-sig/expired).
+	// Read via c.Query so the token never enters a log field; RawQuery is
+	// likewise never logged. On success the principal becomes the connection
+	// identity that the subscribe-time ownership check resolves against.
+	principal, err := g.verifier.Parse(c.Query("token"))
+	if err != nil {
+		_ = wsConn.Close(closeAuthMissing, "invalid token")
+		g.logger.LogAttrs(c.Request.Context(), slog.LevelInfo, "ws_auth_rejected",
 			slog.String("trace_id", traceID),
 		)
 		return
 	}
 
 	wsConn.SetReadLimit(g.cfg.ReadLimit)
-	conn := newConn(wsConn, g.devTenant, g.devUser, g.cfg.SendBuffer)
+	conn := newConn(wsConn, principal.TenantID, principal.UserID, g.cfg.SendBuffer)
 	g.hub.register(conn)
 	g.logger.LogAttrs(c.Request.Context(), slog.LevelInfo, "ws_connected", slog.String("trace_id", traceID))
 

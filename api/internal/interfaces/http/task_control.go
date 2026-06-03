@@ -18,11 +18,9 @@ import (
 
 // TaskControlHandlers serves POST /api/v1/tasks/{task_id}/control.
 type TaskControlHandlers struct {
-	App         *apptask.ControlService
-	Logger      *slog.Logger
-	Metrics     *observability.Metrics
-	DevTenantID uuid.UUID
-	DevUserID   uuid.UUID
+	App     *apptask.ControlService
+	Logger  *slog.Logger
+	Metrics *observability.Metrics
 }
 
 // controlRequest is the JSON body shape.
@@ -99,7 +97,12 @@ func (h *TaskControlHandlers) postControl(c *gin.Context) {
 		return
 	}
 
-	res, err := h.App.Apply(c.Request.Context(), h.DevTenantID, h.DevUserID, taskID, taskdomain.ControlAction(req.Action), reason)
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+
+	res, err := h.App.Apply(c.Request.Context(), p.TenantID, p.UserID, taskID, taskdomain.ControlAction(req.Action), reason)
 	if err != nil {
 		switch {
 		case errors.Is(err, taskdomain.ErrTaskNotFound):
