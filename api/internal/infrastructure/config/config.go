@@ -31,23 +31,23 @@ type Config struct {
 	LogLevel string `env:"LOG_LEVEL" envDefault:"info" yaml:"log_level"`
 
 	// Database
-	DatabaseURL        string        `env:"DATABASE_URL" required:"true" yaml:"database_url"`
-	DBMaxConns         int32         `env:"DB_MAX_CONNS" envDefault:"20" yaml:"db_max_conns"`
-	DBMinConns         int32         `env:"DB_MIN_CONNS" envDefault:"2" yaml:"db_min_conns"`
-	DBMaxConnLifetime  time.Duration `env:"DB_MAX_CONN_LIFETIME" envDefault:"30m" yaml:"db_max_conn_lifetime"`
-	DBMaxConnIdleTime  time.Duration `env:"DB_MAX_CONN_IDLE_TIME" envDefault:"5m" yaml:"db_max_conn_idle_time"`
-	DBMigrateOnBoot    bool          `env:"DB_MIGRATE_ON_BOOT" envDefault:"false" yaml:"db_migrate_on_boot"`
-	DBConnectTimeout   time.Duration `env:"DB_CONNECT_TIMEOUT" envDefault:"5s" yaml:"db_connect_timeout"`
+	DatabaseURL       string        `env:"DATABASE_URL" required:"true" yaml:"database_url"`
+	DBMaxConns        int32         `env:"DB_MAX_CONNS" envDefault:"20" yaml:"db_max_conns"`
+	DBMinConns        int32         `env:"DB_MIN_CONNS" envDefault:"2" yaml:"db_min_conns"`
+	DBMaxConnLifetime time.Duration `env:"DB_MAX_CONN_LIFETIME" envDefault:"30m" yaml:"db_max_conn_lifetime"`
+	DBMaxConnIdleTime time.Duration `env:"DB_MAX_CONN_IDLE_TIME" envDefault:"5m" yaml:"db_max_conn_idle_time"`
+	DBMigrateOnBoot   bool          `env:"DB_MIGRATE_ON_BOOT" envDefault:"false" yaml:"db_migrate_on_boot"`
+	DBConnectTimeout  time.Duration `env:"DB_CONNECT_TIMEOUT" envDefault:"5s" yaml:"db_connect_timeout"`
 
 	// RabbitMQ
 	RabbitMQURL            string        `env:"RABBITMQ_URL" required:"true" yaml:"rabbitmq_url"`
 	RabbitMQConfirmTimeout time.Duration `env:"RABBITMQ_CONFIRM_TIMEOUT" envDefault:"5s" yaml:"rabbitmq_confirm_timeout"`
 
 	// Outbox Relayer
-	OutboxBatchSize   int           `env:"OUTBOX_BATCH_SIZE" envDefault:"100" yaml:"outbox_batch_size"`
+	OutboxBatchSize    int           `env:"OUTBOX_BATCH_SIZE" envDefault:"100" yaml:"outbox_batch_size"`
 	OutboxTickInterval time.Duration `env:"OUTBOX_TICK_INTERVAL" envDefault:"1s" yaml:"outbox_tick_interval"`
-	OutboxMaxAttempts int           `env:"OUTBOX_MAX_ATTEMPTS" envDefault:"10" yaml:"outbox_max_attempts"`
-	OutboxLockID      int64         `env:"OUTBOX_LOCK_ID" envDefault:"918273645" yaml:"outbox_lock_id"`
+	OutboxMaxAttempts  int           `env:"OUTBOX_MAX_ATTEMPTS" envDefault:"10" yaml:"outbox_max_attempts"`
+	OutboxLockID       int64         `env:"OUTBOX_LOCK_ID" envDefault:"918273645" yaml:"outbox_lock_id"`
 
 	// Event-ingest consumer (add-event-ingest-status-sync)
 	EventConsumerPrefetch int `env:"EVENT_CONSUMER_PREFETCH" envDefault:"16" yaml:"event_consumer_prefetch"`
@@ -62,10 +62,24 @@ type Config struct {
 	// Task-write-api
 	DefaultLane         string        `env:"DEFAULT_LANE" envDefault:"default" yaml:"default_lane"`
 	DefaultTaskDeadline time.Duration `env:"DEFAULT_TASK_DEADLINE" envDefault:"60m" yaml:"default_task_deadline"`
-	// Dev-mode principal — auth middleware is a stub today; these IDs fill in
-	// the tenant/user fields the schema requires until JWT extraction lands.
+	// Dev-mode principal — the identity the login endpoint issues a token for.
+	// Until a real user store lands (add-api-user-store), this single principal
+	// fills the tenant/user fields the schema requires.
 	DevTenantID string `env:"DEV_TENANT_ID" envDefault:"00000000-0000-0000-0000-000000000001" yaml:"dev_tenant_id"`
 	DevUserID   string `env:"DEV_USER_ID" envDefault:"00000000-0000-0000-0000-000000000002" yaml:"dev_user_id"`
+
+	// Auth / JWT (add-api-auth-jwt). AUTH_JWT_SECRET signs+verifies HS256 access
+	// tokens and is required:"true" (same fail-fast path as DATABASE_URL / OSS_*).
+	// AUTH_DEV_PASSWORD is the MVP credential source (verified at POST
+	// /auth/login, which then issues a token for DevTenantID/DevUserID); it is
+	// required:"true" so the build ships NO well-known weak login. AUTH_DEV_EMAIL
+	// may default. SECURITY: AUTH_JWT_SECRET and AUTH_DEV_PASSWORD MUST NOT be
+	// logged — the loader still has no config-dump line (see OSS note above); if
+	// one is ever added it MUST redact these alongside the OSS credentials.
+	AuthJWTSecret   string        `env:"AUTH_JWT_SECRET" required:"true" yaml:"auth_jwt_secret"`
+	AuthJWTTTL      time.Duration `env:"AUTH_JWT_TTL" envDefault:"24h" yaml:"auth_jwt_ttl"`
+	AuthDevEmail    string        `env:"AUTH_DEV_EMAIL" envDefault:"dev@example.com" yaml:"auth_dev_email"`
+	AuthDevPassword string        `env:"AUTH_DEV_PASSWORD" required:"true" yaml:"auth_dev_password"`
 
 	// OSS / artifacts-api. The four credential/location keys REUSE the worker's
 	// exact env names (worker/worker/core/config.py) so a single shared config

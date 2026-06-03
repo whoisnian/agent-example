@@ -17,14 +17,16 @@ func envMap(m map[string]string) func(string) (string, bool) {
 	}
 }
 
-// withOSS merges the four required OSS keys into m so tests that aren't about
-// OSS can satisfy the required-field validation. Keys already in m win.
+// withOSS merges the required OSS + auth keys into m so tests that aren't about
+// those can satisfy the required-field validation. Keys already in m win.
 func withOSS(m map[string]string) map[string]string {
 	out := map[string]string{
 		"OSS_ENDPOINT":          "http://oss:9000",
 		"OSS_BUCKET":            "artifacts",
 		"OSS_ACCESS_KEY_ID":     "akid",
 		"OSS_ACCESS_KEY_SECRET": "secret",
+		"AUTH_JWT_SECRET":       "test-secret",
+		"AUTH_DEV_PASSWORD":     "test-password",
 	}
 	for k, v := range m {
 		out[k] = v
@@ -68,6 +70,8 @@ func TestLoad_OSS_RequiredAndDefaults(t *testing.T) {
 		"OSS_BUCKET":            "artifacts",
 		"OSS_ACCESS_KEY_ID":     "akid",
 		"OSS_ACCESS_KEY_SECRET": "secret",
+		"AUTH_JWT_SECRET":       "test-secret",
+		"AUTH_DEV_PASSWORD":     "test-password",
 	}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -103,15 +107,52 @@ func TestLoad_OSS_RequiredAndDefaults(t *testing.T) {
 	}
 }
 
-func TestLoad_EnvOnly_AppliesValues(t *testing.T) {
-	cfg, err := Load("", envMap(withOSS(map[string]string{
+func TestLoad_Auth_RequiredMissing(t *testing.T) {
+	// AUTH_JWT_SECRET and AUTH_DEV_PASSWORD are required (no default weak login).
+	// With every OTHER required key present, omitting each auth key must fail.
+	base := map[string]string{
 		"DATABASE_URL":          "postgres://x",
 		"RABBITMQ_URL":          "amqp://y",
-		"HTTP_ADDR":             ":9090",
-		"LOG_LEVEL":             "debug",
-		"DB_MAX_CONNS":          "50",
+		"OSS_ENDPOINT":          "http://oss:9000",
+		"OSS_BUCKET":            "artifacts",
+		"OSS_ACCESS_KEY_ID":     "akid",
+		"OSS_ACCESS_KEY_SECRET": "secret",
+		"AUTH_JWT_SECRET":       "s",
+		"AUTH_DEV_PASSWORD":     "p",
+	}
+	for _, omit := range []string{"AUTH_JWT_SECRET", "AUTH_DEV_PASSWORD"} {
+		m := map[string]string{}
+		for k, v := range base {
+			if k != omit {
+				m[k] = v
+			}
+		}
+		_, err := Load("", envMap(m))
+		var mr *MissingRequiredError
+		if !errors.As(err, &mr) {
+			t.Fatalf("omitting %s: expected MissingRequiredError, got %T: %v", omit, err, err)
+		}
+		found := false
+		for _, k := range mr.Keys {
+			if k == omit {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("omitting %s: not named in missing list %v", omit, mr.Keys)
+		}
+	}
+}
+
+func TestLoad_EnvOnly_AppliesValues(t *testing.T) {
+	cfg, err := Load("", envMap(withOSS(map[string]string{
+		"DATABASE_URL":           "postgres://x",
+		"RABBITMQ_URL":           "amqp://y",
+		"HTTP_ADDR":              ":9090",
+		"LOG_LEVEL":              "debug",
+		"DB_MAX_CONNS":           "50",
 		"SHUTDOWN_DRAIN_TIMEOUT": "10s",
-		"DB_MIGRATE_ON_BOOT":    "true",
+		"DB_MIGRATE_ON_BOOT":     "true",
 	})))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -146,6 +187,8 @@ oss_endpoint: http://oss:9000
 oss_bucket: artifacts
 oss_access_key_id: akid
 oss_access_key_secret: secret
+auth_jwt_secret: yaml-secret
+auth_dev_password: yaml-password
 http_addr: ":7000"
 log_level: warn
 db_max_conns: 33
