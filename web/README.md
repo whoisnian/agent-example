@@ -64,6 +64,7 @@ npm run build && npm run preview
 |---|---|---|
 | `VITE_API_BASE_URL` | （空）→ 同源 | REST API 基址，例如 `http://localhost:8080` |
 | `VITE_WS_URL` | `ws://localhost:8080/api/v1/ws` | WebSocket 地址 |
+| `VITE_DEV_PROXY_TARGET` | `http://localhost:8080` | **仅 dev**：Vite 把 `/api`（含 `/api/v1/ws` 的 WS 升级）代理到此后端。`VITE_API_BASE_URL` 留空走同源时，由本代理把请求转发到后端，避免登录等 `/api` 请求命中 dev server 返回 404。 |
 
 ## 模块协作约定
 
