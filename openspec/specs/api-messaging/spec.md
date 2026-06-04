@@ -15,7 +15,9 @@ At startup, the service SHALL idempotently declare the messaging topology define
 - queue `q.cost.events` bound to `cost.exchange` with routing key `cost.#`,
 - queue `q.task.dlq` bound to `task.dlx` for dead-letter routing.
 
-All declared queues SHALL be `quorum` type. Per-worker / per-lane execute queues are declared lazily by the worker side and are out of scope for this capability. The same applies to per-worker control queues bound to `task.control`.
+All declared *durable work* queues SHALL be `quorum` type. Per-worker / per-lane execute queues are declared lazily by the worker side and are out of scope for this capability; the per-lane execute queue (`q.task.execute.<lane>`) is itself a durable quorum queue.
+
+Per-worker control queues (`q.task.control.<worker_id>`, bound to `task.control`) are the one exception: they SHALL be declared as **classic `exclusive` + `auto-delete`, non-durable** queues, NOT quorum. Rationale: `worker_id` is a per-process UUID, so the control queue is connection-scoped and must vanish when the worker disconnects rather than accumulate one orphan per restart. Quorum queues cannot satisfy this — they must be durable and cannot be exclusive/auto-delete — and a non-durable *non-exclusive* queue trips RabbitMQ's deprecated `transient_nonexcl_queues` feature (rejected with `reply_code=541`). An exclusive queue is connection-scoped, auto-deleted on disconnect, and exempt from that deprecation. This mirrors the realtime-gateway fan-out queue (exclusive, auto-delete, non-durable).
 
 The declaration step SHALL include a small set of "retypable exchanges" — exchanges whose `type` was changed by a previous OpenSpec change — and pre-delete them before re-declaring, so the topology can evolve. For `add-task-control-api`, that set contains exactly `task.control`. The pre-delete uses `ExchangeDelete(name, ifUnused=false, noWait=false)` from `amqp091-go` — `ifUnused=false` lets the delete proceed even when bindings exist, and `noWait=false` blocks until the broker confirms before the subsequent `ExchangeDeclare`. (There is no `if-empty` argument on exchange deletion; that's a queue-deletion semantic.)
 
@@ -28,6 +30,10 @@ The retypable-exchanges list MUST be **append-only across releases**: once an ex
 #### Scenario: Topology fails fast on incompatible existing entity
 - **WHEN** an existing exchange has a different type than declared AND it is NOT in the retypable set
 - **THEN** startup MUST fail with a fatal log naming the conflicting entity, and the process MUST exit non-zero
+
+#### Scenario: Per-worker control queue is ephemeral, not quorum
+- **WHEN** a worker declares its control queue `q.task.control.<worker_id>` at startup
+- **THEN** the queue MUST be declared classic `exclusive` + `auto-delete` (non-durable) WITHOUT `x-queue-type=quorum`, so it is connection-scoped and the broker reclaims it on disconnect; declaring it non-durable AND non-exclusive (which would trip `transient_nonexcl_queues`, `reply_code=541`) is forbidden
 
 #### Scenario: Retypable exchange is re-declared
 - **GIVEN** `task.control` was previously declared as `direct` (pre-add-task-control-api)

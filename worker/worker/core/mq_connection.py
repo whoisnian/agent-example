@@ -173,8 +173,8 @@ async def declare_worker_queues(
     """Declare ``q.task.execute.<lane>`` and ``q.task.control.<worker_id>``.
 
     Returns ``(execute_queue, control_queue, control_exchange)``. The control
-    queue is declared auto-delete=True so it disappears when the worker
-    disconnects. Unlike the execute queue, the control queue is **not** bound
+    queue is declared exclusive + auto-delete (classic, not quorum) so it is
+    connection-scoped and disappears when the worker disconnects. Unlike the execute queue, the control queue is **not** bound
     to its exchange here — bindings to ``task.control`` (now a *topic*
     exchange) happen dynamically per claim via
     ``ControlListener.bind_for``/``unbind_for`` with routing key
@@ -197,13 +197,19 @@ async def declare_worker_queues(
     )
     await execute_queue.bind(task_exchange, routing_key=f"execute.*.{lane}")
 
+    # Connection-scoped ephemeral queue: worker_id is a per-process UUID, so the
+    # control queue must vanish when this worker disconnects rather than pile up.
+    # It is declared *exclusive* (classic) — not quorum — because quorum queues
+    # must be durable and cannot auto-delete, and a non-durable / non-exclusive
+    # queue trips RabbitMQ's deprecated `transient_nonexcl_queues` feature (gets
+    # rejected with reply_code=541). Exclusive queues are connection-scoped,
+    # auto-deleted on disconnect, and exempt from that deprecation. This mirrors
+    # the realtime-gateway fan-out queue pattern (exclusive, auto-delete).
     control_queue = await channel.declare_queue(
         f"q.task.control.{worker_id}",
         durable=False,
+        exclusive=True,
         auto_delete=True,
-        arguments={
-            "x-queue-type": "quorum",
-        },
     )
     control_exchange = await channel.declare_exchange(
         "task.control",
