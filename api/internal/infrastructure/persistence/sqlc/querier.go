@@ -69,6 +69,12 @@ type Querier interface {
 	GetTaskCostWithOwner(ctx context.Context, arg GetTaskCostWithOwnerParams) (GetTaskCostWithOwnerRow, error)
 	GetTaskRunByID(ctx context.Context, id pgtype.UUID) (TaskRun, error)
 	GetTaskVersionByID(ctx context.Context, id pgtype.UUID) (TaskVersion, error)
+	// Credential lookup for POST /auth/login. Matched case-insensitively against
+	// the users_email_lower_key index; the caller passes an already-lowercased
+	// email but lower($1) keeps the predicate aligned with the index regardless.
+	// Returns no rows for an unknown email; the repository maps pgx.ErrNoRows to
+	// identity.ErrUserNotFound (collapsed to ErrInvalidCredentials by the verifier).
+	GetUserByEmail(ctx context.Context, lower string) (User, error)
 	// Look up a specific version inside a task. Used to validate that an
 	// iterate request's optional `base_version_id` belongs to the path task_id
 	// atomically, without round-tripping a separate ownership check.
@@ -231,6 +237,13 @@ type Querier interface {
 	// Setting a terminal status flips the generated is_active column to false
 	// automatically, freeing the one_active_version_per_task index slot.
 	UpdateVersionStatus(ctx context.Context, arg UpdateVersionStatusParams) (int64, error)
+	// Idempotent dev-seed of the tenant. Keyed on id so repeated boots converge;
+	// the name is left untouched on conflict (the seed only guarantees existence).
+	UpsertTenant(ctx context.Context, arg UpsertTenantParams) error
+	// Idempotent dev-seed of the user. Keyed on id so repeated boots converge and a
+	// changed configured password refreshes the stored hash. password_hash holds a
+	// bcrypt digest — never the plaintext.
+	UpsertUser(ctx context.Context, arg UpsertUserParams) error
 	// Sole writer to task_costs (task-cost-data-model §"Task Costs Aggregation
 	// Table"). Per-event aggregate increment; caller pre-resolves NULL→0 and
 	// per-kind column gating per spec §"Aggregate Increment Mapping Per Kind".
