@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 
 	"github.com/whoisnian/agent-example/api/internal/auth"
 )
@@ -27,13 +26,11 @@ func newLoginEngine(t *testing.T) (*gin.Engine, *auth.Verifier) {
 	e := gin.New()
 	e.Use(gin.Recovery())
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	authenticator, _ := newTestAuthenticator(t, loginEmail, loginPassword)
 	h := &AuthHandlers{
-		Issuer:      auth.NewIssuer(testJWTSecret, time.Hour),
-		Logger:      logger,
-		DevEmail:    loginEmail,
-		DevPassword: loginPassword,
-		DevTenantID: uuid.MustParse("00000000-0000-0000-0000-000000000001"),
-		DevUserID:   uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+		Issuer:        auth.NewIssuer(testJWTSecret, time.Hour),
+		Authenticator: authenticator,
+		Logger:        logger,
 	}
 	v1 := e.Group("/api/v1")
 	h.Register(v1)

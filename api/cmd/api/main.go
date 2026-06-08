@@ -14,6 +14,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -29,6 +30,7 @@ import (
 	appcost "github.com/whoisnian/agent-example/api/internal/application/cost"
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
 	"github.com/whoisnian/agent-example/api/internal/auth"
+	"github.com/whoisnian/agent-example/api/internal/domain/identity"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/config"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/messaging"
@@ -125,6 +127,27 @@ func runServer(args []string) int {
 		logger.Info("migrate_up_applied")
 	}
 
+	// sqlc query set over the pool (shared by every read/write path below).
+	queries := sqlc.New(pool.Pool)
+
+	// Dev-user seed (add-api-user-store). Idempotently upsert the dev tenant/user
+	// from config so the login store is bootstrapped without a registration
+	// endpoint. Runs in runServer only (never runMigrate) and after the optional
+	// boot-migrate block above; it does NOT assume the boot migrator ran. If the
+	// users table isn't present yet, fail with an actionable message instead of a
+	// raw driver error. The password and resulting hash are never logged.
+	if seedErr := persistence.SeedDevUser(ctx, queries, devTenant, devUser, cfg.AuthDevEmail, cfg.AuthDevPassword); seedErr != nil {
+		if errors.Is(seedErr, persistence.ErrSchemaNotMigrated) {
+			logger.Error("dev_user_seed_schema_missing",
+				slog.String("hint", "run 'api migrate up' (or set DB_MIGRATE_ON_BOOT=true) before starting the server"))
+		} else {
+			logger.Error("dev_user_seed_failed", slog.String("err", seedErr.Error()))
+		}
+		pool.Close()
+		return 1
+	}
+	logger.Info("dev_user_seeded", slog.String("user_id", devUser.String()))
+
 	// RabbitMQ connection + topology + publisher.
 	mqConn, err := messaging.Dial(ctx, cfg.RabbitMQURL, logger)
 	if err != nil {
@@ -179,7 +202,6 @@ func runServer(args []string) int {
 	probes.Register("rabbitmq", mqConn.Probe)
 
 	// Task-write-api wiring (domain → application → HTTP).
-	queries := sqlc.New(pool.Pool)
 	domainSvc := taskdomain.NewService(
 		pool.Pool,
 		queries,
@@ -195,15 +217,14 @@ func runServer(args []string) int {
 		Metrics: metrics,
 	}
 
-	// Auth-login wiring (add-api-auth-jwt). The public POST /auth/login verifies
-	// the configured dev credentials and issues a token for the dev principal.
+	// Auth-login wiring (add-api-user-store). The public POST /auth/login looks
+	// the user up in the persistent users table and verifies the bcrypt hash;
+	// the token carries the looked-up user's tenant/user id.
+	userRepo := persistence.NewUserRepository(queries)
 	authHandlers := &httpapi.AuthHandlers{
-		Issuer:      jwtIssuer,
-		Logger:      logger,
-		DevEmail:    cfg.AuthDevEmail,
-		DevPassword: cfg.AuthDevPassword,
-		DevTenantID: devTenant,
-		DevUserID:   devUser,
+		Issuer:        jwtIssuer,
+		Authenticator: identity.NewAuthenticator(userRepo),
+		Logger:        logger,
 	}
 
 	// Event-ingest consumer: drives task_versions.status + tasks.status from

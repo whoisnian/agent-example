@@ -1,7 +1,7 @@
 package httpapi
 
 import (
-	"crypto/subtle"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -9,20 +9,19 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/whoisnian/agent-example/api/internal/auth"
+	"github.com/whoisnian/agent-example/api/internal/domain/identity"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
 
-// AuthHandlers serves the public login endpoint. For MVP the credential source
-// is a single configured dev principal (no user store yet — see
-// add-api-user-store); a successful login issues a token for DevTenantID /
-// DevUserID. The password is verified constant-time and is never logged.
+// AuthHandlers serves the public login endpoint. Credentials are verified
+// against the persistent users table via the Authenticator (add-api-user-store,
+// replacing the former in-memory dev-principal comparison); a successful login
+// issues a token for the looked-up user's tenant/user id. The password is never
+// logged.
 type AuthHandlers struct {
-	Issuer      *auth.Issuer
-	Logger      *slog.Logger
-	DevEmail    string
-	DevPassword string
-	DevTenantID uuid.UUID
-	DevUserID   uuid.UUID
+	Issuer        *auth.Issuer
+	Authenticator *identity.Authenticator
+	Logger        *slog.Logger
 }
 
 // Register mounts POST /api/v1/auth/login. This route is PUBLIC — the auth
@@ -48,9 +47,10 @@ type loginResponse struct {
 	User      loginUser `json:"user"`
 }
 
-// login verifies credentials and issues a signed JWT. An unknown email and a
-// wrong password are indistinguishable (both 401 invalid_credentials); a
-// malformed body is 400 invalid_input. The password never enters a log field.
+// login verifies credentials against the user store and issues a signed JWT. An
+// unknown email and a wrong password are indistinguishable (both 401
+// invalid_credentials); a malformed body is 400 invalid_input. The password
+// never enters a log field.
 func (h *AuthHandlers) login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -62,16 +62,21 @@ func (h *AuthHandlers) login(c *gin.Context) {
 		return
 	}
 
-	// Constant-time on BOTH fields, combined so the response never reveals which
-	// one mismatched.
-	emailOK := subtle.ConstantTimeCompare([]byte(req.Email), []byte(h.DevEmail))
-	passOK := subtle.ConstantTimeCompare([]byte(req.Password), []byte(h.DevPassword))
-	if emailOK&passOK != 1 {
-		Error(c, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
+	user, err := h.Authenticator.Verify(c.Request.Context(), req.Email, req.Password)
+	if err != nil {
+		if errors.Is(err, identity.ErrInvalidCredentials) {
+			Error(c, http.StatusUnauthorized, "invalid_credentials", "email or password is incorrect")
+			return
+		}
+		Error(c, http.StatusInternalServerError, "internal_error", "could not verify credentials")
+		h.Logger.LogAttrs(c.Request.Context(), slog.LevelError, "auth_login_verify_failed",
+			slog.String("trace_id", observability.TraceIDFromContext(c.Request.Context())),
+			slog.String("err", err.Error()),
+		)
 		return
 	}
 
-	token, expiresAt, err := h.Issuer.Issue(h.DevTenantID, h.DevUserID)
+	token, expiresAt, err := h.Issuer.Issue(user.TenantID, user.ID)
 	if err != nil {
 		Error(c, http.StatusInternalServerError, "internal_error", "could not issue token")
 		h.Logger.LogAttrs(c.Request.Context(), slog.LevelError, "auth_login_issue_failed",
@@ -83,11 +88,11 @@ func (h *AuthHandlers) login(c *gin.Context) {
 
 	h.Logger.LogAttrs(c.Request.Context(), slog.LevelInfo, "auth_login_ok",
 		slog.String("trace_id", observability.TraceIDFromContext(c.Request.Context())),
-		slog.String("user_id", h.DevUserID.String()),
+		slog.String("user_id", user.ID.String()),
 	)
 	OK(c, loginResponse{
 		Token:     token,
 		ExpiresAt: expiresAt.Format("2006-01-02T15:04:05Z07:00"),
-		User:      loginUser{ID: h.DevUserID, TenantID: h.DevTenantID, Email: h.DevEmail},
+		User:      loginUser{ID: user.ID, TenantID: user.TenantID, Email: user.Email},
 	})
 }

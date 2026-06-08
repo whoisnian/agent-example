@@ -62,20 +62,25 @@ type Config struct {
 	// Task-write-api
 	DefaultLane         string        `env:"DEFAULT_LANE" envDefault:"default" yaml:"default_lane"`
 	DefaultTaskDeadline time.Duration `env:"DEFAULT_TASK_DEADLINE" envDefault:"60m" yaml:"default_task_deadline"`
-	// Dev-mode principal — the identity the login endpoint issues a token for.
-	// Until a real user store lands (add-api-user-store), this single principal
-	// fills the tenant/user fields the schema requires.
+	// Dev-mode principal — the tenant/user ids the dev-user seed upserts at boot
+	// (add-api-user-store). The login endpoint then issues a token for whatever
+	// user the credential lookup resolves; for the seeded dev user that is this
+	// pair. The ids also fill the tenant/user fields the schema requires.
 	DevTenantID string `env:"DEV_TENANT_ID" envDefault:"00000000-0000-0000-0000-000000000001" yaml:"dev_tenant_id"`
 	DevUserID   string `env:"DEV_USER_ID" envDefault:"00000000-0000-0000-0000-000000000002" yaml:"dev_user_id"`
 
 	// Auth / JWT (add-api-auth-jwt). AUTH_JWT_SECRET signs+verifies HS256 access
 	// tokens and is required:"true" (same fail-fast path as DATABASE_URL / OSS_*).
-	// AUTH_DEV_PASSWORD is the MVP credential source (verified at POST
-	// /auth/login, which then issues a token for DevTenantID/DevUserID); it is
-	// required:"true" so the build ships NO well-known weak login. AUTH_DEV_EMAIL
-	// may default. SECURITY: AUTH_JWT_SECRET and AUTH_DEV_PASSWORD MUST NOT be
-	// logged — the loader still has no config-dump line (see OSS note above); if
-	// one is ever added it MUST redact these alongside the OSS credentials.
+	// AUTH_DEV_EMAIL / AUTH_DEV_PASSWORD are SEED INPUTS (add-api-user-store): at
+	// boot the API upserts a users row with email=AUTH_DEV_EMAIL and
+	// password_hash=bcrypt(AUTH_DEV_PASSWORD) for DevUserID/DevTenantID; login
+	// then verifies against that stored row, not these values directly.
+	// AUTH_DEV_PASSWORD stays required:"true" so the build ships NO well-known
+	// weak login (and no user can be seeded without one); AUTH_DEV_EMAIL may
+	// default. SECURITY: AUTH_JWT_SECRET and AUTH_DEV_PASSWORD MUST NOT be logged
+	// (nor the seeded hash) — the loader still has no config-dump line (see OSS
+	// note above); if one is ever added it MUST redact these alongside the OSS
+	// credentials.
 	AuthJWTSecret   string        `env:"AUTH_JWT_SECRET" required:"true" yaml:"auth_jwt_secret"`
 	AuthJWTTTL      time.Duration `env:"AUTH_JWT_TTL" envDefault:"24h" yaml:"auth_jwt_ttl"`
 	AuthDevEmail    string        `env:"AUTH_DEV_EMAIL" envDefault:"dev@example.com" yaml:"auth_dev_email"`

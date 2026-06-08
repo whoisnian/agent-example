@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/whoisnian/agent-example/api/internal/auth"
+	"github.com/whoisnian/agent-example/api/internal/domain/identity"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
 
@@ -30,8 +31,10 @@ func newAuthEngine(t *testing.T) (engine *gin.Engine, handlerRan *bool) {
 		Verifier: testVerifier(),
 		AuthHandlers: &AuthHandlers{
 			Issuer: auth.NewIssuer(testJWTSecret, time.Hour), Logger: logger,
-			DevEmail: "d@e.com", DevPassword: "pw",
-			DevTenantID: uuid.New(), DevUserID: uuid.New(),
+			// These tests exercise only the Bearer middleware on /_whoami and the
+			// public-route bypass; /auth/login is never called with valid creds,
+			// so any non-nil Authenticator suffices.
+			Authenticator: func() *identity.Authenticator { a, _ := newTestAuthenticator(t, "d@e.com", "pw"); return a }(),
 		},
 	}
 	e := NewEngine(&deps)
