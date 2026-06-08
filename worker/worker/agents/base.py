@@ -17,13 +17,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-from worker.agents.loop import run_agent_loop
+from worker.agents.loop import DEFAULT_ROLE_INSTRUCTIONS, run_agent_loop
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
     from worker.agents.loop import WriteFile
     from worker.agents.model import ModelFactory
+    from worker.agents.subagent import RoleInstructions
     from worker.core.messages import TaskExecuteMessage
     from worker.core.run_context import RunContext
 
@@ -34,14 +35,18 @@ class AgentSpec:
 
     ``model_key`` is resolved through the :class:`ModelFactory` at run time.
     ``tool_names`` must each resolve to a registered ``tool`` plugin.
-    ``subagents`` are ``deepagents``-compatible subagent definitions
-    (planner / executor / critic) passed through to ``create_deep_agent``.
+    ``subagent_names`` must each resolve to a registered ``subagent`` plugin;
+    the loop sources its planner / executor / critic instructions from them.
+    ``subagents`` are ``deepagents``-compatible subagent definitions passed
+    through to ``create_deep_agent`` on the optional :func:`build_deep_agent`
+    path (distinct from ``subagent_names``, which feeds the MVP loop).
     """
 
     task_type: str
     model_key: str
     system_prompt_path: Path
     tool_names: tuple[str, ...] = ()
+    subagent_names: tuple[str, ...] = ()
     subagents: tuple[Any, ...] = ()
     limits: dict[str, Any] = field(default_factory=dict)
 
@@ -110,6 +115,7 @@ class LoopAgent:
         write_file: WriteFile,
         max_step_retries: int,
         metrics: Any | None = None,
+        roles: RoleInstructions = DEFAULT_ROLE_INSTRUCTIONS,
     ) -> None:
         self._spec = spec
         self._model_factory = model_factory
@@ -117,6 +123,7 @@ class LoopAgent:
         self._write_file = write_file
         self._max_step_retries = max_step_retries
         self._metrics = metrics
+        self._roles = roles
 
     @property
     def task_type(self) -> str:
@@ -125,6 +132,11 @@ class LoopAgent:
     @property
     def spec(self) -> AgentSpec:
         return self._spec
+
+    @property
+    def roles(self) -> RoleInstructions:
+        """The planner/executor/critic instructions this agent runs the loop with."""
+        return self._roles
 
     async def run(self, ctx: RunContext, message: TaskExecuteMessage) -> None:
         model = self._model_factory.get(self._spec.model_key)
@@ -138,6 +150,7 @@ class LoopAgent:
                 max_step_retries=self._max_step_retries,
                 deadline_ts=message.deadline_ts,
                 metrics=self._metrics,
+                roles=self._roles,
             )
             for art in produced:
                 await self._persistence.insert_artifact(

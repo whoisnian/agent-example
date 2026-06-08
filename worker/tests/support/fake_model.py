@@ -12,15 +12,42 @@ scripted response; tests assemble the script to drive the desired transcript.
 
 from __future__ import annotations
 
+from typing import Any
+
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeMessagesListChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.outputs import ChatResult
+from pydantic import Field
 
 
 def scripted_model(responses: list[str | AIMessage]) -> FakeMessagesListChatModel:
     """Build a chat model that replays ``responses`` (str or AIMessage) in order."""
     messages = [AIMessage(content=r) if isinstance(r, str) else r for r in responses]
     return FakeMessagesListChatModel(responses=messages)
+
+
+class CapturingScriptedChatModel(FakeMessagesListChatModel):
+    """Scripted model that also records each invocation's input ``messages``.
+
+    The stock ``FakeMessagesListChatModel`` discards the prompt it receives, so a
+    test cannot observe which instruction the loop sent. This subclass appends
+    every call's ``messages`` to the public :attr:`calls` list before replaying
+    the scripted response, letting a test assert the planner / executor / critic
+    instruction actually reached the model (drift guard for add-worker-subagent-plugin).
+    """
+
+    calls: list[list[BaseMessage]] = Field(default_factory=list)
+
+    def _generate(self, messages: list[BaseMessage], *args: Any, **kwargs: Any) -> ChatResult:
+        self.calls.append(list(messages))
+        return super()._generate(messages, *args, **kwargs)
+
+
+def capturing_scripted_model(responses: list[str | AIMessage]) -> CapturingScriptedChatModel:
+    """Like :func:`scripted_model`, but the returned model records its inputs."""
+    messages = [AIMessage(content=r) if isinstance(r, str) else r for r in responses]
+    return CapturingScriptedChatModel(responses=messages)
 
 
 class FakeModelFactory:

@@ -15,10 +15,11 @@ from worker.agents.loop import (
     StepRetryBudgetExceeded,
     run_agent_loop,
 )
+from worker.agents.subagent import RoleInstructions
 from worker.core.persistence import CheckpointConflictError
 from worker.core.run_context import CancelToken, PauseToken
 
-from tests.support.fake_model import scripted_model
+from tests.support.fake_model import capturing_scripted_model, scripted_model
 
 
 class FakeCheckpointStore:
@@ -114,6 +115,49 @@ async def test_happy_path_plan_steps_finish() -> None:
     # One artifact produced (a.py), ctx.step advanced to 2.
     assert [a.path for a in produced] == ["a.py"]
     assert ctx.step == 2
+
+
+async def test_roles_supply_planner_executor_critic_instructions() -> None:
+    """The supplied RoleInstructions reach the model in the per-role system message.
+
+    Drift guard: proves the loop runs with the passed-in role instructions (the
+    production path passes those resolved from the subagent plugins) rather than
+    ignoring them in favour of a hardcoded default.
+    """
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    model = capturing_scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "done", "files": []}',
+            '{"verdict": "finish"}',
+        ]
+    )
+    roles = RoleInstructions(
+        planner="PLANNER_MARKER_XYZ",
+        executor="EXECUTOR_MARKER_XYZ",
+        critic="CRITIC_MARKER_XYZ",
+    )
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(path=path, oss_key=path, bytes=0, sha256="h")
+
+    await run_agent_loop(
+        ctx,
+        _msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=write_file,
+        max_step_retries=1,
+        roles=roles,
+    )
+
+    # The three calls are planner, executor, critic in order; each role's marker
+    # MUST appear in that call's SystemMessage (first message).
+    system_texts = [str(call[0].content) for call in model.calls]
+    assert "PLANNER_MARKER_XYZ" in system_texts[0]
+    assert "EXECUTOR_MARKER_XYZ" in system_texts[1]
+    assert "CRITIC_MARKER_XYZ" in system_texts[2]
 
 
 async def test_retry_then_advance() -> None:

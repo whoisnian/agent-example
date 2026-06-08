@@ -35,6 +35,12 @@ def validate_spec(spec: AgentSpec, plugins: PluginRegistry) -> None:
             raise AgentValidationError(
                 f"agent {spec.task_type!r}: declared tool {tool_name!r} is not a registered plugin"
             )
+    for subagent_name in spec.subagent_names:
+        if plugins.get_subagent(subagent_name) is None:
+            raise AgentValidationError(
+                f"agent {spec.task_type!r}: declared subagent {subagent_name!r} "
+                f"is not a registered plugin"
+            )
 
 
 class AgentRegistry:

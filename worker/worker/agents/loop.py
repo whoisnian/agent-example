@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from worker.agents.subagent import RoleInstructions
 from worker.core.persistence import CheckpointConflictError
 
 if TYPE_CHECKING:
@@ -77,6 +78,16 @@ _CRITIC_INSTRUCTION = (
     'Respond with JSON only: {"verdict": "advance" | "retry" | "finish"}.'
 )
 
+#: Fallback role instructions for direct callers (e.g. tests) that supply no
+#: ``roles``. In production the agent passes the instructions resolved from the
+#: planner / executor / critic subagent plugins (whose ``prompt.md`` files carry
+#: this same text); see add-worker-subagent-plugin.
+DEFAULT_ROLE_INSTRUCTIONS = RoleInstructions(
+    planner=_PLANNER_INSTRUCTION,
+    executor=_EXECUTOR_INSTRUCTION,
+    critic=_CRITIC_INSTRUCTION,
+)
+
 _SUMMARY_CAP = 500
 
 
@@ -90,17 +101,24 @@ async def run_agent_loop(
     max_step_retries: int,
     deadline_ts: int | None = None,
     metrics: Any | None = None,
+    roles: RoleInstructions = DEFAULT_ROLE_INSTRUCTIONS,
 ) -> list[ProducedArtifact]:
     """Run the plan→execute→critic loop, returning the artifacts produced.
 
     Resumes from the latest checkpoint when present (plan restored without
     re-planning). Raises on cancel (``asyncio.CancelledError``), deadline, or
     retry-budget exhaustion so the consumer applies its requeue / error policy.
+
+    ``roles`` supplies the planner / executor / critic instructions; production
+    passes those resolved from the subagent plugins, and direct callers default
+    to :data:`DEFAULT_ROLE_INSTRUCTIONS`.
     """
     cp = ctx.checkpoint_store
     log = ctx.logger.bind(component="agent_loop")
 
-    plan, resume_from = await _load_or_create_plan(ctx, message, model, system_prompt, cp, log)
+    plan, resume_from = await _load_or_create_plan(
+        ctx, message, model, system_prompt, cp, log, roles
+    )
 
     produced: list[ProducedArtifact] = []
     for idx in range(resume_from, len(plan)):
@@ -108,7 +126,7 @@ async def run_agent_loop(
         title = plan[idx]
         step_start = time.monotonic()
         verdict, summary, step_artifacts = await _run_step(
-            ctx, model, system_prompt, message, title, write_file, max_step_retries, log
+            ctx, model, system_prompt, message, title, write_file, max_step_retries, log, roles
         )
         produced.extend(step_artifacts)
 
@@ -163,6 +181,7 @@ async def _load_or_create_plan(
     system_prompt: str,
     cp: CheckpointStore,
     log: Any,
+    roles: RoleInstructions,
 ) -> tuple[list[str], int]:
     """Restore the plan from the latest checkpoint, or plan afresh."""
     latest = await cp.latest()
@@ -172,7 +191,7 @@ async def _load_or_create_plan(
         log.info("agent_resumed", resume_from=latest.step_seq, step_count=len(plan))
         return plan, latest.step_seq
 
-    plan = await _plan(ctx, model, system_prompt, message.prompt)
+    plan = await _plan(ctx, model, system_prompt, message.prompt, roles.planner)
     await _emit(ctx, kind="plan", payload={"steps": plan, "step_count": len(plan)})
     await _safe_checkpoint(
         cp,
@@ -194,17 +213,18 @@ async def _run_step(
     write_file: WriteFile,
     max_step_retries: int,
     log: Any,
+    roles: RoleInstructions,
 ) -> tuple[str, str, list[ProducedArtifact]]:
     """Execute + critique one step with bounded retries."""
     attempt = 0
     while True:
-        result = await _execute(ctx, model, system_prompt, title, message.prompt)
+        result = await _execute(ctx, model, system_prompt, title, message.prompt, roles.executor)
         summary = str(result.get("summary", ""))
         attempt_artifacts: list[ProducedArtifact] = []
         for f in result.get("files", []) or []:
             attempt_artifacts.append(await write_file(ctx, f["path"], f.get("content", "")))
 
-        verdict = await _critic(ctx, model, system_prompt, title, summary)
+        verdict = await _critic(ctx, model, system_prompt, title, summary, roles.critic)
         if verdict == "retry":
             if attempt < max_step_retries:
                 attempt += 1
@@ -218,9 +238,9 @@ async def _run_step(
 
 
 async def _plan(
-    ctx: RunContext, model: BaseChatModel, system_prompt: str, prompt: str
+    ctx: RunContext, model: BaseChatModel, system_prompt: str, prompt: str, instruction: str
 ) -> list[str]:
-    data = await _invoke_json(ctx, model, system_prompt, _PLANNER_INSTRUCTION, prompt)
+    data = await _invoke_json(ctx, model, system_prompt, instruction, prompt)
     steps = data.get("steps", [])
     out = [s["title"] if isinstance(s, dict) else str(s) for s in steps]
     if not out:
@@ -229,17 +249,27 @@ async def _plan(
 
 
 async def _execute(
-    ctx: RunContext, model: BaseChatModel, system_prompt: str, title: str, prompt: str
+    ctx: RunContext,
+    model: BaseChatModel,
+    system_prompt: str,
+    title: str,
+    prompt: str,
+    instruction: str,
 ) -> dict[str, Any]:
     content = f"Overall task: {prompt}\nCurrent step: {title}"
-    return await _invoke_json(ctx, model, system_prompt, _EXECUTOR_INSTRUCTION, content)
+    return await _invoke_json(ctx, model, system_prompt, instruction, content)
 
 
 async def _critic(
-    ctx: RunContext, model: BaseChatModel, system_prompt: str, title: str, summary: str
+    ctx: RunContext,
+    model: BaseChatModel,
+    system_prompt: str,
+    title: str,
+    summary: str,
+    instruction: str,
 ) -> str:
     content = f"Step: {title}\nResult summary: {summary}"
-    data = await _invoke_json(ctx, model, system_prompt, _CRITIC_INSTRUCTION, content)
+    data = await _invoke_json(ctx, model, system_prompt, instruction, content)
     verdict = str(data.get("verdict", "advance")).lower()
     if verdict not in {"advance", "retry", "finish"}:
         verdict = "advance"
