@@ -1,0 +1,6 @@
+kind: subagent
+name: planner
+version: 0.1.0
+entrypoint: worker.plugins.subagent.planner.handler:build
+applies_to:
+  task_types: [code-gen, research]
