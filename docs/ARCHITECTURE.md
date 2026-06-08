@@ -915,20 +915,21 @@ v1 (prompt: 调研 2026 各厂商 coding agent ...)
 
 ```
 worker/plugins/
-├── tools/
+├── tool/                       # 实现：单数目录名（loader 扫描 tool/ 与 subagent/）
 │   ├── web_search/
 │   │   ├── plugin.yaml
 │   │   └── handler.py
 │   └── oss_fs/
-├── subagents/
+├── subagent/
 │   └── critic/
 │       ├── plugin.yaml
-│       └── prompt.md
-└── skills/
+│       ├── prompt.md           # 角色提示词（作为数据，可独立编辑）
+│       └── handler.py          # entrypoint: build() -> SubagentDefinition
+└── skill/                      # [Post-MVP] 尚未实现；loader 暂不扫描 skill/
     └── react-project/
         ├── skill.yaml
         ├── instructions.md
-        └── tools/  # 局部 tools
+        └── tool/  # 局部 tools
 ```
 
 `plugin.yaml` 示例：
@@ -957,29 +958,30 @@ resources:
 
 ### 8.3 Python 接口（约定）
 
-```python
-from worker.plugins import Tool, Subagent, Skill, register
+实现采用**基于 `entrypoint` 的约定**（非装饰器注册）：`plugin.yaml` 的 `entrypoint: module:callable` 指向一个可调用对象，loader 在首次使用时惰性导入。Tool 与 Subagent 都走这条路径。
 
-@register
-class WebSearchTool(Tool):
-    name = "web_search"
-    schema = {...}  # JSON Schema
-
-    async def call(self, ctx: ToolContext, query: str, top_k: int = 5) -> dict:
-        # ctx 提供：task_id, run_id, oss client, logger, cancel_token
-        ...
-```
+Tool —— `entrypoint` 指向工具函数本身：
 
 ```python
-@register
-class CriticSubagent(Subagent):
-    name = "critic"
-    prompt = "..."
-    tools = ["read_file", "diff"]
-    model = "claude-sonnet-4-6"
+# worker/plugins/tool/web_search/handler.py
+async def search(ctx, *, query: str, top_k: int = 5) -> dict:
+    # ctx 提供：task_id, run_id, oss client, logger, cancel_token
+    ...
 ```
 
-`Skill` 通过声明式 yaml + instructions.md 注册；Worker 启动时扫描 `plugins/` 目录构建注册表，并按 `applies_to.task_types` 路由。
+Subagent —— `entrypoint` 指向一个零参 `build()`，返回 `SubagentDefinition`，提示词从同目录 `prompt.md` 读取：
+
+```python
+# worker/plugins/subagent/critic/handler.py
+from worker.plugins.subagent_spec import SubagentDefinition, load_prompt
+
+def build() -> SubagentDefinition:
+    return SubagentDefinition(name="critic", instruction=load_prompt(__file__))
+```
+
+> MVP 的 subagent 为「纯提示词」：只承载 `name + instruction`，复用父 agent 的 model 与 tools（per-subagent `model`/`tools` 属 Post-MVP）。planner / executor / critic 三个角色作为内置 subagent 插件交付，agent 通过 `AgentSpec.subagent_names` 声明、启动期校验并注入到 plan→execute→critic 循环。
+
+`Skill` 通过声明式 yaml + instructions.md 注册（**[Post-MVP]**，loader 暂不扫描）；Worker 启动时扫描 `plugins/{tool,subagent}/` 目录构建注册表，并按 `applies_to.task_types` 路由。
 
 ### 8.4 安全与沙箱
 - 每个 tool 调用受 `permissions` 白名单约束（网络/文件/进程）。
