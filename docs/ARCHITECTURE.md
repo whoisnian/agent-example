@@ -787,9 +787,10 @@ User → API: POST /tasks/{id}/iterate
 - **解锁触发点**：当一个 version 从 active 集合迁出（终态 succeeded/failed/cancelled）时，索引自动释放，新的迭代请求即可成功。
 - **前端配合**：在 `task.status` 活跃时禁用迭代/回滚-branch 按钮，并通过 WS 监听状态变化主动启用。
 
-Worker 收到 execute 时拿到 `parent_artifact_root`，"基于父版本产物增量改造"：
-- 代码类任务：先把 parent artifact 拷贝/挂载为工作目录（OSS 同 bucket 内 server-side copy，避免下载上传）。
-- 调研类任务：拿父版本的报告作为上下文输入给 agent。
+Worker 收到带 `parent_version_id` 的 execute 时"基于父版本产物增量改造"。实现（add-worker-rollback-handling）：
+- 继承键控于 **`parent_version_id`**（推导确定性前缀 `compute_oss_prefix(tenant, task, parent_version)`），**不**依赖 `parent_artifact_root`——该列目前无写者、API 恒发 null；若将来出现非空值，Worker 记一条告警。
+- 在 agent 循环前，列出父版本前缀下的**制品**对象（排除运行内部的 `checkpoints/` 子前缀），OSS 同 bucket 内 server-side copy 到新版本前缀，并按对象记 `artifacts` 行。记录幂等于 `(version_id, oss_key)`（唯一索引 + upsert），重投/覆盖不产生重复行。仅在首次执行（无 checkpoint）时继承，重放跳过。
+- MVP 为 **copy-forward**（把父产物带入新版本前缀），agent 不读取其内容（planner/executor/critic 循环暂无读/上下文通道）；"把父报告作为 agent 上下文"的真增量编辑属 Post-MVP。
 
 ### 6.5 回滚
 
@@ -804,7 +805,7 @@ POST /tasks/{id}/rollback
   - **要求任务当前无活跃版本**（活跃中返回 `409 active_version_exists`）。原因：`task-event-ingest` 的 `tasks.status` 同步以 `current_version` 为 CAS 闸门，运行中移动指针会让该 run 的状态同步静默失效。所以 `switch` 并非"任意时刻可切"——它不产生活跃版本（不被互斥索引阻塞），但额外要求"无并发活跃 run"。
   - **目标版本必须为终态**：经目标行的 `is_active` 列显式断言（非终态返回 `409 invalid_state`）。
   - 后果：`tasks.status`（最后一次执行结果）与 `current_version` 指向版本的状态可合法地不一致；任务列表徽标只读 `tasks.status`，故反映"最后执行结果"而非"工作基线"。
-- `branch`：基于 v_k 创建新版本并执行（用于"以 v_k 为起点继续走"）；与 iterate 一样需要先通过互斥检查，活跃中返回 `409`。`prompt` 省略时自动填充 `"rollback to version <n>"`。复用 iterate 的 execute 消息（携带 v_k 的 `artifact_root` 作为 `parent_artifact_root`），**Worker 无需改动**。
+- `branch`：基于 v_k 创建新版本并执行（用于"以 v_k 为起点继续走"）；与 iterate 一样需要先通过互斥检查，活跃中返回 `409`。`prompt` 省略时自动填充 `"rollback to version <n>"`。复用 iterate 的 execute 消息（携带 `parent_version_id`），Worker 侧据此继承父版本制品（见 §6.4 实现说明）。
 
 ### 6.6 失败与重试
 
