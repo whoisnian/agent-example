@@ -16,7 +16,11 @@ export function CostBadge({ cost }: CostBadgeProps): JSX.Element {
     `amount=${cost.amount_usd} USD · in=${cost.input_tokens} out=${cost.output_tokens} ` +
     `cached=${cost.cached_tokens} tools=${cost.tool_calls} wall=${cost.wall_time_ms}ms`;
   return (
-    <span data-testid="cost-badge" title={title} className="font-mono text-xs text-text-muted">
+    <span
+      data-testid="cost-badge"
+      title={title}
+      className="font-mono text-xs text-muted-foreground"
+    >
       {formatAmount(cost.amount_usd)}
     </span>
   );

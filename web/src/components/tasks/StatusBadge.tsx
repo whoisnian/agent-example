@@ -1,16 +1,16 @@
 import type { JSX } from "react";
+import { Badge, type BadgeProps } from "@/components/ui/badge";
 
-/** Map a task/version status to a semantic text colour (palette-only, no
- *  arbitrary hex per the tailwind lint rule). */
-const STATUS_COLOR: Record<string, string> = {
-  pending: "text-text-muted",
-  queued: "text-text-muted",
-  running: "text-accent",
-  paused: "text-warning",
-  cancelling: "text-warning",
-  cancelled: "text-text-muted",
-  succeeded: "text-success",
-  failed: "text-danger",
+/** Map a task/version status to a shadcn Badge variant. */
+const STATUS_VARIANT: Record<string, NonNullable<BadgeProps["variant"]>> = {
+  pending: "secondary",
+  queued: "secondary",
+  running: "default",
+  paused: "warning",
+  cancelling: "warning",
+  cancelled: "secondary",
+  succeeded: "success",
+  failed: "destructive",
 };
 
 export interface StatusBadgeProps {
@@ -18,16 +18,10 @@ export interface StatusBadgeProps {
 }
 
 export function StatusBadge({ status }: StatusBadgeProps): JSX.Element {
-  const color = STATUS_COLOR[status] ?? "text-text-muted";
+  const variant = STATUS_VARIANT[status] ?? "secondary";
   return (
-    <span
-      data-testid="status-badge"
-      data-status={status}
-      className={["inline-flex items-center rounded border border-border bg-surface px-2 py-1 text-xs font-medium", color].join(
-        " ",
-      )}
-    >
+    <Badge variant={variant} data-testid="status-badge" data-status={status}>
       {status}
-    </span>
+    </Badge>
   );
 }

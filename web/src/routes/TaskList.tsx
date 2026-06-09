@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Button } from "@/components/primitives/Button";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/tasks/StatusBadge";
 import { CostBadge } from "@/components/tasks/CostBadge";
 import { useTasksQuery } from "@/features/tasks/queries";
@@ -26,14 +26,14 @@ export function TaskList(): JSX.Element {
   return (
     <section data-testid="task-list-page">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-text">Tasks</h1>
-        <Link to="/tasks/new">
-          <Button data-testid="new-task-button">New task</Button>
-        </Link>
+        <h1 className="text-2xl font-semibold text-foreground">Tasks</h1>
+        <Button asChild data-testid="new-task-button">
+          <Link to="/tasks/new">New task</Link>
+        </Button>
       </div>
 
       <div className="mb-4">
-        <label className="text-sm text-text-muted">
+        <label className="text-sm text-muted-foreground">
           Status{" "}
           <select
             data-testid="status-filter"
@@ -42,7 +42,7 @@ export function TaskList(): JSX.Element {
               setStatus(e.target.value);
               setPage(1);
             }}
-            className="rounded border border-border bg-surface px-2 py-1 text-sm text-text"
+            className="rounded-md border border-input bg-background px-2 py-1 text-sm text-foreground"
           >
             <option value="all">all</option>
             {TASK_STATUSES.map((s) => (
@@ -55,16 +55,16 @@ export function TaskList(): JSX.Element {
       </div>
 
       {query.isPending ? (
-        <p data-testid="task-list-loading" className="text-sm text-text-muted">
+        <p data-testid="task-list-loading" className="text-sm text-muted-foreground">
           Loading…
         </p>
       ) : data && data.items.length === 0 ? (
-        <p data-testid="task-list-empty" className="text-sm text-text-muted">
+        <p data-testid="task-list-empty" className="text-sm text-muted-foreground">
           No tasks yet. Create one to get started.
         </p>
       ) : (
         <table data-testid="task-list-table" className="w-full text-left text-sm">
-          <thead className="text-text-muted">
+          <thead className="text-muted-foreground">
             <tr>
               <th className="py-2">Title</th>
               <th className="py-2">Type</th>
@@ -78,10 +78,10 @@ export function TaskList(): JSX.Element {
                 key={t.id}
                 data-testid="task-row"
                 onClick={() => navigate(`/tasks/${t.id}`)}
-                className="cursor-pointer border-t border-border hover:bg-surface"
+                className="cursor-pointer border-t border-border hover:bg-accent/50"
               >
-                <td className="py-2 text-text">{t.title}</td>
-                <td className="py-2 text-text-muted">{t.task_type}</td>
+                <td className="py-2 text-foreground">{t.title}</td>
+                <td className="py-2 text-muted-foreground">{t.task_type}</td>
                 <td className="py-2">
                   <StatusBadge status={t.status} />
                 </td>
@@ -94,7 +94,7 @@ export function TaskList(): JSX.Element {
         </table>
       )}
 
-      <div className="mt-4 flex items-center gap-2 text-sm text-text-muted">
+      <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
         <Button
           variant="ghost"
           disabled={page <= 1}

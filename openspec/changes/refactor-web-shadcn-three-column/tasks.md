@@ -39,9 +39,9 @@
 
 ## 5. 页面迁移（行为不变，仅换皮）（PR4–PR5）
 
-- [ ] 5.1 `LoginPage`：改用 shadcn `Card`/`Input`/`Label`/`Button`；保留内联错误面与既有 testid，使 `LoginPage.test.tsx` 通过（PR4）
-- [ ] 5.2 `TaskList`：表格/分页/状态筛选改用 shadcn primitives；保留 `task-row`/`status-filter`/`page-*`/`new-task-button` 等 testid，使 `TaskList.test.tsx` 通过（PR4）
-- [ ] 5.3 `TaskCreate`：表单改用 shadcn 表单 primitives；保留校验与 testid，使 `TaskCreate.test.tsx` 通过（PR4）
+- [x] 5.1 `LoginPage`：改用 shadcn `Card`/`Input`/`Label`/`Button`；保留内联错误面与既有 testid，使 `LoginPage.test.tsx` 通过（PR4）
+- [x] 5.2 `TaskList`：表格/分页/状态筛选改用 shadcn primitives；保留 `task-row`/`status-filter`/`page-*`/`new-task-button` 等 testid，使 `TaskList.test.tsx` 通过（PR4）
+- [x] 5.3 `TaskCreate`：表单改用 shadcn 表单 primitives；保留校验与 testid，使 `TaskCreate.test.tsx` 通过（PR4）
 - [ ] 5.4 `TaskDetail`：迁入三栏中列，header/状态/成本/控制条/版本树/事件流用 shadcn 重绘；产物展示从详情页中列移除、改由右栏面板承载（PR5）
 - [ ] 5.5 `VersionTree` 展开→选中改造：移除 `version-expand-toggle`+内联 `ArtifactList`，改为行选中（`version-select` + `aria-selected`/`data-selected`）写入 `selectedVersionId`，默认选中 `current_version`；**改写** `VersionTree.test.tsx` 的展开类断言为选中断言（这是 design 硬约束的已知例外）（PR5）
 - [ ] 5.6 `CostDashboard`：分组选择/窗口/条形图改用 shadcn primitives；保留 `amount_usd` 字符串规则与 testid，使 `CostDashboard.test.tsx` 通过（PR5）

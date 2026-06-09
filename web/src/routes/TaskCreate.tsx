@@ -1,7 +1,10 @@
 import type { JSX } from "react";
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button } from "@/components/primitives/Button";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { ApiError } from "@/services/http";
 import { useCreateTaskMutation } from "@/features/tasks/mutations";
 import type { CreateTaskRequest, InvalidInputData } from "@/features/tasks/types";
@@ -66,32 +69,35 @@ export function TaskCreate(): JSX.Element {
 
   return (
     <section data-testid="task-create-page">
-      <h1 className="mb-4 text-2xl font-semibold text-text">New task</h1>
+      <h1 className="mb-4 text-2xl font-semibold text-foreground">New task</h1>
       <form onSubmit={onSubmit} className="flex max-w-xl flex-col gap-4">
         {err("") ? (
-          <p data-testid="form-error" className="text-sm text-danger">
+          <p data-testid="form-error" className="text-sm text-destructive">
             {err("")}
           </p>
         ) : null}
 
-        <label className="flex flex-col gap-1 text-sm text-text-muted">
-          Title
-          <input
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="title">Title</Label>
+          <Input
+            id="title"
             data-testid="title-input"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="rounded border border-border bg-surface px-2 py-1 text-text"
           />
-          {err("title") ? <span className="text-xs text-danger">{err("title")}</span> : null}
-        </label>
+          {err("title") ? (
+            <span className="text-xs text-destructive">{err("title")}</span>
+          ) : null}
+        </div>
 
-        <label className="flex flex-col gap-1 text-sm text-text-muted">
-          Task type
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="task-type">Task type</Label>
           <select
+            id="task-type"
             data-testid="task-type-select"
             value={taskType}
             onChange={(e) => setTaskType(e.target.value)}
-            className="rounded border border-border bg-surface px-2 py-1 text-text"
+            className="h-10 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
           >
             {TASK_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -100,43 +106,48 @@ export function TaskCreate(): JSX.Element {
             ))}
           </select>
           {err("task_type") ? (
-            <span className="text-xs text-danger">{err("task_type")}</span>
+            <span className="text-xs text-destructive">{err("task_type")}</span>
           ) : null}
-        </label>
+        </div>
 
-        <label className="flex flex-col gap-1 text-sm text-text-muted">
-          Prompt
-          <textarea
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="prompt">Prompt</Label>
+          <Textarea
+            id="prompt"
             data-testid="prompt-input"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             rows={4}
-            className="rounded border border-border bg-surface px-2 py-1 text-text"
           />
-          {err("prompt") ? <span className="text-xs text-danger">{err("prompt")}</span> : null}
-        </label>
+          {err("prompt") ? (
+            <span className="text-xs text-destructive">{err("prompt")}</span>
+          ) : null}
+        </div>
 
-        <label className="flex flex-col gap-1 text-sm text-text-muted">
-          Params (JSON, optional)
-          <textarea
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="params">Params (JSON, optional)</Label>
+          <Textarea
+            id="params"
             data-testid="params-input"
             value={paramsText}
             onChange={(e) => setParamsText(e.target.value)}
             rows={3}
-            className="rounded border border-border bg-surface px-2 py-1 font-mono text-text"
+            className="font-mono"
           />
-          {err("params") ? <span className="text-xs text-danger">{err("params")}</span> : null}
-        </label>
+          {err("params") ? (
+            <span className="text-xs text-destructive">{err("params")}</span>
+          ) : null}
+        </div>
 
-        <label className="flex flex-col gap-1 text-sm text-text-muted">
-          Lane (optional)
-          <input
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="lane">Lane (optional)</Label>
+          <Input
+            id="lane"
             data-testid="lane-input"
             value={lane}
             onChange={(e) => setLane(e.target.value)}
-            className="rounded border border-border bg-surface px-2 py-1 text-text"
           />
-        </label>
+        </div>
 
         <div>
           <Button type="submit" disabled={mutation.isPending} data-testid="submit-button">
