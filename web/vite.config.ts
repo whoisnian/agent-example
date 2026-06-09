@@ -21,10 +21,19 @@ export default defineConfig(({ mode }) => {
       // Same-origin API calls (VITE_API_BASE_URL empty) hit :5173, which has no
       // /api routes → 404 (e.g. POST /api/v1/auth/login). Proxy /api to the
       // backend; `ws: true` also forwards the /api/v1/ws WebSocket upgrade.
+      //
+      // changeOrigin stays FALSE on purpose: the API's WS gateway enforces a
+      // same-origin check (coder/websocket compares the request Host against the
+      // Origin header). Rewriting Host to the target (changeOrigin: true) makes
+      // Host=localhost:8080 while the browser's Origin stays the dev host, so the
+      // upgrade 403s on any non-localhost:8080 host (LAN IP, localhost:5173, …).
+      // Forwarding the original Host keeps Host==Origin → same-origin passes on
+      // every host with no per-host WS_ALLOWED_ORIGINS config. Gin routes by path,
+      // so the REST proxy doesn't need the rewrite.
       proxy: {
         "/api": {
           target: proxyTarget,
-          changeOrigin: true,
+          changeOrigin: false,
           ws: true,
         },
       },
