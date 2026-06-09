@@ -28,3 +28,43 @@ describe("ui store — toasts", () => {
     expect(useUiStore.getState().toasts).toHaveLength(0);
   });
 });
+
+describe("ui store — three-column layout state", () => {
+  beforeEach(() => {
+    useUiStore.setState({
+      navCollapsed: false,
+      previewCollapsed: false,
+      selectedVersionId: null,
+    });
+  });
+
+  it("defaults: both columns expanded, no version selected", () => {
+    const s = useUiStore.getState();
+    expect(s.navCollapsed).toBe(false);
+    expect(s.previewCollapsed).toBe(false);
+    expect(s.selectedVersionId).toBeNull();
+  });
+
+  it("toggleNav / togglePreview flip their flags", () => {
+    useUiStore.getState().toggleNav();
+    expect(useUiStore.getState().navCollapsed).toBe(true);
+    useUiStore.getState().togglePreview();
+    expect(useUiStore.getState().previewCollapsed).toBe(true);
+    useUiStore.getState().toggleNav();
+    expect(useUiStore.getState().navCollapsed).toBe(false);
+  });
+
+  it("setNavCollapsed / setPreviewCollapsed set explicit values", () => {
+    useUiStore.getState().setNavCollapsed(true);
+    useUiStore.getState().setPreviewCollapsed(true);
+    expect(useUiStore.getState().navCollapsed).toBe(true);
+    expect(useUiStore.getState().previewCollapsed).toBe(true);
+  });
+
+  it("setSelectedVersionId anchors and clears the preview", () => {
+    useUiStore.getState().setSelectedVersionId("v-1");
+    expect(useUiStore.getState().selectedVersionId).toBe("v-1");
+    useUiStore.getState().setSelectedVersionId(null);
+    expect(useUiStore.getState().selectedVersionId).toBeNull();
+  });
+});

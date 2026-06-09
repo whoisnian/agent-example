@@ -68,8 +68,8 @@ describe("router skeleton", () => {
   it("renders the shell + TaskList page when authenticated", () => {
     useAuthStore.setState({ token: "test" });
     renderAt("/tasks");
-    expect(screen.getByTestId("top-bar")).toBeInTheDocument();
     expect(screen.getByTestId("side-nav")).toBeInTheDocument();
+    expect(screen.getByTestId("preview-column")).toBeInTheDocument();
     expect(screen.getByTestId("task-list-page")).toBeInTheDocument();
   });
 

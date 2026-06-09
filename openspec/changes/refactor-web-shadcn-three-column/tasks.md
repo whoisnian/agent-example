@@ -21,12 +21,12 @@
 
 ## 3. 三栏外壳与全局 UI 状态（PR2）
 
-- [ ] 3.1 扩展 `features/ui/store.ts`：新增 `navCollapsed`/`previewCollapsed`（含 toggle）、`selectedVersionId`（默认取任务 `current_version`）及对应 setter；补 store 单测
-- [ ] 3.2 三栏化 `RootLayout`（**保持文件在 `src/routes/root-layout.tsx`**，不迁目录，避免动 `TopBar.test.tsx` 的 `@/routes/root-layout` import）：CSS grid 三列，子组件落在 `components/layout/`；保持 `data-testid="root-layout"`
-- [ ] 3.3 重写 `SideNav` 为左导航列（Logo、Tasks/Cost/Settings、用户区+登出、最近任务入口），用 shadcn + lucide 图标；保留 `data-testid="side-nav"` 与 `nav-*` 选择器及 active 样式
-- [ ] 3.4 将 `TopBar` 的用户区/登出能力并入左导航列；移除或精简旧顶栏。明确处置：保留 `logout-button`/`user-email`（满足 `web-auth` 断言），并决定 `top-bar`/`user-area` testid 去留；把 `TopBar.test.tsx` 的登出 gating 测试迁到承载登出的左导航组件
-- [ ] 3.5 实现响应式降级：宽视口三列并排，窄视口右栏抽屉化、左栏折叠为图标条；补外壳折叠/响应式渲染测试
-- [ ] 3.6 退役 `components/layout/ContentSlot.tsx`（如被三栏取代）或改造为中列容器
+- [x] 3.1 扩展 `features/ui/store.ts`：新增 `navCollapsed`/`previewCollapsed`（含 toggle）、`selectedVersionId`（默认取任务 `current_version`）及对应 setter；补 store 单测
+- [x] 3.2 三栏化 `RootLayout`（**保持文件在 `src/routes/root-layout.tsx`**，不迁目录，避免动 `TopBar.test.tsx` 的 `@/routes/root-layout` import）：CSS grid 三列，子组件落在 `components/layout/`；保持 `data-testid="root-layout"`
+- [x] 3.3 重写 `SideNav` 为左导航列（Logo、Tasks/Cost/Settings、用户区+登出、最近任务入口），用 shadcn + lucide 图标；保留 `data-testid="side-nav"` 与 `nav-*` 选择器及 active 样式
+- [x] 3.4 将 `TopBar` 的用户区/登出能力并入左导航列；移除或精简旧顶栏。明确处置：保留 `logout-button`/`user-email`（满足 `web-auth` 断言），并决定 `top-bar`/`user-area` testid 去留；把 `TopBar.test.tsx` 的登出 gating 测试迁到承载登出的左导航组件
+- [x] 3.5 实现响应式降级：宽视口三列并排，窄视口右栏抽屉化、左栏折叠为图标条；补外壳折叠/响应式渲染测试
+- [x] 3.6 退役 `components/layout/ContentSlot.tsx`（如被三栏取代）或改造为中列容器
 
 ## 4. Artifact 预览面板（右栏）（PR3）
 

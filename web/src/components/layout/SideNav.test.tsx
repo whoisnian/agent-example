@@ -8,7 +8,8 @@ import { createQueryClient } from "@/services/query-client";
 import { RequireAuth } from "@/routes/require-auth";
 import { RootLayout } from "@/routes/root-layout";
 import { useAuthStore } from "@/features/auth/store";
-import { TopBar } from "@/components/layout/TopBar";
+import { useUiStore } from "@/features/ui/store";
+import { SideNav } from "@/components/layout/SideNav";
 
 const USER = { id: "u1", tenant_id: "t1", email: "dev@example.com" } as const;
 
@@ -34,17 +35,19 @@ function GatedTree({ initial }: { initial: string }): JSX.Element {
   );
 }
 
-describe("TopBar", () => {
+describe("SideNav (left navigation column)", () => {
   beforeEach(() => {
     window.localStorage.clear();
     useAuthStore.setState({ token: null, user: null });
+    // Expanded nav so the user email is visible (it hides on the icon rail).
+    useUiStore.setState({ navCollapsed: false });
   });
 
   it("shows the logged-in user's email", () => {
     useAuthStore.setState({ token: "t", user: USER });
     render(
       <MemoryRouter>
-        <TopBar />
+        <SideNav />
       </MemoryRouter>,
     );
     expect(screen.getByTestId("user-email")).toHaveTextContent(USER.email);
@@ -54,11 +57,25 @@ describe("TopBar", () => {
     useAuthStore.setState({ token: null, user: null });
     render(
       <MemoryRouter>
-        <TopBar />
+        <SideNav />
       </MemoryRouter>,
     );
     expect(screen.queryByTestId("user-email")).toBeNull();
     expect(screen.getByTestId("logout-button")).toBeInTheDocument();
+  });
+
+  it("collapse toggle hides the brand name and user email", async () => {
+    useAuthStore.setState({ token: "t", user: USER });
+    render(
+      <MemoryRouter>
+        <SideNav />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("user-email")).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId("nav-collapse-toggle"));
+    expect(screen.queryByTestId("user-email")).toBeNull();
+    // Nav links remain (icon-only) so navigation still works when collapsed.
+    expect(screen.getByTestId("nav-tasks")).toBeInTheDocument();
   });
 
   it("logout clears the session and gating routes /tasks → /login", async () => {
@@ -70,6 +87,8 @@ describe("TopBar", () => {
 
     expect(useAuthStore.getState().token).toBeNull();
     expect(useAuthStore.getState().user).toBeNull();
-    await waitFor(() => expect(screen.getByTestId("login-stub")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("login-stub")).toBeInTheDocument(),
+    );
   });
 });
