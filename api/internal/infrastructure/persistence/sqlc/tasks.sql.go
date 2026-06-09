@@ -161,7 +161,7 @@ func (q *Queries) ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, e
 }
 
 const lockTaskForControl = `-- name: LockTaskForControl :one
-SELECT id, status, current_version
+SELECT id, status, current_version, task_type
 FROM tasks
 WHERE id = $1 AND tenant_id = $2 AND user_id = $3
 FOR UPDATE
@@ -177,6 +177,7 @@ type LockTaskForControlRow struct {
 	ID             pgtype.UUID `json:"id"`
 	Status         string      `json:"status"`
 	CurrentVersion pgtype.UUID `json:"current_version"`
+	TaskType       string      `json:"task_type"`
 }
 
 // Acquires a row-level lock AND verifies ownership in one round-trip
@@ -185,11 +186,19 @@ type LockTaskForControlRow struct {
 // outcome before reading task.status. Owner predicate is inline so
 // unknown OR unowned tasks return no rows — the caller maps
 // pgx.ErrNoRows to ErrTaskNotFound for the identical 404 regardless of
-// cause (mirrors task-read-api / task-cost-api).
+// cause (mirrors task-read-api / task-cost-api). `task_type` is selected
+// so the rollback `branch` path (add-task-rollback-api) gets everything it
+// needs for createActiveVersion from this one owner-scoped lock, without an
+// unscoped GetTaskByID re-read; the control caller ignores the column.
 func (q *Queries) LockTaskForControl(ctx context.Context, arg LockTaskForControlParams) (LockTaskForControlRow, error) {
 	row := q.db.QueryRow(ctx, lockTaskForControl, arg.ID, arg.TenantID, arg.UserID)
 	var i LockTaskForControlRow
-	err := row.Scan(&i.ID, &i.Status, &i.CurrentVersion)
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.CurrentVersion,
+		&i.TaskType,
+	)
 	return i, err
 }
 
@@ -214,6 +223,27 @@ func (q *Queries) LockTaskRow(ctx context.Context, id pgtype.UUID) (LockTaskRowR
 	var i LockTaskRowRow
 	err := row.Scan(&i.ID, &i.Status, &i.CurrentVersion)
 	return i, err
+}
+
+const switchTaskCurrentVersion = `-- name: SwitchTaskCurrentVersion :exec
+UPDATE tasks
+SET current_version = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type SwitchTaskCurrentVersionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	CurrentVersion pgtype.UUID `json:"current_version"`
+}
+
+// Rollback `switch` mode (add-task-rollback-api): repoints `current_version`
+// at a historical (terminal) version WITHOUT touching `tasks.status` —
+// task-event-ingest stays the sole run-driven writer of status. Contrast with
+// UpdateTaskCurrentVersion, which seeds status='pending' for a new run.
+func (q *Queries) SwitchTaskCurrentVersion(ctx context.Context, arg SwitchTaskCurrentVersionParams) error {
+	_, err := q.db.Exec(ctx, switchTaskCurrentVersion, arg.ID, arg.CurrentVersion)
+	return err
 }
 
 const updateTaskCurrentVersion = `-- name: UpdateTaskCurrentVersion :exec

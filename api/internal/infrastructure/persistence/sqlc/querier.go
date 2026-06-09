@@ -188,7 +188,10 @@ type Querier interface {
 	// outcome before reading task.status. Owner predicate is inline so
 	// unknown OR unowned tasks return no rows — the caller maps
 	// pgx.ErrNoRows to ErrTaskNotFound for the identical 404 regardless of
-	// cause (mirrors task-read-api / task-cost-api).
+	// cause (mirrors task-read-api / task-cost-api). `task_type` is selected
+	// so the rollback `branch` path (add-task-rollback-api) gets everything it
+	// needs for createActiveVersion from this one owner-scoped lock, without an
+	// unscoped GetTaskByID re-read; the control caller ignores the column.
 	LockTaskForControl(ctx context.Context, arg LockTaskForControlParams) (LockTaskForControlRow, error)
 	// Acquires a row-level lock on a task and returns its id/status/current_version.
 	// Used by the iterate path so concurrent requests against the same task
@@ -219,6 +222,11 @@ type Querier interface {
 	// The inner JOIN to tasks is the owner gate AND defense-in-depth against
 	// orphaned cost_events.task_id rows (no FK on that column).
 	SumOwnerCosts(ctx context.Context, arg SumOwnerCostsParams) (SumOwnerCostsRow, error)
+	// Rollback `switch` mode (add-task-rollback-api): repoints `current_version`
+	// at a historical (terminal) version WITHOUT touching `tasks.status` —
+	// task-event-ingest stays the sole run-driven writer of status. Contrast with
+	// UpdateTaskCurrentVersion, which seeds status='pending' for a new run.
+	SwitchTaskCurrentVersion(ctx context.Context, arg SwitchTaskCurrentVersionParams) error
 	// Points `tasks.current_version` at the new version and stamps the task back
 	// to `pending`. Called by the iterate transaction after `createActiveVersion`
 	// succeeds.

@@ -40,8 +40,11 @@ FOR UPDATE;
 -- outcome before reading task.status. Owner predicate is inline so
 -- unknown OR unowned tasks return no rows — the caller maps
 -- pgx.ErrNoRows to ErrTaskNotFound for the identical 404 regardless of
--- cause (mirrors task-read-api / task-cost-api).
-SELECT id, status, current_version
+-- cause (mirrors task-read-api / task-cost-api). `task_type` is selected
+-- so the rollback `branch` path (add-task-rollback-api) gets everything it
+-- needs for createActiveVersion from this one owner-scoped lock, without an
+-- unscoped GetTaskByID re-read; the control caller ignores the column.
+SELECT id, status, current_version, task_type
 FROM tasks
 WHERE id = $1 AND tenant_id = $2 AND user_id = $3
 FOR UPDATE;
@@ -53,6 +56,16 @@ FOR UPDATE;
 UPDATE tasks
 SET status = 'pending',
     current_version = $2,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: SwitchTaskCurrentVersion :exec
+-- Rollback `switch` mode (add-task-rollback-api): repoints `current_version`
+-- at a historical (terminal) version WITHOUT touching `tasks.status` —
+-- task-event-ingest stays the sole run-driven writer of status. Contrast with
+-- UpdateTaskCurrentVersion, which seeds status='pending' for a new run.
+UPDATE tasks
+SET current_version = $2,
     updated_at = now()
 WHERE id = $1;
 
