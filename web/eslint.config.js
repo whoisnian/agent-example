@@ -96,11 +96,22 @@ export default tseslint.config(
       ],
     },
   },
-  // Test files: relax the unused-imports rule slightly.
+  // Test files: relax the unused-imports rule slightly, and don't treat
+  // arbitrary class-string fixtures passed to cn() as Tailwind classnames.
   {
     files: ["**/*.test.{ts,tsx}", "src/test/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
+      "tailwindcss/no-custom-classname": "off",
+    },
+  },
+  // Vendored shadcn primitives intentionally export a component plus its cva
+  // variants from one file (e.g. Button + buttonVariants); the Fast-Refresh
+  // "only export components" rule does not apply to this convention.
+  {
+    files: ["src/components/ui/**/*.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
     },
   },
   // Disable stylistic rules that conflict with Prettier.

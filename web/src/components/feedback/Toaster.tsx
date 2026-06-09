@@ -3,10 +3,10 @@ import { useEffect } from "react";
 import { useUiStore, type Toast } from "@/features/ui/store";
 
 const LEVEL_CLASS: Record<Toast["level"], string> = {
-  success: "border-success text-text",
-  error: "border-danger text-text",
-  warning: "border-warning text-text",
-  info: "border-border text-text",
+  success: "border-success text-foreground",
+  error: "border-destructive text-foreground",
+  warning: "border-warning text-foreground",
+  info: "border-border text-foreground",
 };
 
 function ToastItem({ toast }: { toast: Toast }): JSX.Element {
@@ -30,7 +30,7 @@ function ToastItem({ toast }: { toast: Toast }): JSX.Element {
       onKeyDown={onKeyDown}
       data-testid={`toast-${toast.level}`}
       className={[
-        "min-w-64 max-w-96 rounded border bg-surface p-3 shadow-md outline-none",
+        "min-w-64 max-w-96 rounded border bg-card p-3 shadow-md outline-none",
         LEVEL_CLASS[toast.level],
       ].join(" ")}
     >
@@ -40,7 +40,7 @@ function ToastItem({ toast }: { toast: Toast }): JSX.Element {
           type="button"
           onClick={(): void => dismiss(toast.id)}
           aria-label="Dismiss toast"
-          className="text-xs text-text-muted hover:text-text"
+          className="text-xs text-muted-foreground hover:text-foreground"
         >
           x
         </button>

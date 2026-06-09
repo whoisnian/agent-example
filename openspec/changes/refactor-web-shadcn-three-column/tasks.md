@@ -49,8 +49,8 @@
 
 ## 6. 清理与文档（PR6）
 
-- [ ] 6.1 退役 `components/primitives/Button.tsx`，移除所有旧引用；清理临时保留的旧 token 别名
-- [ ] 6.2 全仓核对无残留旧语义类——覆盖 `src/**`、`web/index.html`、`src/styles/globals.css`（含 `feedback/Toaster.tsx`、`feedback/ErrorBoundary.tsx`、`routes/placeholders/*` 等约 22 个命中文件）；加硬门禁：`grep -rE 'bg-bg|bg-surface|text-text|text-text-muted|bg-accent|bg-danger|border-border' web/src web/index.html` 计数为 0
-- [ ] 6.3 更新 `docs/ARCHITECTURE.md §4.3`：三栏外壳、shadcn 主题策略、`components/ui`/`lib/cn` 目录约定、放宽后的颜色 lint 规则、CSP `img-src` 变更
-- [ ] 6.4 更新 `web/AGENTS.md`（或新增）说明新颜色规则（禁裸 hex、允许 `hsl(var(--*))`）与组件目录约定
-- [ ] 6.5 终检：`npm run typecheck && npm run lint && npm run test && npm run build` 全绿，`npm run build` 体积纳入验收
+- [x] 6.1 退役 `components/primitives/Button.tsx`，移除所有旧引用；清理临时保留的旧 token 别名
+- [x] 6.2 全仓核对无残留旧语义类——覆盖 `src/**`、`web/index.html`、`src/styles/globals.css`（含 `feedback/Toaster.tsx`、`feedback/ErrorBoundary.tsx`、`routes/placeholders/*` 等约 22 个命中文件）；加硬门禁：`grep -rE 'bg-bg|bg-surface|text-text|text-text-muted|bg-accent|bg-danger|border-border' web/src web/index.html` 计数为 0
+- [x] 6.3 更新 `docs/ARCHITECTURE.md §4.3`：三栏外壳、shadcn 主题策略、`components/ui`/`lib/cn` 目录约定、放宽后的颜色 lint 规则、CSP `img-src` 变更
+- [x] 6.4 更新 `web/AGENTS.md`（或新增）说明新颜色规则（禁裸 hex、允许 `hsl(var(--*))`）与组件目录约定
+- [x] 6.5 终检：`npm run typecheck && npm run lint && npm run test && npm run build` 全绿，`npm run build` 体积纳入验收

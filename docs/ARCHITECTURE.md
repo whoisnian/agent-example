@@ -144,6 +144,8 @@ src/
 ```
 
 关键设计：
+- **三栏外壳（shadcn/ui）**：应用外壳为三栏布局 —— 左**导航列**（Logo + Tasks/Cost/Settings + 用户区/登出，可折叠为图标条）/ 中**路由内容区**（TaskDetail 为主）/ 右**Artifact 预览列**（可折叠，窄屏抽屉化）。`RootLayout` 在 `routes/root-layout.tsx`，三栏子组件在 `components/layout/`。列折叠态与右栏「选中版本」(`selectedVersionId`) 归 Zustand（`features/ui/store`）。VersionTree 由「行内展开」改为「行选中驱动右栏预览」。
+- **设计系统**：组件基座为 shadcn/ui（vendored 到 `components/ui/`，`cn()` 在 `lib/cn.ts`），主题走 shadcn 标准 **CSS 变量**（`globals.css` 的 `:root`/`.dark`，`tailwind.config.js` 以 `hsl(var(--token))` 映射，`darkMode:["class"]`，MVP 默认深色放 `:root`）。颜色纪律：禁裸 hex（eslint `no-restricted-syntax`），允许 `hsl(var(--*))` 形式的 arbitrary 值。图片预览需 CSP `img-src` 含 OSS（当前 `https:`）；文本预览经 OSS `fetch`（受 CORS 约束，失败降级为 download-only）。
 - **状态分层**：本地 UI 状态用 Zustand；服务端状态用 React Query（自带缓存、失效、轮询兜底）。
 - **实时通道**：MVP 默认 WebSocket，失败降级为 5s 轮询；SSE 与更复杂的多级降级为 Post-MVP。
 - **大文件上传**：前端拿临时 STS 凭证后直传 OSS，不走后端 API，避免后端带宽瓶颈。

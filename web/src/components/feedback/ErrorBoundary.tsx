@@ -42,15 +42,15 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <div
           role="alert"
-          className="m-6 rounded border border-danger bg-surface p-6 text-text"
+          className="m-6 rounded border border-destructive bg-card p-6 text-foreground"
           data-testid="error-boundary-fallback"
         >
-          <h2 className="mb-2 text-lg font-semibold text-danger">Something went wrong.</h2>
-          <p className="mb-4 text-sm text-text-muted">{this.state.error.message}</p>
+          <h2 className="mb-2 text-lg font-semibold text-destructive">Something went wrong.</h2>
+          <p className="mb-4 text-sm text-muted-foreground">{this.state.error.message}</p>
           <button
             type="button"
             onClick={this.handleReload}
-            className="rounded bg-accent px-4 py-2 text-sm text-white hover:bg-accent"
+            className="rounded bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
           >
             Reload
           </button>

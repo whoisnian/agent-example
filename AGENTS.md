@@ -85,8 +85,13 @@ openspec/     变更与规格管理
 - 禁止在 Worker 中直接持久化业务状态到 DB —— 只能写：cost_events / task_runs heartbeat / task_checkpoints / artifacts。其它状态翻转必须通过事件让 API/Cost Service 处理
 
 ### 4.3 前端（`web/`，React）
-- 包管理：`pnpm`
-- 框架：Vite + React 18 + TypeScript 严格模式
+
+> 前端细则见 [`web/AGENTS.md`](web/AGENTS.md)（shadcn 主题、颜色 lint、组件目录、三栏外壳）。
+
+- 包管理：`npm`（仓库使用 npm；engines 锁 node≥24 / npm≥11）
+- 框架：Vite + React 19 + TypeScript 严格模式
+- UI 基座：**shadcn/ui**（vendored 到 `components/ui/`，`cn()` 在 `lib/cn.ts`）；主题走 shadcn **CSS 变量**（`globals.css` 的 `:root`/`.dark`，`tailwind.config.js` 以 `hsl(var(--token))` 映射）。颜色禁裸 hex，允许 `hsl(var(--*))`
+- 外壳：三栏（导航 / 内容 / Artifact 预览）；`RootLayout` 在 `routes/`，子组件在 `components/layout/`；列折叠态与 `selectedVersionId` 归 Zustand
 - 服务端状态：React Query；本地 UI 状态：Zustand。**不要混用**
 - 实时：`features/realtime/` 下的 WS 客户端；不要在组件里直连 WS
 - 任务级互斥反映在 UI：`task.status` 活跃时禁用迭代/回滚-branch 按钮，并显示原因
