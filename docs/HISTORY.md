@@ -88,3 +88,5 @@ seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-c
 16. 2026-06-04-add-web-auth-login
 17. 2026-06-08-add-api-user-store
 18. 2026-06-08-add-worker-subagent-plugin
+19. 2026-06-08-add-task-rollback-api
+20. 2026-06-08-add-worker-rollback-handling
