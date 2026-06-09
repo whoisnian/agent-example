@@ -110,8 +110,12 @@ func accessLogMiddleware(logger *slog.Logger) gin.HandlerFunc {
 // through without a token.
 type publicRoute struct{ method, path string }
 
-// publicRoutes is the fixed allowlist: the health/metrics probes and the login
-// endpoint (a caller has no token yet). Keyed on the route TEMPLATE
+// publicRoutes is the fixed allowlist: the health/metrics probes, the login
+// endpoint (a caller has no token yet), and the WS upgrade. The WS route is NOT
+// unauthenticated — browsers can't set an Authorization header on a WebSocket
+// handshake, so the realtime gateway authenticates the `?token=<jwt>` query
+// param itself (closing 4001 on any failure). It must bypass this header-based
+// middleware so that query-token path can run. Keyed on the route TEMPLATE
 // (c.FullPath()) + method so only the intended verb is public and trailing-
 // slash / query tricks can't widen it.
 var publicRoutes = map[publicRoute]bool{
@@ -119,6 +123,7 @@ var publicRoutes = map[publicRoute]bool{
 	{http.MethodGet, "/readyz"}:             true,
 	{http.MethodGet, "/metrics"}:            true,
 	{http.MethodPost, "/api/v1/auth/login"}: true,
+	{http.MethodGet, "/api/v1/ws"}:          true,
 }
 
 // authMiddleware authenticates every non-public request via a Bearer JWT. On

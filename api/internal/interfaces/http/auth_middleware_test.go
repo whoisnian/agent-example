@@ -49,6 +49,27 @@ func newAuthEngine(t *testing.T) (engine *gin.Engine, handlerRan *bool) {
 	return e, ran
 }
 
+// TestAuth_WSRouteBypassesBearerMiddleware guards the realtime-gateway auth
+// path: a browser WebSocket handshake can't send an Authorization header, so the
+// gateway authenticates the `?token=` query param itself. The header-based
+// middleware must let GET /api/v1/ws through (no Bearer ⇒ NOT 401) so that path
+// can run; otherwise the WS upgrade 401s before reaching the gateway.
+func TestAuth_WSRouteBypassesBearerMiddleware(t *testing.T) {
+	e, _ := newAuthEngine(t)
+	// Register a stand-in for the gateway so FullPath() resolves to the template
+	// the allowlist is keyed on (as the real gateway does in NewEngine).
+	reached := false
+	e.GET("/api/v1/ws", func(c *gin.Context) { reached = true; c.Status(http.StatusOK) })
+
+	status, body := doReq(e, http.MethodGet, "/api/v1/ws", "")
+	if status == http.StatusUnauthorized {
+		t.Fatalf("GET /api/v1/ws returned 401 with no Authorization header, want bypass; body=%s", body)
+	}
+	if !reached {
+		t.Errorf("middleware did not pass the request through to the /ws handler")
+	}
+}
+
 func doReq(e *gin.Engine, method, path, authHeader string) (status int, body string) {
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(method, path, http.NoBody)
