@@ -1,60 +1,64 @@
+import tailwindcssAnimate from "tailwindcss-animate";
+
 /** @type {import('tailwindcss').Config} */
 export default {
+  // Class-based dark mode (shadcn convention). MVP renders the :root palette
+  // with no `.dark` class; see src/styles/globals.css.
+  darkMode: ["class"],
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
-    // Semantic palette — no raw hex usage in component code.
-    // Arbitrary Tailwind values (e.g. `bg-[#abcdef]`) are blocked by lint.
-    colors: {
-      transparent: "transparent",
-      current: "currentColor",
-      white: "#ffffff",
-      black: "#000000",
-      bg: "#0b1020",
-      surface: "#161b2e",
-      border: "#2a3147",
-      text: "#e5e7eb",
-      "text-muted": "#94a3b8",
-      accent: "#6366f1",
-      success: "#10b981",
-      warning: "#f59e0b",
-      danger: "#ef4444",
-    },
-    spacing: {
-      0: "0",
-      1: "0.25rem",
-      2: "0.5rem",
-      3: "0.75rem",
-      4: "1rem",
-      5: "1.25rem",
-      6: "1.5rem",
-      8: "2rem",
-      10: "2.5rem",
-      12: "3rem",
-      16: "4rem",
-      20: "5rem",
-      24: "6rem",
-      32: "8rem",
-      48: "12rem",
-      64: "16rem",
-      96: "24rem",
-    },
-    fontSize: {
-      xs: ["0.75rem", { lineHeight: "1rem" }],
-      sm: ["0.875rem", { lineHeight: "1.25rem" }],
-      base: ["1rem", { lineHeight: "1.5rem" }],
-      lg: ["1.125rem", { lineHeight: "1.75rem" }],
-      xl: ["1.25rem", { lineHeight: "1.75rem" }],
-      "2xl": ["1.5rem", { lineHeight: "2rem" }],
-      "3xl": ["1.875rem", { lineHeight: "2.25rem" }],
-    },
-    boxShadow: {
-      none: "none",
-      sm: "0 1px 2px 0 rgb(0 0 0 / 0.25)",
-      DEFAULT: "0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3)",
-      md: "0 4px 6px -1px rgb(0 0 0 / 0.35), 0 2px 4px -2px rgb(0 0 0 / 0.35)",
-      lg: "0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.4)",
-    },
+    // NOTE: no top-level `colors`/`spacing`/`fontSize` — Tailwind's default
+    // scales are intentionally restored so vendored shadcn primitives render
+    // correctly. Color comes from CSS variables mapped below.
     extend: {
+      colors: {
+        border: "hsl(var(--border))",
+        input: "hsl(var(--input))",
+        ring: "hsl(var(--ring))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        primary: {
+          DEFAULT: "hsl(var(--primary))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        secondary: {
+          DEFAULT: "hsl(var(--secondary))",
+          foreground: "hsl(var(--secondary-foreground))",
+        },
+        destructive: {
+          DEFAULT: "hsl(var(--destructive))",
+          foreground: "hsl(var(--destructive-foreground))",
+        },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        warning: {
+          DEFAULT: "hsl(var(--warning))",
+          foreground: "hsl(var(--warning-foreground))",
+        },
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
+        card: {
+          DEFAULT: "hsl(var(--card))",
+          foreground: "hsl(var(--card-foreground))",
+        },
+      },
+      borderRadius: {
+        lg: "var(--radius)",
+        md: "calc(var(--radius) - 2px)",
+        sm: "calc(var(--radius) - 4px)",
+      },
       fontFamily: {
         sans: [
           "ui-sans-serif",
@@ -75,7 +79,21 @@ export default {
           "monospace",
         ],
       },
+      keyframes: {
+        "accordion-down": {
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
+        },
+        "accordion-up": {
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
+      },
+      animation: {
+        "accordion-down": "accordion-down 0.2s ease-out",
+        "accordion-up": "accordion-up 0.2s ease-out",
+      },
     },
   },
-  plugins: [],
+  plugins: [tailwindcssAnimate],
 };

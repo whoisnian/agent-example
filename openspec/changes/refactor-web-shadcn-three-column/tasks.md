@@ -2,22 +2,22 @@
 
 ## 1. 基座：依赖、cn、主题、配置（PR1）
 
-- [ ] 1.1 安装依赖：`class-variance-authority`、`clsx`、`tailwind-merge`、`tailwindcss-animate`、`lucide-react`，及实际用到的 `@radix-ui/react-*`（slot/scroll-area/tabs/tooltip/separator/label/select）。逐个 `npm info @radix-ui/react-<x> peerDependencies` 核对并锁定声明 `react@19` peer 的版本
-- [ ] 1.2 新增 `src/lib/cn.ts`（`clsx` + `tailwind-merge`）并补单测（`cn` 已在 `eslint.config.js` 的 `tailwindcss.callees` 注册，无需再配 lint callee）
-- [ ] 1.3 在 `src/styles/globals.css` 注入 shadcn `:root` 与 `.dark` 变量（`--background`/`--foreground`/`--card`/`--primary`/`--muted`/`--accent`/`--border`/`--input`/`--ring`/`--destructive`/`--radius`）；MVP 默认观感放 `:root`（不挂 `.dark`），并把现有 `@apply bg-bg text-text` 改为新 token
-- [ ] 1.4 改写 `tailwind.config.js`：`darkMode:["class"]`，`theme.extend.colors` 映射 CSS 变量；移除对 `colors`/`spacing`/`fontSize` 的顶层覆盖以恢复 Tailwind 默认 scale；加入 `tailwindcss-animate` 插件
-- [ ] 1.5 改 `web/index.html`：`<body class>` 由 `bg-bg text-text` 换为新 token；CSP `img-src` 放开为 `'self' data: https:`（保持 `script-src 'self'`/`object-src 'none'`/`frame-ancestors 'none'` 不变）
-- [ ] 1.6 放宽 `eslint.config.js` 颜色规则：允许 `hsl(var(--*))` 形式的 arbitrary 值，仍禁裸 `#hex`
-- [ ] 1.7 新增 `components.json`（shadcn 配置，路径别名指向 `components/ui`/`lib`，保留偶尔用 CLI 追加单组件的能力）
-- [ ] 1.8 确认 `npm run typecheck && npm run lint && npm run test` 全绿（必要时临时保留旧 token 别名以免旧页面编译失败）；确认 vendoring 的是 shadcn 的 **Tailwind-3 兼容形态**（无 `@theme`/Tailwind4-only 语法）
+- [x] 1.1 安装依赖：`class-variance-authority`、`clsx`、`tailwind-merge`、`tailwindcss-animate`、`lucide-react`，及实际用到的 `@radix-ui/react-*`（slot/scroll-area/tabs/tooltip/separator/label/select）。逐个 `npm info @radix-ui/react-<x> peerDependencies` 核对并锁定声明 `react@19` peer 的版本
+- [x] 1.2 新增 `src/lib/cn.ts`（`clsx` + `tailwind-merge`）并补单测（`cn` 已在 `eslint.config.js` 的 `tailwindcss.callees` 注册，无需再配 lint callee）
+- [x] 1.3 在 `src/styles/globals.css` 注入 shadcn `:root` 与 `.dark` 变量（`--background`/`--foreground`/`--card`/`--primary`/`--muted`/`--accent`/`--border`/`--input`/`--ring`/`--destructive`/`--radius`）；MVP 默认观感放 `:root`（不挂 `.dark`），并把现有 `@apply bg-bg text-text` 改为新 token
+- [x] 1.4 改写 `tailwind.config.js`：`darkMode:["class"]`，`theme.extend.colors` 映射 CSS 变量；移除对 `colors`/`spacing`/`fontSize` 的顶层覆盖以恢复 Tailwind 默认 scale；加入 `tailwindcss-animate` 插件
+- [x] 1.5 改 `web/index.html`：`<body class>` 由 `bg-bg text-text` 换为新 token；CSP `img-src` 放开为 `'self' data: https:`（保持 `script-src 'self'`/`object-src 'none'`/`frame-ancestors 'none'` 不变）
+- [x] 1.6 放宽 `eslint.config.js` 颜色规则：允许 `hsl(var(--*))` 形式的 arbitrary 值，仍禁裸 `#hex`
+- [x] 1.7 新增 `components.json`（shadcn 配置，路径别名指向 `components/ui`/`lib`，保留偶尔用 CLI 追加单组件的能力）
+- [x] 1.8 确认 `npm run typecheck && npm run lint && npm run test` 全绿（必要时临时保留旧 token 别名以免旧页面编译失败）；确认 vendoring 的是 shadcn 的 **Tailwind-3 兼容形态**（无 `@theme`/Tailwind4-only 语法）
 
 ## 2. 移植 shadcn primitives 到 components/ui（PR1）
 
-- [ ] 2.1 移植 `Button`（cva 变体），并提供从旧 `primitives/Button` API 的等价变体映射（`primary→default`、`ghost→ghost`、`danger→destructive`）
-- [ ] 2.2 移植 `Card`、`Badge`、`Separator`、`ScrollArea`
-- [ ] 2.3 移植表单类 `Input`、`Label`、`Textarea`、`Select`
-- [ ] 2.4 移植 `Tabs`、`Tooltip`、`Skeleton`（用于加载态）
-- [ ] 2.5 为新增 primitives 补最小渲染冒烟测试（保证可用、a11y role 正确）
+- [x] 2.1 移植 `Button`（cva 变体），并提供从旧 `primitives/Button` API 的等价变体映射（`primary→default`、`ghost→ghost`、`danger→destructive`）
+- [x] 2.2 移植 `Card`、`Badge`、`Separator`、`ScrollArea`
+- [x] 2.3 移植表单类 `Input`、`Label`、`Textarea`、`Select`
+- [x] 2.4 移植 `Tabs`、`Tooltip`、`Skeleton`（用于加载态）
+- [x] 2.5 为新增 primitives 补最小渲染冒烟测试（保证可用、a11y role 正确）
 
 ## 3. 三栏外壳与全局 UI 状态（PR2）
 

@@ -1,9 +1,11 @@
 // ESLint 9 flat config.
 //
 // Rules of note:
-//   - tailwindcss/no-arbitrary-value: error  → enforces the design-token layer
-//     defined in tailwind.config.js. No raw `bg-[#abc]` / `mt-[13px]` literals
-//     are allowed.
+//   - Color discipline: with the shadcn CSS-variable theme, arbitrary values are
+//     permitted ONLY when they reference a theme variable (e.g.
+//     `ring-[hsl(var(--ring))]`); bare hex literals (`bg-[#abc]`) stay banned via
+//     a `no-restricted-syntax` guard. `tailwindcss/no-arbitrary-value` is off
+//     because vendored shadcn primitives need a few variable-backed arbitraries.
 //   - tailwindcss/no-custom-classname: warn → catches typos.
 //   - @typescript-eslint/recommended         → strict TS-aware base.
 //
@@ -61,15 +63,31 @@ export default tseslint.config(
       ...reactPlugin.configs.recommended.rules,
       ...reactPlugin.configs["jsx-runtime"].rules,
       ...reactHooksPlugin.configs.recommended.rules,
+      // TypeScript provides prop typing; the runtime prop-types check is
+      // redundant and misfires on forwardRef-typed shadcn primitives.
+      "react/prop-types": "off",
       "react-refresh/only-export-components": [
         "warn",
         { allowConstantExport: true },
       ],
 
-      // Tailwind design-token enforcement
-      "tailwindcss/no-arbitrary-value": "error",
+      // Tailwind design-token enforcement. Arbitrary values are allowed only
+      // when variable-backed; bare hex color literals are rejected below.
       "tailwindcss/no-custom-classname": "warn",
       "tailwindcss/no-contradicting-classname": "error",
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/\\[#[0-9a-fA-F]{3,8}\\]/]",
+          message:
+            "Raw hex color literals are not allowed. Use a theme token (e.g. bg-background, text-foreground) or hsl(var(--token)).",
+        },
+        {
+          selector: "TemplateElement[value.raw=/\\[#[0-9a-fA-F]{3,8}\\]/]",
+          message:
+            "Raw hex color literals are not allowed. Use a theme token (e.g. bg-background, text-foreground) or hsl(var(--token)).",
+        },
+      ],
 
       // TypeScript
       "@typescript-eslint/no-unused-vars": [
