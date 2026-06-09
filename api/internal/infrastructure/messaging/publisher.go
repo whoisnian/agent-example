@@ -15,13 +15,17 @@ import (
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
 
-// Envelope is the typed payload published to RabbitMQ. `Payload` is whatever
-// the producer hands us; we serialise it as JSON.
+// Envelope carries one outbound delivery from the relayer to the publisher.
+// `Payload` IS the wire body: per ARCHITECTURE §5.3 the message body is the
+// flat domain message (e.g. the execute message `{msg_id, idempotency_key,
+// task_id, version_id, ...}`), which the worker parses directly — it is NOT
+// re-wrapped here. `MsgID` and `OccurredAt` travel as AMQP properties
+// (message_id / timestamp), not in the body. The payload already carries its
+// own msg_id / idempotency_key, so no envelope-level idempotency key is added.
 type Envelope struct {
-	MsgID          string    `json:"msg_id"`
-	IdempotencyKey string    `json:"idempotency_key"`
-	Payload        any       `json:"payload"`
-	OccurredAt     time.Time `json:"occurred_at"`
+	MsgID      string    // → AMQP message_id property
+	Payload    any       // → JSON body (the flat §5.3 message)
+	OccurredAt time.Time // → AMQP timestamp property
 }
 
 // Publisher hides amqp091 details so application code never touches Channel.Publish.
@@ -75,13 +79,21 @@ func (p *ConfirmingPublisher) openChannel() error {
 	return nil
 }
 
-// Publish serialises the envelope, injects the current trace context, and
+// encodeBody renders the AMQP body for a delivery. The body IS the flat
+// payload (ARCHITECTURE §5.3) — the worker parses it straight into its
+// TaskExecuteMessage — so we serialise `env.Payload`, never the Envelope.
+// Extracted as a seam so the wire contract is unit-testable without a channel.
+func encodeBody(env Envelope) ([]byte, error) {
+	return json.Marshal(env.Payload)
+}
+
+// Publish serialises the payload, injects the current trace context, and
 // blocks on the confirm channel. Returns nil on ack, error on nack/timeout.
 func (p *ConfirmingPublisher) Publish(ctx context.Context, exchange, routingKey string, env Envelope) error {
 	start := time.Now()
-	body, err := json.Marshal(env)
+	body, err := encodeBody(env)
 	if err != nil {
-		return fmt.Errorf("marshal envelope: %w", err)
+		return fmt.Errorf("marshal payload: %w", err)
 	}
 
 	carrier := propagation.MapCarrier{}
@@ -152,4 +164,3 @@ func (p *ConfirmingPublisher) Close() error {
 	}
 	return p.channel.Close()
 }
-

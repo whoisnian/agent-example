@@ -22,8 +22,9 @@ type EventIngester interface {
 }
 
 // taskEventEnvelope is the worker's *bare* TaskEvent JSON (worker/core/
-// publisher.py). Do NOT confuse with messaging.Envelope — that wrapper is the
-// API→worker (Relayer) shape and is never used inbound. Dedupe is on the
+// publisher.py). Both directions are bare: the Relayer also publishes the flat
+// payload as the body (ARCHITECTURE §5.3), so messaging.Envelope is only an
+// internal relayer→publisher carrier, never a wire shape. Dedupe is on the
 // body's (run_id, seq), not the AMQP idempotency_key header.
 type taskEventEnvelope struct {
 	TaskID    string          `json:"task_id"`

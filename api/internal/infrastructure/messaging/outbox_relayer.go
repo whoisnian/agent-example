@@ -130,10 +130,9 @@ func (r *Relayer) tick(ctx context.Context) {
 // failed depending on outcome.
 func (r *Relayer) publishRow(ctx context.Context, row *persistence.OutboxRow) {
 	env := Envelope{
-		MsgID:          row.AggregateID.String(),
-		IdempotencyKey: row.AggregateID.String(),
-		Payload:        row.Payload,
-		OccurredAt:     row.CreatedAt,
+		MsgID:      row.AggregateID.String(),
+		Payload:    row.Payload,
+		OccurredAt: row.CreatedAt,
 	}
 	err := r.publisher.Publish(ctx, row.Exchange, row.Topic, env)
 	if err == nil {
