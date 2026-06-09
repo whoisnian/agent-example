@@ -90,6 +90,19 @@ function build(): RealtimeClient {
   });
 }
 
+describe("realtime client — default endpoint", () => {
+  it("defaults to a same-origin ws URL when no url/env override is set", () => {
+    // No `url` option and (in the test env) no VITE_WS_URL → derive from origin.
+    const c = new RealtimeClient({
+      webSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    });
+    c.subscribe("task:t1", vi.fn());
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    expect(lastSocket().url.startsWith(`${proto}//${window.location.host}/api/v1/ws`)).toBe(true);
+    c.close();
+  });
+});
+
 describe("realtime client — connection & subscription", () => {
   it("lazily connects on first subscribe", () => {
     const c = build();
@@ -103,9 +116,7 @@ describe("realtime client — connection & subscription", () => {
     const c = build();
     c.subscribe("task:t1", vi.fn());
     lastSocket().openConn();
-    expect(lastSocket().sent[0]).toBe(
-      JSON.stringify({ op: "subscribe", topics: ["task:t1"] }),
-    );
+    expect(lastSocket().sent[0]).toBe(JSON.stringify({ op: "subscribe", topics: ["task:t1"] }));
     expect(c.getConnectionState()).toBe("open");
   });
 
@@ -115,9 +126,7 @@ describe("realtime client — connection & subscription", () => {
     lastSocket().openConn();
     c.subscribe("task:t1", vi.fn()); // second handler — must NOT cause a 2nd subscribe frame
     // Only one subscribe frame ever sent
-    expect(
-      lastSocket().sent.filter((s) => s.includes('"op":"subscribe"')),
-    ).toHaveLength(1);
+    expect(lastSocket().sent.filter((s) => s.includes('"op":"subscribe"'))).toHaveLength(1);
   });
 
   it("unsubscribes via the returned function", () => {
@@ -125,9 +134,7 @@ describe("realtime client — connection & subscription", () => {
     const detach = c.subscribe("task:t1", vi.fn());
     lastSocket().openConn();
     detach();
-    expect(
-      lastSocket().sent.some((s) => s.includes('"op":"unsubscribe"')),
-    ).toBe(true);
+    expect(lastSocket().sent.some((s) => s.includes('"op":"unsubscribe"'))).toBe(true);
   });
 });
 

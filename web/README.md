@@ -12,10 +12,10 @@
 
 消费已上线的 task-write / task-read / event-ingest API，跑通"提交 → 执行 → 观测 → 迭代"闭环：
 
-| 路由 | 页面 | 数据 |
-|---|---|---|
-| `/tasks` | TaskList | `GET /tasks`（分页 + 单选 status 过滤 + 成本列） |
-| `/tasks/new` | TaskCreate | `POST /tasks`（成功跳详情；`400 invalid_input` 逐字段内联） |
+| 路由         | 页面       | 数据                                                                   |
+| ------------ | ---------- | ---------------------------------------------------------------------- |
+| `/tasks`     | TaskList   | `GET /tasks`（分页 + 单选 status 过滤 + 成本列）                       |
+| `/tasks/new` | TaskCreate | `POST /tasks`（成功跳详情；`400 invalid_input` 逐字段内联）            |
 | `/tasks/:id` | TaskDetail | `GET /tasks/{id}` + `/versions` + `/versions/{cur}/events`；含迭代动作 |
 
 要点：
@@ -45,26 +45,26 @@ npm run build && npm run preview
 
 ## 常用命令
 
-| 命令 | 作用 |
-|---|---|
-| `npm run dev` | Vite dev server（HMR, `:5173`） |
-| `npm run build` | `tsc --noEmit` + `vite build` → `dist/` |
-| `npm run preview` | 本地预览 `dist/`（`:4173`） |
-| `npm run lint` | ESLint 9 flat config（含 `tailwindcss/no-arbitrary-value: error`） |
-| `npm run lint:fix` | 自动修复 |
-| `npm run format` / `format:check` | Prettier |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Vitest 单测 |
-| `npm run test:watch` | Vitest watch |
-| `npm run test:coverage` | 含覆盖率 |
+| 命令                              | 作用                                                               |
+| --------------------------------- | ------------------------------------------------------------------ |
+| `npm run dev`                     | Vite dev server（HMR, `:5173`）                                    |
+| `npm run build`                   | `tsc --noEmit` + `vite build` → `dist/`                            |
+| `npm run preview`                 | 本地预览 `dist/`（`:4173`）                                        |
+| `npm run lint`                    | ESLint 9 flat config（含 `tailwindcss/no-arbitrary-value: error`） |
+| `npm run lint:fix`                | 自动修复                                                           |
+| `npm run format` / `format:check` | Prettier                                                           |
+| `npm run typecheck`               | `tsc --noEmit`                                                     |
+| `npm test`                        | Vitest 单测                                                        |
+| `npm run test:watch`              | Vitest watch                                                       |
+| `npm run test:coverage`           | 含覆盖率                                                           |
 
 ## 环境变量
 
-| 变量 | 默认 | 用途 |
-|---|---|---|
-| `VITE_API_BASE_URL` | （空）→ 同源 | REST API 基址，例如 `http://localhost:8080` |
-| `VITE_WS_URL` | `ws://localhost:8080/api/v1/ws` | WebSocket 地址 |
-| `VITE_DEV_PROXY_TARGET` | `http://localhost:8080` | **仅 dev**：Vite 把 `/api`（含 `/api/v1/ws` 的 WS 升级）代理到此后端。`VITE_API_BASE_URL` 留空走同源时，由本代理把请求转发到后端，避免登录等 `/api` 请求命中 dev server 返回 404。 |
+| 变量                    | 默认                      | 用途                                                                                                                                                                               |
+| ----------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_API_BASE_URL`     | （空）→ 同源              | REST API 基址，例如 `http://localhost:8080`                                                                                                                                        |
+| `VITE_WS_URL`           | （空）→ 同源 `/api/v1/ws` | WebSocket 地址；留空时按页面同源推导（`ws`/`wss` + 当前 host），随 dev proxy / 反向代理走，无需按 host 配置                                                                        |
+| `VITE_DEV_PROXY_TARGET` | `http://localhost:8080`   | **仅 dev**：Vite 把 `/api`（含 `/api/v1/ws` 的 WS 升级）代理到此后端。`VITE_API_BASE_URL` 留空走同源时，由本代理把请求转发到后端，避免登录等 `/api` 请求命中 dev server 返回 404。 |
 
 ## 模块协作约定
 

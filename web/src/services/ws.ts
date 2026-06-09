@@ -1,20 +1,13 @@
 import { useAuthStore } from "@/features/auth/store";
-import type {
-  ConnectionState,
-  RealtimeEvent,
-  RealtimeClientFrame,
-} from "@/types/envelope";
+import type { ConnectionState, RealtimeEvent, RealtimeClientFrame } from "@/types/envelope";
 
 export type Handler = (event: RealtimeEvent) => void;
-export type GapCallback = (
-  topic: string,
-  fromSeq: number,
-  toSeq: number,
-) => void | Promise<void>;
+export type GapCallback = (topic: string, fromSeq: number, toSeq: number) => void | Promise<void>;
 export type Navigator = (to: string) => void;
 
 export interface RealtimeClientOptions {
-  /** Override WS URL. Defaults to `VITE_WS_URL`. */
+  /** Override WS URL. Defaults to `VITE_WS_URL`, else the page's same origin
+   *  (`ws|wss://<host>/api/v1/ws`). */
   url?: string;
   /** Default no-op + warn log. Override to fetch missed events via REST. */
   onGap?: GapCallback;
@@ -49,6 +42,21 @@ const DEFAULT_OPTS = {
   idleCloseMs: 5 * 60_000,
 };
 
+/**
+ * Default WS endpoint: the page's own origin (ws/wss + host) + `/api/v1/ws`,
+ * so the socket rides the same dev proxy / reverse proxy as the same-origin
+ * REST client (`VITE_API_BASE_URL` empty) and works on any host — localhost,
+ * a LAN IP, or prod — with no per-host config. `VITE_WS_URL` still overrides.
+ * Falls back to a local default only when there is no DOM (non-browser/SSR).
+ */
+function sameOriginWsUrl(): string {
+  if (typeof window !== "undefined" && window.location?.host) {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/api/v1/ws`;
+  }
+  return "ws://localhost:8080/api/v1/ws";
+}
+
 export class RealtimeClient {
   private url: string;
   private wsImpl: typeof WebSocket;
@@ -80,13 +88,12 @@ export class RealtimeClient {
       typeof import.meta !== "undefined"
         ? ((import.meta as ImportMeta).env?.["VITE_WS_URL"] as string | undefined)
         : undefined;
-    this.url = opts.url ?? envUrl ?? "ws://localhost:8080/api/v1/ws";
+    this.url = opts.url ?? envUrl ?? sameOriginWsUrl();
     this.wsImpl = opts.webSocketImpl ?? (globalThis.WebSocket as typeof WebSocket);
     this.nowFn = opts.now ?? (() => Date.now());
     this.onGap =
       opts.onGap ??
       ((topic, fromSeq, toSeq): void => {
-         
         console.warn(`[realtime] gap on ${topic}: ${fromSeq}..${toSeq}`);
       });
     this.navigator = opts.navigator ?? null;
@@ -216,7 +223,6 @@ export class RealtimeClient {
     try {
       socket = new this.wsImpl(this.buildUrl());
     } catch (e) {
-       
       console.error("[realtime] WebSocket constructor threw", e);
       this.scheduleReconnect();
       return;
@@ -251,7 +257,6 @@ export class RealtimeClient {
     try {
       frame = JSON.parse(raw);
     } catch {
-       
       console.warn("[realtime] invalid JSON frame", raw);
       return;
     }
@@ -271,7 +276,6 @@ export class RealtimeClient {
       try {
         void this.onGap(frame.topic, entry.lastDeliveredSeq + 1, seq - 1);
       } catch (e) {
-         
         console.error("[realtime] onGap threw", e);
       }
     }
@@ -280,7 +284,6 @@ export class RealtimeClient {
       try {
         h(frame);
       } catch (e) {
-         
         console.error("[realtime] handler threw", e);
       }
     }
@@ -330,7 +333,6 @@ export class RealtimeClient {
     try {
       this.socket.send(JSON.stringify(frame));
     } catch (e) {
-       
       console.warn("[realtime] send failed", e);
     }
   }
@@ -340,16 +342,19 @@ export class RealtimeClient {
     this.heartbeatTimer = setInterval(() => {
       this.sendFrame({ op: "ping" });
     }, this.heartbeatIntervalMs);
-    this.heartbeatDeadlineTimer = setInterval(() => {
-      if (this.nowFn() - this.lastInboundAt > this.heartbeatTimeoutMs) {
-        // Stale connection — close + let reconnect path take over.
-        try {
-          this.socket?.close(1000);
-        } catch {
-          /* ignore */
+    this.heartbeatDeadlineTimer = setInterval(
+      () => {
+        if (this.nowFn() - this.lastInboundAt > this.heartbeatTimeoutMs) {
+          // Stale connection — close + let reconnect path take over.
+          try {
+            this.socket?.close(1000);
+          } catch {
+            /* ignore */
+          }
         }
-      }
-    }, Math.min(this.heartbeatIntervalMs, 5_000));
+      },
+      Math.min(this.heartbeatIntervalMs, 5_000),
+    );
   }
 
   private clearHeartbeat(): void {
