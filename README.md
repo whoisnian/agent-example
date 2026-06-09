@@ -11,6 +11,7 @@
 .
 ├── docs/                # 文档（架构、历史记录等）
 │   ├── ARCHITECTURE.md  # 生产级架构设计方案（MVP 标注）
+│   ├── DEVELOPMENT.md   # 本地开发环境启动说明（依赖栈 + 各模块编排）
 │   └── HISTORY.md       # 项目演进历史 / 关键决策
 ├── web/                 # 前端代码根目录（React + TypeScript + Vite）
 ├── api/                 # 后端 API 代码根目录（Golang）
@@ -66,4 +67,4 @@
 - 代理协作：[`AGENTS.md`](AGENTS.md)
 - OpenSpec 变更：`openspec/changes/`
 
-各子模块的本地启动方式将在对应子目录的 `README.md` 中给出。
+本地完整链路（依赖栈 + API + Worker + 前端）的启动顺序与端到端联调见 [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)；各子模块的命令与配置详情见对应子目录的 `README.md`。
