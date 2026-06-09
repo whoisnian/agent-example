@@ -85,6 +85,9 @@ async def pg_pool(pg_container: Any) -> AsyncIterator[Any]:
                 sha256      TEXT,
                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+            -- Mirrors api migration 0008: insert_artifact upserts on this key.
+            CREATE UNIQUE INDEX IF NOT EXISTS artifacts_version_oss_key_key
+                ON artifacts (version_id, oss_key);
             """
         )
     try:

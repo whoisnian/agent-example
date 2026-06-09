@@ -356,12 +356,22 @@ class Persistence:
         bytes_size: int | None,
         sha256: str | None,
     ) -> UUID:
+        # Upsert on (version_id, oss_key): re-recording the same object (a
+        # redelivered run re-inheriting a parent artifact) or overwriting a
+        # produced file collapses to one row. RETURNING yields the existing
+        # row's id on conflict, so callers always get the authoritative id.
         artifact_id = uuid4()
         async with self._pool.acquire() as conn:
-            await conn.execute(
+            row_id: UUID = await conn.fetchval(
                 """
                 INSERT INTO artifacts (id, version_id, kind, oss_key, mime, bytes, sha256)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                ON CONFLICT (version_id, oss_key) DO UPDATE
+                SET kind = EXCLUDED.kind,
+                    mime = EXCLUDED.mime,
+                    bytes = EXCLUDED.bytes,
+                    sha256 = EXCLUDED.sha256
+                RETURNING id
                 """,
                 artifact_id,
                 version_id,
@@ -371,7 +381,7 @@ class Persistence:
                 bytes_size,
                 sha256,
             )
-        return artifact_id
+        return row_id
 
 
 def _terminal(row: asyncpg.Record, outcome: ClaimOutcome) -> ClaimResult:
