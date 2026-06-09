@@ -27,8 +27,9 @@ type Metrics struct {
 	OutboxRelayerLeader prometheus.Gauge
 
 	// Task-write-api business metrics
-	TasksCreatedTotal  *prometheus.CounterVec
-	TasksIteratedTotal *prometheus.CounterVec
+	TasksCreatedTotal    *prometheus.CounterVec
+	TasksIteratedTotal   *prometheus.CounterVec
+	TasksRolledBackTotal *prometheus.CounterVec
 
 	// Event-ingest / status-sync metrics
 	EventsIngestedTotal         *prometheus.CounterVec
@@ -129,6 +130,13 @@ func NewMetrics() *Metrics {
 				Help: "Iterate-task attempts via POST /api/v1/tasks/{id}/iterate. Outcome: success|conflict|not_found|invalid|error.",
 			},
 			[]string{"outcome"},
+		),
+		TasksRolledBackTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "tasks_rolled_back_total",
+				Help: "Rollback attempts via POST /api/v1/tasks/{id}/rollback. Mode: branch|switch|unknown. Outcome: success|conflict|not_found|invalid|error.",
+			},
+			[]string{"mode", "outcome"},
 		),
 		EventsIngestedTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -241,6 +249,7 @@ func NewMetrics() *Metrics {
 		m.OutboxRelayerLeader,
 		m.TasksCreatedTotal,
 		m.TasksIteratedTotal,
+		m.TasksRolledBackTotal,
 		m.EventsIngestedTotal,
 		m.EventStatusTransitionsTotal,
 		m.EventIngestMalformedTotal,

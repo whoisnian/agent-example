@@ -49,6 +49,28 @@ type IterateTaskResult struct {
 	Status    string
 }
 
+// RollbackTaskCommand mirrors POST /api/v1/tasks/{task_id}/rollback plus the
+// principal fields the auth middleware injects. Mode is "branch" | "switch".
+type RollbackTaskCommand struct {
+	TenantID        uuid.UUID
+	UserID          uuid.UUID
+	TaskID          uuid.UUID
+	TargetVersionID uuid.UUID
+	Mode            string
+	Prompt          string
+	Params          json.RawMessage
+	Lane            *string
+}
+
+// RollbackTaskResult mirrors the rollback response. For branch, VersionID is
+// the new version; for switch it is the now-current target version.
+type RollbackTaskResult struct {
+	VersionID uuid.UUID
+	VersionNo int32
+	Status    string
+	Mode      string
+}
+
 // Service is the application-layer wrapper around the domain Service. The
 // struct stays open for adding cross-cutting concerns (metrics, audit) later
 // without forcing handlers to touch the domain package directly.
@@ -99,5 +121,29 @@ func (s *Service) IterateTask(ctx context.Context, cmd IterateTaskCommand) (Iter
 		VersionID: out.VersionID,
 		VersionNo: out.VersionNo,
 		Status:    string(out.Status),
+	}, nil
+}
+
+// RollbackTask folds the principal into a domain.Owner and forwards to
+// domain.Service.RollbackTask.
+//
+//nolint:gocritic // hugeParam: value semantics intentional for an input command; the struct is read-only.
+func (s *Service) RollbackTask(ctx context.Context, cmd RollbackTaskCommand) (RollbackTaskResult, error) {
+	out, err := s.Domain.RollbackTask(ctx, domain.Owner{TenantID: cmd.TenantID, UserID: cmd.UserID}, domain.RollbackInput{
+		TaskID:          cmd.TaskID,
+		TargetVersionID: cmd.TargetVersionID,
+		Mode:            domain.RollbackMode(cmd.Mode),
+		Prompt:          cmd.Prompt,
+		Params:          cmd.Params,
+		Lane:            cmd.Lane,
+	})
+	if err != nil {
+		return RollbackTaskResult{}, err
+	}
+	return RollbackTaskResult{
+		VersionID: out.VersionID,
+		VersionNo: out.VersionNo,
+		Status:    string(out.Status),
+		Mode:      string(out.Mode),
 	}, nil
 }
