@@ -1,13 +1,24 @@
 import type { JSX } from "react";
 import { useState } from "react";
-import type { VersionNode } from "@/features/tasks/types";
+import type { RollbackMode, VersionNode } from "@/features/tasks/types";
 import { StatusBadge } from "./StatusBadge";
 import { CostBadge } from "./CostBadge";
 import { ArtifactList } from "./ArtifactList";
+import { RollbackControl } from "./RollbackControl";
+
+const BUSY_REASON = "Task is busy — wait for the active version to finish";
 
 export interface VersionTreeProps {
   versions: VersionNode[];
   currentVersionId: string | null;
+  /** Whether the task is in an active state — disables ALL rollback actions
+   *  (the backend requires a non-active task for both modes). */
+  taskActive?: boolean;
+  /** When provided, each non-current row offers a rollback picker. The version
+   *  id is supplied here; the leaf RollbackControl is id-agnostic. */
+  onRollback?: (versionId: string, mode: RollbackMode, prompt?: string) => void;
+  /** True while a rollback request is in flight — disables the pickers. */
+  rollbackPending?: boolean;
 }
 
 interface Row {
@@ -42,7 +53,13 @@ function flatten(versions: VersionNode[]): Row[] {
   return rows;
 }
 
-export function VersionTree({ versions, currentVersionId }: VersionTreeProps): JSX.Element {
+export function VersionTree({
+  versions,
+  currentVersionId,
+  taskActive = false,
+  onRollback,
+  rollbackPending = false,
+}: VersionTreeProps): JSX.Element {
   // Which version rows are expanded (showing their artifact list). Ephemeral
   // view state with no cross-component consumer, so it stays local — not in
   // Zustand (which is reserved for non-server, app-level UI state). Declared
@@ -101,6 +118,24 @@ export function VersionTree({ versions, currentVersionId }: VersionTreeProps): J
             {isOpen ? (
               <div className="pl-6">
                 <ArtifactList versionId={node.id} />
+              </div>
+            ) : null}
+            {onRollback && !isCurrent ? (
+              <div className="pl-6">
+                <RollbackControl
+                  branchDisabled={taskActive}
+                  branchReason={taskActive ? BUSY_REASON : undefined}
+                  switchDisabled={taskActive || node.is_active}
+                  switchReason={
+                    taskActive
+                      ? BUSY_REASON
+                      : node.is_active
+                        ? "Can only switch to a finished version"
+                        : undefined
+                  }
+                  pending={rollbackPending}
+                  onRollback={(mode, prompt) => onRollback(node.id, mode, prompt)}
+                />
               </div>
             ) : null}
           </li>

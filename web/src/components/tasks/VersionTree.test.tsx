@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
@@ -69,6 +69,58 @@ describe("VersionTree artifact expansion", () => {
     // Nothing expanded → no list query fired.
     await waitFor(() => expect(requested).toHaveLength(0));
     expect(screen.queryByTestId("artifact-list")).not.toBeInTheDocument();
+  });
+
+  it("offers a rollback control on non-current rows only when onRollback is given", () => {
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <VersionTree versions={versions} currentVersionId="ver-1" onRollback={vi.fn()} />
+      </QueryClientProvider>,
+    );
+    const rows = screen.getAllByTestId("version-node");
+    // ver-1 is current → no rollback; ver-2 is non-current → rollback offered.
+    expect(within(rows[0]!).queryByTestId("rollback-control")).not.toBeInTheDocument();
+    expect(within(rows[1]!).getByTestId("rollback-control")).toBeInTheDocument();
+  });
+
+  it("renders no rollback control when onRollback is omitted", () => {
+    render(wrap());
+    expect(screen.queryByTestId("rollback-control")).not.toBeInTheDocument();
+  });
+
+  it("disables switch (only) on an active target row", async () => {
+    const activeNode = { ...node("ver-2", 2), status: "running", is_active: true };
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <VersionTree
+          versions={[node("ver-1", 1), activeNode]}
+          currentVersionId="ver-1"
+          onRollback={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    const row = screen.getAllByTestId("version-node")[1]!;
+    await userEvent.click(within(row).getByTestId("rollback-button"));
+    // Task not active, but the target version is active → switch off, branch on.
+    expect(within(row).getByTestId("rollback-switch")).toBeDisabled();
+    expect(within(row).getByTestId("rollback-branch")).toBeEnabled();
+  });
+
+  it("disables both rollback actions while the task is active", async () => {
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <VersionTree
+          versions={[node("ver-1", 1), node("ver-2", 2)]}
+          currentVersionId="ver-1"
+          taskActive
+          onRollback={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    const row = screen.getAllByTestId("version-node")[1]!;
+    await userEvent.click(within(row).getByTestId("rollback-button"));
+    expect(within(row).getByTestId("rollback-switch")).toBeDisabled();
+    expect(within(row).getByTestId("rollback-branch")).toBeDisabled();
   });
 
   it("expanding one row fires exactly one request for that version, siblings untouched", async () => {

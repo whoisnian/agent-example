@@ -8,6 +8,9 @@ import type {
   EventPage,
   IterateTaskRequest,
   IterateTaskResponse,
+  RollbackBranchResponse,
+  RollbackSwitchResponse,
+  RollbackTaskRequest,
   TaskDetail,
   TaskListPage,
   VersionDetail,
@@ -73,6 +76,21 @@ export function iterateTask(
     // 409 conflict is surfaced in-page (toast naming the active version).
     toastOnError: false,
   });
+}
+
+export function rollbackTask(
+  taskId: string,
+  body: RollbackTaskRequest,
+): Promise<RollbackBranchResponse | RollbackSwitchResponse> {
+  return apiFetch<RollbackBranchResponse | RollbackSwitchResponse>(
+    `/api/v1/tasks/${taskId}/rollback`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      // 409 active_version_exists / invalid_state are surfaced in-page.
+      toastOnError: false,
+    },
+  );
 }
 
 export function controlTask(taskId: string, body: ControlRequest): Promise<ControlResponse> {

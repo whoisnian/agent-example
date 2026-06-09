@@ -222,6 +222,146 @@ describe("TaskDetail", () => {
     });
   });
 
+  // --- rollback (add-web-rollback-entry) ---
+
+  // A non-current terminal sibling so the version tree offers a rollback row.
+  function versionsEnvelope(): object {
+    return {
+      code: 0,
+      message: "ok",
+      data: {
+        items: [
+          versionNodeFixture("ver-1", null, 1, "succeeded"),
+          versionNodeFixture("ver-2", "ver-1", 2, "succeeded"),
+        ],
+      },
+      trace_id: "t",
+    };
+  }
+
+  it("branch rollback posts the target + mode and confirms on success", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id/versions", () =>
+        HttpResponse.json(versionsEnvelope()),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/rollback", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          {
+            code: 0,
+            message: "ok",
+            data: { version_id: "ver-3", version_no: 3, status: "pending" },
+            trace_id: "t",
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    render(wrap("task-1"));
+    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    await userEvent.click(within(row).getByTestId("rollback-button"));
+    await userEvent.click(within(row).getByTestId("rollback-branch"));
+    await userEvent.type(within(row).getByTestId("rollback-prompt"), "go back");
+    await userEvent.click(within(row).getByTestId("rollback-submit"));
+    await waitFor(() =>
+      expect(body).toEqual({ target_version_id: "ver-2", mode: "branch", prompt: "go back" }),
+    );
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "success" && t.message.includes("branch"))).toBe(true);
+    });
+  });
+
+  it("switch rollback posts a pointer move (no prompt) and confirms", async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id/versions", () =>
+        HttpResponse.json(versionsEnvelope()),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/rollback", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          {
+            code: 0,
+            message: "ok",
+            data: { current_version_id: "ver-2", version_no: 2, status: "succeeded" },
+            trace_id: "t",
+          },
+          { status: 200 },
+        );
+      }),
+    );
+    render(wrap("task-1"));
+    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    await userEvent.click(within(row).getByTestId("rollback-button"));
+    await userEvent.click(within(row).getByTestId("rollback-switch"));
+    await waitFor(() => expect(body).toEqual({ target_version_id: "ver-2", mode: "switch" }));
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "success" && t.message.includes("switch"))).toBe(true);
+    });
+  });
+
+  it("surfaces a 409 active_version_exists naming the active version, and does not retry", async () => {
+    let posts = 0;
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id/versions", () =>
+        HttpResponse.json(versionsEnvelope()),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/rollback", () => {
+        posts += 1;
+        return HttpResponse.json(
+          {
+            code: "active_version_exists",
+            message: "task has an active version",
+            data: { active_version_id: "ver-9", active_version_status: "running" },
+            trace_id: "t",
+          },
+          { status: 409 },
+        );
+      }),
+    );
+    render(wrap("task-1"));
+    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    await userEvent.click(within(row).getByTestId("rollback-button"));
+    await userEvent.click(within(row).getByTestId("rollback-switch"));
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "warning" && t.message.includes("ver-9"))).toBe(true);
+    });
+    expect(posts).toBe(1);
+  });
+
+  it("surfaces a 409 invalid_state on switch as a warning", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/tasks/:id/versions", () =>
+        HttpResponse.json(versionsEnvelope()),
+      ),
+      http.post("http://localhost/api/v1/tasks/:id/rollback", () =>
+        HttpResponse.json(
+          {
+            code: "invalid_state",
+            message: "cannot switch to a non-terminal version",
+            data: null,
+            trace_id: "t",
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    render(wrap("task-1"));
+    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    await userEvent.click(within(row).getByTestId("rollback-button"));
+    await userEvent.click(within(row).getByTestId("rollback-switch"));
+    await waitFor(() => {
+      const toasts = useUiStore.getState().toasts;
+      expect(toasts.some((t) => t.level === "warning" && t.message.includes("non-terminal"))).toBe(
+        true,
+      );
+    });
+  });
+
   // --- cost panel (add-web-cost-views) ---
 
   it("renders the cost panel token breakdown from /tasks/{id}/cost", async () => {

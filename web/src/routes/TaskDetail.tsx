@@ -13,11 +13,16 @@ import { ApiError } from "@/services/http";
 import { useUiStore } from "@/features/ui/store";
 import { useTaskQuery, useVersionsQuery, useVersionEventsQuery } from "@/features/tasks/queries";
 import { useTaskCostQuery } from "@/features/costs/queries";
-import { useControlTaskMutation, useIterateTaskMutation } from "@/features/tasks/mutations";
+import {
+  useControlTaskMutation,
+  useIterateTaskMutation,
+  useRollbackTaskMutation,
+} from "@/features/tasks/mutations";
 import {
   isActiveStatus,
   type ActiveVersionConflict,
   type ControlAction,
+  type RollbackMode,
 } from "@/features/tasks/types";
 import { useTaskLive, liveRefetchInterval } from "@/features/tasks/use-task-live";
 
@@ -51,8 +56,43 @@ export function TaskDetail(): JSX.Element {
 
   const iterate = useIterateTaskMutation();
   const control = useControlTaskMutation();
+  const rollback = useRollbackTaskMutation();
   const [showIterate, setShowIterate] = useState(false);
   const [iteratePrompt, setIteratePrompt] = useState("");
+
+  // Roll back to a historical version. The requested mode is read here (the two
+  // response bodies share no discriminator); both responses carry version_no.
+  // Status is NOT mutated optimistically — it flows back via the live/poll path.
+  const onRollback = (versionId: string, mode: RollbackMode, prompt?: string): void => {
+    rollback.mutate(
+      {
+        taskId: id,
+        body: { target_version_id: versionId, mode, ...(prompt ? { prompt } : {}) },
+      },
+      {
+        onSuccess: (data) => {
+          pushToast({
+            level: "success",
+            message: `Rollback (${mode}) → version ${data.version_no}`,
+          });
+        },
+        onError: (err) => {
+          if (err instanceof ApiError && err.code === "active_version_exists") {
+            const d = err.data;
+            const reason = isConflictData(d)
+              ? `active version ${d.active_version_id} is ${d.active_version_status}`
+              : "an active version already exists";
+            pushToast({ level: "warning", message: `Cannot roll back: ${reason}` });
+          } else if (err instanceof ApiError && err.code === "invalid_state") {
+            // e.g. switch to a non-terminal target; message names the reason.
+            pushToast({ level: "warning", message: err.message });
+          } else if (err instanceof ApiError) {
+            pushToast({ level: "error", message: err.message });
+          }
+        },
+      },
+    );
+  };
 
   // Issue a pause/resume/cancel control. The 202 is NOT a status change — the
   // worker flips status asynchronously and the new value arrives via useTaskLive
@@ -159,7 +199,13 @@ export function TaskDetail(): JSX.Element {
       <div className="mb-6">
         <h2 className="mb-2 text-lg font-medium text-text">Versions</h2>
         {versionsQuery.data ? (
-          <VersionTree versions={versionsQuery.data.items} currentVersionId={currentVersionId} />
+          <VersionTree
+            versions={versionsQuery.data.items}
+            currentVersionId={currentVersionId}
+            taskActive={isActive}
+            onRollback={onRollback}
+            rollbackPending={rollback.isPending}
+          />
         ) : (
           <p className="text-sm text-text-muted">Loading versions…</p>
         )}

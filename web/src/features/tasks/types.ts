@@ -172,6 +172,37 @@ export interface IterateTaskResponse {
   status: string;
 }
 
+/** Rollback mode (task-rollback-api §6.5): `branch` re-executes from the target
+ *  version (201, new version); `switch` only repoints `current_version` (200,
+ *  pointer move, no run). */
+export type RollbackMode = "branch" | "switch";
+
+export interface RollbackTaskRequest {
+  target_version_id: string;
+  mode: RollbackMode;
+  /** branch only; an empty/omitted prompt is valid (the backend auto-fills
+   *  "rollback to version N"). */
+  prompt?: string;
+  params?: unknown;
+  lane?: string;
+}
+
+/** 201 `data` for mode=branch (a newly created version). */
+export interface RollbackBranchResponse {
+  version_id: string;
+  version_no: number;
+  status: string;
+}
+
+/** 200 `data` for mode=switch (a pointer move). NOTE the field name differs
+ *  from branch (`current_version_id`, not `version_id`); the two share no
+ *  discriminator, so callers key off the requested `mode`, not the response. */
+export interface RollbackSwitchResponse {
+  current_version_id: string;
+  version_no: number;
+  status: string;
+}
+
 /** `data` of a 409 `active_version_exists` error. */
 export interface ActiveVersionConflict {
   active_version_id: string;
