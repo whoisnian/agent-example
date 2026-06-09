@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from worker.agents.inherit import inherit_parent_artifacts
 from worker.agents.loop import DEFAULT_ROLE_INSTRUCTIONS, run_agent_loop
 
 if TYPE_CHECKING:
@@ -140,6 +141,7 @@ class LoopAgent:
 
     async def run(self, ctx: RunContext, message: TaskExecuteMessage) -> None:
         model = self._model_factory.get(self._spec.model_key)
+        await self._maybe_inherit_parent_artifacts(ctx, message)
         try:
             produced = await run_agent_loop(
                 ctx,
@@ -168,6 +170,34 @@ class LoopAgent:
             self._record_run("error")
             raise
         self._record_run("success")
+
+    async def _maybe_inherit_parent_artifacts(
+        self, ctx: RunContext, message: TaskExecuteMessage
+    ) -> None:
+        """Seed the new version from the parent's artifacts on a fresh run.
+
+        Gated on ``parent_version_id`` present AND no prior checkpoint (the run
+        is fresh, not a resume). The gate is a performance optimization; row-level
+        idempotency (the ``insert_artifact`` upsert) is the correctness backstop
+        for the crash-before-first-checkpoint window. The worker keys on
+        ``parent_version_id``; a non-null ``parent_artifact_root`` is unexpected
+        (the API leaves it null) and is logged as a contract warning.
+        """
+        if message.parent_artifact_root is not None:
+            ctx.logger.warning(
+                "parent_artifact_root_unexpected",
+                parent_artifact_root=message.parent_artifact_root,
+            )
+        if message.parent_version_id is None:
+            return
+        if await ctx.checkpoint_store.latest() is not None:
+            return  # resume — a prior attempt already inherited
+        count = await inherit_parent_artifacts(ctx, self._persistence, message.parent_version_id)
+        ctx.logger.info(
+            "artifacts_inherited",
+            count=count,
+            parent_version_id=str(message.parent_version_id),
+        )
 
     def _record_run(self, outcome: str) -> None:
         if self._metrics is not None:

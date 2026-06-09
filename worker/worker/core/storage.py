@@ -118,6 +118,27 @@ class OssClient:
             )
         return dst_absolute
 
+    async def list_keys(self, prefix: str) -> list[tuple[str, int]]:
+        """List objects under ``prefix``, returning ``(relative_key, size)`` pairs.
+
+        The relative key has ``prefix`` stripped, so it feeds straight back into
+        :meth:`server_side_copy` / :meth:`get`. Paginates so it does not truncate
+        at 1000 objects, and tolerates an empty result (no ``Contents``) by
+        returning ``[]``. Any object key that does not start with ``prefix`` is
+        skipped defensively.
+        """
+        _validate_prefix(prefix)
+        out: list[tuple[str, int]] = []
+        async with self._client_cm() as s3:
+            paginator = s3.get_paginator("list_objects_v2")
+            async for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+                for obj in page.get("Contents", []):
+                    key: str = obj["Key"]
+                    if not key.startswith(prefix):
+                        continue
+                    out.append((key[len(prefix) :], int(obj["Size"])))
+        return out
+
     async def ensure_bucket(self) -> None:
         """Create the bucket if it does not exist (idempotent, dev convenience)."""
         async with self._client_cm() as s3:
