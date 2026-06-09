@@ -30,12 +30,12 @@
 
 ## 4. Artifact 预览面板（右栏）（PR3）
 
-- [ ] 4.1 新增 `PreviewPanel`（右栏容器）：读 `selectedVersionId`，无选中版本时渲染空/占位态
-- [ ] 4.2 迁移 `ArtifactList` 下载逻辑入面板：列表渲染（kind/mime/size）、presign 按需下载、加载/空/错误三态，保留 `artifact-row`/`artifact-download`/`artifact-list-empty`/`artifact-list-loading`/`artifact-list-error` testid 与单错误面约定
-- [ ] 4.3 实现轻量内容预览：`image/*` 走 `<img>`；text/json/yaml 走 presign+fetch 截断（默认 64KB 上限 + 截断提示）；其它仅下载
-- [ ] 4.4 预览仅对用户**选中的单个 artifact**触发 fetch（切换 version 不预拉），不缓存 presign（沿用 mutation 语义）
-- [ ] 4.5 验证两道跨源关卡：图片 `<img>` 不被 CSP `img-src` 拦（浏览器 console 无 violation）；文本 `fetch(presigned OSS)` 的 CORS——若 OSS 未放 `Access-Control-Allow-Origin`，文本预览降级为 download-only + 单条 inline 预览错误（见 design Open Questions）
-- [ ] 4.6 新增预览面板测试：选中版本驱动、空态、下载 re-mint、下载单错误面、文本 fetch 失败降级、图片/文本/二进制三类预览分支
+- [x] 4.1 新增 `PreviewPanel`（右栏容器）：读 `selectedVersionId`，无选中版本时渲染空/占位态
+- [x] 4.2 迁移 `ArtifactList` 下载逻辑入面板：列表渲染（kind/mime/size）、presign 按需下载、加载/空/错误三态，保留 `artifact-row`/`artifact-download`/`artifact-list-empty`/`artifact-list-loading`/`artifact-list-error` testid 与单错误面约定
+- [x] 4.3 实现轻量内容预览：`image/*` 走 `<img>`；text/json/yaml 走 presign+fetch 截断（默认 64KB 上限 + 截断提示）；其它仅下载
+- [x] 4.4 预览仅对用户**选中的单个 artifact**触发 fetch（切换 version 不预拉），不缓存 presign（沿用 mutation 语义）
+- [x] 4.5 验证两道跨源关卡：图片 `<img>` 不被 CSP `img-src` 拦（浏览器 console 无 violation）；文本 `fetch(presigned OSS)` 的 CORS——若 OSS 未放 `Access-Control-Allow-Origin`，文本预览降级为 download-only + 单条 inline 预览错误（见 design Open Questions）
+- [x] 4.6 新增预览面板测试：选中版本驱动、空态、下载 re-mint、下载单错误面、文本 fetch 失败降级、图片/文本/二进制三类预览分支
 
 ## 5. 页面迁移（行为不变，仅换皮）（PR4–PR5）
 

@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import { Outlet } from "react-router-dom";
 import { SideNav } from "@/components/layout/SideNav";
 import { PreviewColumn } from "@/components/layout/PreviewColumn";
+import { ArtifactPreviewPanel } from "@/features/artifacts/ArtifactPreviewPanel";
 
 /**
  * Three-column application shell: left navigation column, center route content,
@@ -19,12 +20,7 @@ export function RootLayout(): JSX.Element {
         <Outlet />
       </main>
       <PreviewColumn>
-        <p
-          className="p-4 text-sm text-muted-foreground"
-          data-testid="preview-placeholder"
-        >
-          Select a version to preview its artifacts.
-        </p>
+        <ArtifactPreviewPanel />
       </PreviewColumn>
     </div>
   );
