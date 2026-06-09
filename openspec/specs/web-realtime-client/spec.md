@@ -5,7 +5,7 @@ TBD - created by archiving change init-web-scaffold. Update Purpose after archiv
 ## Requirements
 ### Requirement: WebSocket Connection Lifecycle
 
-The project SHALL expose a singleton `realtimeClient` in `src/services/ws.ts` that manages a single `WebSocket` connection to `VITE_WS_URL` with token-based auth (token appended as `?token=<jwt>` query param at connect time, matching `docs/ARCHITECTURE.md §5.2`).
+The project SHALL expose a singleton `realtimeClient` in `src/services/ws.ts` that manages a single `WebSocket` connection to the realtime endpoint — `VITE_WS_URL` when set, otherwise the page's own origin (`ws`/`wss` + current host + `/api/v1/ws`, mirroring the same-origin REST default so it rides the same proxy) — with token-based auth (token appended as `?token=<jwt>` query param at connect time, matching `docs/ARCHITECTURE.md §5.2`).
 
 The client SHALL:
 - connect lazily on the first `subscribe()` call after app mount,
