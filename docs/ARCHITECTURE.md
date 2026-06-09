@@ -800,8 +800,11 @@ POST /tasks/{id}/rollback
 { "target_version_id": "<v_k>", "mode": "switch" | "branch" }
 ```
 
-- `switch`：仅更新 `current_version` 指针，不创建新版本、不执行；不受任务级互斥约束（不产生活跃版本）。
-- `branch`：基于 v_k 创建新版本并执行（用于"以 v_k 为起点继续走"）；与 iterate 一样需要先通过互斥检查，活跃中返回 409。
+- `switch`：仅更新 `current_version` 指针（含 `updated_at`），**不写 `tasks.status`**（保持 `task-event-ingest` 为 status 的唯一运行期写者），不创建新版本、不执行。实现约束（add-task-rollback-api）：
+  - **要求任务当前无活跃版本**（活跃中返回 `409 active_version_exists`）。原因：`task-event-ingest` 的 `tasks.status` 同步以 `current_version` 为 CAS 闸门，运行中移动指针会让该 run 的状态同步静默失效。所以 `switch` 并非"任意时刻可切"——它不产生活跃版本（不被互斥索引阻塞），但额外要求"无并发活跃 run"。
+  - **目标版本必须为终态**：经目标行的 `is_active` 列显式断言（非终态返回 `409 invalid_state`）。
+  - 后果：`tasks.status`（最后一次执行结果）与 `current_version` 指向版本的状态可合法地不一致；任务列表徽标只读 `tasks.status`，故反映"最后执行结果"而非"工作基线"。
+- `branch`：基于 v_k 创建新版本并执行（用于"以 v_k 为起点继续走"）；与 iterate 一样需要先通过互斥检查，活跃中返回 `409`。`prompt` 省略时自动填充 `"rollback to version <n>"`。复用 iterate 的 execute 消息（携带 v_k 的 `artifact_root` 作为 `parent_artifact_root`），**Worker 无需改动**。
 
 ### 6.6 失败与重试
 
