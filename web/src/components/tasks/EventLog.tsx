@@ -18,7 +18,7 @@ export interface EventLogProps {
 export function EventLog({ events }: EventLogProps): JSX.Element {
   if (events.length === 0) {
     return (
-      <p data-testid="event-log-empty" className="text-sm text-text-muted">
+      <p data-testid="event-log-empty" className="text-sm text-muted-foreground">
         No events yet.
       </p>
     );
@@ -27,9 +27,9 @@ export function EventLog({ events }: EventLogProps): JSX.Element {
     <ul data-testid="event-log" className="flex flex-col gap-1 font-mono text-xs">
       {events.map((e) => (
         <li key={e.id} data-testid="event-row" className="flex gap-2">
-          <span className="text-text-muted">#{e.seq}</span>
-          <span className="text-accent">{e.kind}</span>
-          <span className="truncate text-text-muted">{preview(e.payload)}</span>
+          <span className="text-muted-foreground">#{e.seq}</span>
+          <span className="text-primary">{e.kind}</span>
+          <span className="truncate text-muted-foreground">{preview(e.payload)}</span>
         </li>
       ))}
     </ul>

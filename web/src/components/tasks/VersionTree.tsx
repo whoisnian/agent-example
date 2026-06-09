@@ -1,9 +1,9 @@
 import type { JSX } from "react";
-import { useState } from "react";
+import { cn } from "@/lib/cn";
+import { useUiStore } from "@/features/ui/store";
 import type { RollbackMode, VersionNode } from "@/features/tasks/types";
 import { StatusBadge } from "./StatusBadge";
 import { CostBadge } from "./CostBadge";
-import { ArtifactList } from "./ArtifactList";
 import { RollbackControl } from "./RollbackControl";
 
 const BUSY_REASON = "Task is busy — wait for the active version to finish";
@@ -60,22 +60,15 @@ export function VersionTree({
   onRollback,
   rollbackPending = false,
 }: VersionTreeProps): JSX.Element {
-  // Which version rows are expanded (showing their artifact list). Ephemeral
-  // view state with no cross-component consumer, so it stays local — not in
-  // Zustand (which is reserved for non-server, app-level UI state). Declared
-  // before any early return to satisfy the rules-of-hooks.
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggle = (id: string): void =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  // Selecting a row anchors the right-column Artifact Preview (the preview owns
+  // the artifact fetch; the tree only drives the selection). Selection lives in
+  // the global UI store so the preview column can read it.
+  const selectedVersionId = useUiStore((s) => s.selectedVersionId);
+  const setSelectedVersionId = useUiStore((s) => s.setSelectedVersionId);
 
   if (versions.length === 0) {
     return (
-      <p data-testid="version-tree-empty" className="text-sm text-text-muted">
+      <p data-testid="version-tree-empty" className="text-sm text-muted-foreground">
         No versions yet.
       </p>
     );
@@ -86,40 +79,37 @@ export function VersionTree({
     <ul data-testid="version-tree" className="flex flex-col gap-1">
       {rows.map(({ node, depth }) => {
         const isCurrent = node.id === currentVersionId;
-        const isOpen = expanded.has(node.id);
+        const isSelected = node.id === selectedVersionId;
         return (
           <li
             key={node.id}
             data-testid="version-node"
             data-current={isCurrent}
+            data-selected={isSelected}
             className="flex flex-col gap-1 text-sm"
             style={{ paddingLeft: `${depth * 16}px` }}
           >
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                data-testid="version-expand-toggle"
-                aria-expanded={isOpen}
-                aria-label={isOpen ? "Hide artifacts" : "Show artifacts"}
-                onClick={() => toggle(node.id)}
-                className="font-mono text-xs text-text-muted hover:text-text"
-              >
-                {isOpen ? "▾" : "▸"}
-              </button>
-              <span className="font-mono text-text">v{node.version_no}</span>
+            <button
+              type="button"
+              data-testid="version-select"
+              aria-selected={isSelected}
+              onClick={() => setSelectedVersionId(node.id)}
+              className={cn(
+                "flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors",
+                isSelected
+                  ? "bg-accent text-accent-foreground"
+                  : "hover:bg-accent/50",
+              )}
+            >
+              <span className="font-mono text-foreground">v{node.version_no}</span>
               <StatusBadge status={node.status} />
               <CostBadge cost={node.cost} />
               {isCurrent ? (
-                <span data-testid="current-marker" className="text-xs text-accent">
+                <span data-testid="current-marker" className="text-xs text-primary">
                   current
                 </span>
               ) : null}
-            </div>
-            {isOpen ? (
-              <div className="pl-6">
-                <ArtifactList versionId={node.id} />
-              </div>
-            ) : null}
+            </button>
             {onRollback && !isCurrent ? (
               <div className="pl-6">
                 <RollbackControl

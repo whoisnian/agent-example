@@ -1,8 +1,8 @@
 import type { JSX } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/primitives/Button";
+import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/tasks/StatusBadge";
 import { CostBadge } from "@/components/tasks/CostBadge";
 import { ControlBar } from "@/components/tasks/ControlBar";
@@ -38,11 +38,21 @@ export function TaskDetail(): JSX.Element {
   const { id = "" } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
+  const setSelectedVersionId = useUiStore((s) => s.setSelectedVersionId);
 
   const taskQuery = useTaskQuery(id);
   const task = taskQuery.data?.task;
   const isActive = task ? isActiveStatus(task.status) : false;
   const currentVersionId = task?.current_version ?? null;
+
+  // Default the right-column Artifact Preview to this task's current version,
+  // and clear the selection when leaving the detail page so the preview panel
+  // does not show a stale version on the list/cost pages. The version tree can
+  // override the selection while the page is mounted.
+  useEffect(() => {
+    setSelectedVersionId(currentVersionId);
+    return () => setSelectedVersionId(null);
+  }, [currentVersionId, setSelectedVersionId]);
 
   const interval = liveRefetchInterval(isActive);
   // Re-run the queries with polling now that we know active/version state.
@@ -126,15 +136,15 @@ export function TaskDetail(): JSX.Element {
   if (taskQuery.error instanceof ApiError && taskQuery.error.status === 404) {
     return (
       <section data-testid="task-not-found">
-        <h1 className="text-2xl font-semibold text-text">Task not found</h1>
-        <p className="text-sm text-text-muted">No task with id {id}.</p>
+        <h1 className="text-2xl font-semibold text-foreground">Task not found</h1>
+        <p className="text-sm text-muted-foreground">No task with id {id}.</p>
       </section>
     );
   }
 
   if (taskQuery.isPending) {
     return (
-      <p data-testid="task-detail-loading" className="text-sm text-text-muted">
+      <p data-testid="task-detail-loading" className="text-sm text-muted-foreground">
         Loading…
       </p>
     );
@@ -143,7 +153,7 @@ export function TaskDetail(): JSX.Element {
   const detail = taskQuery.data;
   if (!detail) {
     return (
-      <p data-testid="task-detail-error" className="text-sm text-danger">
+      <p data-testid="task-detail-error" className="text-sm text-destructive">
         Failed to load task.
       </p>
     );
@@ -176,28 +186,28 @@ export function TaskDetail(): JSX.Element {
   return (
     <section data-testid="task-detail-page">
       <div className="mb-4 flex items-center gap-3">
-        <h1 className="text-2xl font-semibold text-text">{loadedTask.title}</h1>
+        <h1 className="text-2xl font-semibold text-foreground">{loadedTask.title}</h1>
         <StatusBadge status={loadedTask.status} />
-        <span className="text-sm text-text-muted">{loadedTask.task_type}</span>
+        <span className="text-sm text-muted-foreground">{loadedTask.task_type}</span>
         <CostBadge cost={detail.cost} />
         <ControlBar status={loadedTask.status} pending={control.isPending} onAction={onControl} />
       </div>
 
       <div data-testid="task-cost-panel" className="mb-6">
-        <h2 className="mb-2 text-lg font-medium text-text">Cost</h2>
+        <h2 className="mb-2 text-lg font-medium text-foreground">Cost</h2>
         {costQuery.data ? (
           <TokenBar cost={costQuery.data.total} />
         ) : costQuery.isPending ? (
-          <p className="text-sm text-text-muted">Loading cost…</p>
+          <p className="text-sm text-muted-foreground">Loading cost…</p>
         ) : (
           // A 404 here is a defensive no-op (the page is already gated by the
           // task query); render nothing rather than a second not-found screen.
-          <p className="text-sm text-text-muted">Cost unavailable.</p>
+          <p className="text-sm text-muted-foreground">Cost unavailable.</p>
         )}
       </div>
 
       <div className="mb-6">
-        <h2 className="mb-2 text-lg font-medium text-text">Versions</h2>
+        <h2 className="mb-2 text-lg font-medium text-foreground">Versions</h2>
         {versionsQuery.data ? (
           <VersionTree
             versions={versionsQuery.data.items}
@@ -207,7 +217,7 @@ export function TaskDetail(): JSX.Element {
             rollbackPending={rollback.isPending}
           />
         ) : (
-          <p className="text-sm text-text-muted">Loading versions…</p>
+          <p className="text-sm text-muted-foreground">Loading versions…</p>
         )}
         <div className="mt-3">
           <Button
@@ -226,7 +236,7 @@ export function TaskDetail(): JSX.Element {
                 onChange={(e) => setIteratePrompt(e.target.value)}
                 rows={3}
                 placeholder="Describe the change for the next version…"
-                className="rounded border border-border bg-surface px-2 py-1 text-text"
+                className="rounded-md border border-input bg-background px-2 py-1 text-foreground"
               />
               <div>
                 <Button
@@ -243,15 +253,15 @@ export function TaskDetail(): JSX.Element {
       </div>
 
       <div>
-        <h2 className="mb-2 text-lg font-medium text-text">Events</h2>
+        <h2 className="mb-2 text-lg font-medium text-foreground">Events</h2>
         {currentVersionId ? (
           eventsQuery.data ? (
             <EventLog events={eventsQuery.data.items} />
           ) : (
-            <p className="text-sm text-text-muted">Loading events…</p>
+            <p className="text-sm text-muted-foreground">Loading events…</p>
           )
         ) : (
-          <p data-testid="no-current-version" className="text-sm text-text-muted">
+          <p data-testid="no-current-version" className="text-sm text-muted-foreground">
             No current version yet.
           </p>
         )}

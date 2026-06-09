@@ -45,11 +45,11 @@ function wrap(): JSX.Element {
 }
 
 afterEach(() => {
-  useUiStore.setState({ toasts: [] });
+  useUiStore.setState({ toasts: [], selectedVersionId: null });
 });
 
-describe("VersionTree artifact expansion", () => {
-  it("keeps existing badges/current-marker and issues NO artifact request while collapsed", async () => {
+describe("VersionTree artifact selection", () => {
+  it("keeps existing badges/current-marker and issues NO artifact request itself", async () => {
     const requested: string[] = [];
     server.use(
       http.get("http://localhost/api/v1/versions/:id/artifacts", ({ params }) => {
@@ -66,7 +66,7 @@ describe("VersionTree artifact expansion", () => {
 
     expect(screen.getAllByTestId("version-node")).toHaveLength(2);
     expect(screen.getByTestId("current-marker")).toBeInTheDocument();
-    // Nothing expanded → no list query fired.
+    // The tree never fetches artifacts; that is the preview panel's job.
     await waitFor(() => expect(requested).toHaveLength(0));
     expect(screen.queryByTestId("artifact-list")).not.toBeInTheDocument();
   });
@@ -123,26 +123,24 @@ describe("VersionTree artifact expansion", () => {
     expect(within(row).getByTestId("rollback-branch")).toBeDisabled();
   });
 
-  it("expanding one row fires exactly one request for that version, siblings untouched", async () => {
-    const requested: string[] = [];
-    server.use(
-      http.get("http://localhost/api/v1/versions/:id/artifacts", ({ params }) => {
-        requested.push(String(params["id"]));
-        return HttpResponse.json({
-          code: 0,
-          message: "ok",
-          data: { version_id: String(params["id"]), artifacts: [] },
-          trace_id: "t",
-        });
-      }),
-    );
+  it("selecting a row sets selectedVersionId and marks the row selected", async () => {
     render(wrap());
 
-    const firstRow = screen.getAllByTestId("version-node")[0]!;
-    await userEvent.click(within(firstRow).getByTestId("version-expand-toggle"));
+    const rows = screen.getAllByTestId("version-node");
+    expect(useUiStore.getState().selectedVersionId).toBeNull();
 
-    // The expanded row resolves to its (empty) list; only ver-1 was requested.
-    expect(await within(firstRow).findByTestId("artifact-list-empty")).toBeInTheDocument();
-    await waitFor(() => expect(requested).toEqual(["ver-1"]));
+    await userEvent.click(within(rows[1]!).getByTestId("version-select"));
+
+    expect(useUiStore.getState().selectedVersionId).toBe("ver-2");
+    expect(rows[1]!).toHaveAttribute("data-selected", "true");
+    expect(rows[0]!).toHaveAttribute("data-selected", "false");
+  });
+
+  it("any version (not only current) is selectable", async () => {
+    render(wrap());
+    const rows = screen.getAllByTestId("version-node");
+    // ver-1 is current; select the non-current ver-2.
+    await userEvent.click(within(rows[1]!).getByTestId("version-select"));
+    expect(useUiStore.getState().selectedVersionId).toBe("ver-2");
   });
 });

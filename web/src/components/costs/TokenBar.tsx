@@ -23,11 +23,11 @@ export function TokenBar({ cost }: TokenBarProps): JSX.Element {
       <span
         data-testid="token-bar-amount"
         title={`${cost.amount_usd} USD`}
-        className="font-mono text-xl font-semibold text-text"
+        className="font-mono text-xl font-semibold text-foreground"
       >
         {formatAmount(cost.amount_usd)}
       </span>
-      <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-muted">
+      <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>
           <dt className="inline">in</dt>{" "}
           <dd className="inline font-mono">{num(cost.input_tokens)}</dd>

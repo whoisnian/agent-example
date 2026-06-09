@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useState } from "react";
-import { Button } from "@/components/primitives/Button";
+import { Button } from "@/components/ui/button";
 import type { RollbackMode } from "@/features/tasks/types";
 
 export interface RollbackControlProps {
@@ -44,7 +44,7 @@ export function RollbackControl({
         data-testid="rollback-button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="self-start font-mono text-xs text-text-muted hover:text-text"
+        className="self-start font-mono text-xs text-muted-foreground hover:text-foreground"
       >
         Rollback…
       </button>
@@ -78,7 +78,7 @@ export function RollbackControl({
                 onChange={(e) => setPrompt(e.target.value)}
                 rows={3}
                 placeholder="Optional — describe the change (blank rolls back as-is)…"
-                className="rounded border border-border bg-surface px-2 py-1 text-text"
+                className="rounded-md border border-input bg-background px-2 py-1 text-foreground"
               />
               <div>
                 <Button

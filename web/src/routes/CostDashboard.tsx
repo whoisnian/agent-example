@@ -30,7 +30,7 @@ function windowFor(days: WindowDays): { from: string; to: string } {
 function GroupedRows({ items }: { items: CostGroupItem[] }): JSX.Element {
   if (items.length === 0) {
     return (
-      <p data-testid="cost-empty" className="text-sm text-text-muted">
+      <p data-testid="cost-empty" className="text-sm text-muted-foreground">
         No spend in this window.
       </p>
     );
@@ -43,9 +43,9 @@ function GroupedRows({ items }: { items: CostGroupItem[] }): JSX.Element {
   const total = sumAmounts(items.map((it) => it.totals.amount_usd));
   return (
     <div className="flex flex-col gap-3">
-      <div data-testid="cost-group-total" className="text-sm text-text-muted">
+      <div data-testid="cost-group-total" className="text-sm text-muted-foreground">
         Window total{" "}
-        <span className="font-mono text-text" title={`${total} USD`}>
+        <span className="font-mono text-foreground" title={`${total} USD`}>
           {formatAmount(total)}
         </span>
       </div>
@@ -57,17 +57,17 @@ function GroupedRows({ items }: { items: CostGroupItem[] }): JSX.Element {
             data-key={it.key}
             className="flex items-center gap-3 text-sm"
           >
-            <span className="w-48 shrink-0 truncate font-mono text-text" title={it.key}>
+            <span className="w-48 shrink-0 truncate font-mono text-foreground" title={it.key}>
               {it.key}
             </span>
-            <span className="h-2 flex-1 overflow-hidden rounded bg-surface">
+            <span className="h-2 flex-1 overflow-hidden rounded bg-muted">
               <span
-                className="block h-full bg-accent"
+                className="block h-full bg-primary"
                 style={{ width: `${barFraction(it.totals.amount_usd, max) * 100}%` }}
               />
             </span>
             <span
-              className="w-24 shrink-0 text-right font-mono text-text-muted"
+              className="w-24 shrink-0 text-right font-mono text-muted-foreground"
               title={`${it.totals.amount_usd} USD`}
             >
               {formatAmount(it.totals.amount_usd)}
@@ -90,7 +90,7 @@ function RollupView({ data }: { data: CostRollup }): JSX.Element {
       <div className="flex flex-col gap-2">
         <TokenBar cost={data.total} />
         {isZero ? (
-          <p data-testid="cost-empty" className="text-sm text-text-muted">
+          <p data-testid="cost-empty" className="text-sm text-muted-foreground">
             No spend yet.
           </p>
         ) : null}
@@ -117,16 +117,16 @@ export function CostDashboard(): JSX.Element {
 
   return (
     <section data-testid="cost-dashboard-page">
-      <h1 className="mb-4 text-2xl font-semibold text-text">Cost</h1>
+      <h1 className="mb-4 text-2xl font-semibold text-foreground">Cost</h1>
 
       <div className="mb-6 flex flex-wrap items-center gap-4">
-        <label className="flex items-center gap-2 text-sm text-text-muted">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
           Group
           <select
             data-testid="cost-group-select"
             value={group}
             onChange={(e) => setGroup(e.target.value as GroupChoice)}
-            className="rounded border border-border bg-surface px-2 py-1 text-text"
+            className="rounded-md border border-input bg-background px-2 py-1 text-foreground"
           >
             {GROUP_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -137,13 +137,13 @@ export function CostDashboard(): JSX.Element {
         </label>
 
         {group !== "none" ? (
-          <label className="flex items-center gap-2 text-sm text-text-muted">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
             Window
             <select
               data-testid="cost-window-select"
               value={windowDays}
               onChange={(e) => setWindowDays(Number(e.target.value) as WindowDays)}
-              className="rounded border border-border bg-surface px-2 py-1 text-text"
+              className="rounded-md border border-input bg-background px-2 py-1 text-foreground"
             >
               {WINDOW_OPTIONS.map((d) => (
                 <option key={d} value={d}>
@@ -156,11 +156,11 @@ export function CostDashboard(): JSX.Element {
       </div>
 
       {query.isPending ? (
-        <p data-testid="cost-loading" className="text-sm text-text-muted">
+        <p data-testid="cost-loading" className="text-sm text-muted-foreground">
           Loading…
         </p>
       ) : query.error ? (
-        <p data-testid="cost-error" className="text-sm text-danger">
+        <p data-testid="cost-error" className="text-sm text-destructive">
           Failed to load cost. Please retry.
         </p>
       ) : (

@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Button } from "@/components/primitives/Button";
+import { Button } from "@/components/ui/button";
 import { controlAvailability, type ControlAction } from "@/features/tasks/types";
 
 export interface ControlBarProps {
@@ -45,7 +45,7 @@ export function ControlBar({ status, pending, onAction }: ControlBarProps): JSX.
       </Button>
       <Button
         data-testid="control-cancel"
-        variant="danger"
+        variant="destructive"
         disabled={pending || !canCancel}
         title={pending ? "A control request is in progress" : cancelReason}
         onClick={() => onAction("cancel")}
