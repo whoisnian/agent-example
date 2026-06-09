@@ -1,0 +1,30 @@
+## Why
+
+`add-task-rollback-api` shipped `branch` rollback, which (like `iterate`) enqueues an `execute` message carrying the parent version so the worker can build the new version **incrementally on the parent's artifacts** (`docs/ARCHITECTURE.md §6.4`/`§6.5`: "基于父版本产物增量改造" — code tasks copy the parent artifacts as the working base; the new version starts from them). But the worker today **parses `parent_version_id`/`parent_artifact_root` and ignores them** — every run produces a from-scratch artifact set, so a branch-rollback (and an iterate) silently loses the parent's files. The OSS primitive for this already exists (`OssClient.server_side_copy`, currently "no caller wired yet"). This change wires the worker side of rollback: parent-artifact inheritance on the shared execute path.
+
+## What Changes
+
+- When a consumed `execute` message carries a **`parent_version_id`**, the worker SHALL, before running the agent loop, **inherit the parent version's artifacts**: list the **artifact** objects under the parent's OSS prefix, server-side-copy each into the new version's prefix, and record an `artifacts` row per copied object — so the new version begins as a copy of the parent and the agent overlays its changes.
+- Inheritance MUST **exclude run-internal objects** — specifically the reserved `checkpoints/` sub-prefix, where the CheckpointStore offloads large checkpoint blobs under the same version prefix (`core/checkpoint.py`). Copying those would pollute the new version's artifact listing.
+- Inheritance keys on **`parent_version_id`**, deriving the parent prefix as `compute_oss_prefix(tenant, task, parent_version_id)`. It does **not** use `parent_artifact_root`: no production writer sets `task_versions.artifact_root` (the create-INSERT writes it `nil`, and there is no `UPDATE`), so the API sends `parent_artifact_root` null today; the deterministic prefix is the reliable signal. As a contract guard, if a non-null `parent_artifact_root` ever arrives (a future writer), the worker logs a warning — its value (`artifacts/v1/`-style, per the API tests) would not match the deterministic prefix and the assumption would need revalidation.
+- **Artifact recording is idempotent** on `(version_id, oss_key)`: a new unique index plus an upsert (`ON CONFLICT (version_id, oss_key) DO UPDATE`) means re-inheriting (after a crash before the first checkpoint) or the agent overwriting an inherited file produces **one** row, not duplicates. The fresh-run gate (skip when a checkpoint already exists) stays as a performance optimization; the upsert is the correctness backstop.
+- A parent with no artifact objects (or `parent_version_id` absent — a first/create run) is a **no-op**: the new version starts empty exactly as today.
+- Add an `OssClient.list_keys(prefix)` method (the one missing primitive) — paginated (`list_objects_v2`, async paginator / `ContinuationToken`, tolerating an absent `Contents`), returning each object's relative key + size. `server_side_copy` is reused as-is, and inheritance records the **absolute key it returns** (not a re-concatenation, which `normpath` could rewrite).
+- **Shared benefit, honestly scoped:** because `branch` and `iterate` use the identical execute path, this closes the parent-inheritance gap for **both**. There is no rollback-unique worker behavior.
+- **Out of scope (Post-MVP / deliberately not now):** feeding parent artifacts into the agent's *reasoning context* (true incremental editing — the MVP planner/executor/critic loop has no read/context path; this is "copy-forward", not "edit-in-place"); research-specific "parent report as prompt context"; populating `task_versions.artifact_root` (an API/schema concern, and unnecessary since inheritance is prefix-derived); a `task.events` emission for inheritance (logged only for MVP).
+
+## Capabilities
+
+### New Capabilities
+- `worker-artifact-inheritance`: the worker's parent-artifact inheritance on `execute` — copying a parent version's artifact objects (excluding `checkpoints/`) into the new version's prefix and recording artifact rows when `parent_version_id` is present, gated to a fresh run, keyed on the deterministic prefix, idempotent on `(version_id, oss_key)`.
+
+### Modified Capabilities
+- `task-data-model`: the `artifacts` table gains a UNIQUE constraint on `(version_id, oss_key)` (one row per object per version), so artifact recording is idempotent under at-least-once delivery and overwrite.
+
+## Impact
+
+- **Code (worker):** `core/storage.py` (`OssClient.list_keys`); new `agents/inherit.py` (`inherit_parent_artifacts(ctx, persistence, parent_version_id)` — list (skip `checkpoints/`) → server-side-copy → `insert_artifact` recording the copy's returned absolute key); `core/persistence.py` (`insert_artifact` becomes an upsert on `(version_id, oss_key)`); `agents/base.py` (`LoopAgent.run` seeds before `run_agent_loop`, gated on a fresh run via `checkpoint_store.latest()`); tests with a fake OSS client + persistence (incl. a `checkpoints/0.bin` skip case and a resume-re-inherit case), plus a storage integration test for `list_keys`/copy.
+- **Schema (api):** new migration `0008` adding `UNIQUE (version_id, oss_key)` on `artifacts` (the worker's insert relies on it for the upsert; the migration lives with the API, which owns `migrations/`).
+- **No new message/MQ contract:** the `execute` shape is unchanged; the worker simply starts consuming the `parent_version_id` it already receives. `parent_artifact_root` stays in the message (harmless, still null) but is no longer the worker's signal.
+- **No API code change, no worker→business-table writes beyond the existing `artifacts` insert** (AGENTS §4.2 allows the worker to write `artifacts`).
+- **Behavior:** iterate and rollback-branch now produce a version whose artifact set includes the parent's files plus the run's changes, instead of from-scratch output. Create/first runs are unaffected. Produced-file overwrites within a run now collapse to one `artifacts` row (a side benefit of the unique index).
