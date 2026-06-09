@@ -91,3 +91,15 @@ seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-c
 19. 2026-06-08-add-task-rollback-api
 20. 2026-06-08-add-worker-rollback-handling
 21. 2026-06-09-add-web-rollback-entry
+
+### 2026-06-10-refactor-web-shadcn-three-column
+```md
+当前项目的 web 前端页面较为简陋，期望使用流行的 shadcn/ui 进行重构，样式及布局主要参考 ~/Pictures/Screenshot.png 的 claude 三栏式布局
+三栏映射至 导航/任务详情/Artifact预览；全面切到 shadcn CSS 变量主题；一次迁移全部页面
+用 openspec 发起 refactor-web-shadcn-three-column 提案
+新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
+整理 commit 并提交到远端仓库
+
+/opsx:apply
+/opsx:archive
+```
