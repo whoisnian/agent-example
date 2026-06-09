@@ -519,7 +519,7 @@ CREATE INDEX ON outbox (status, next_retry_at);
 | GET    | `/tasks/{task_id}` | 详情（含当前版本摘要 + 成本摘要） |
 | POST   | `/tasks/{task_id}/control` | 控制：pause/resume/cancel — capability `task-control-api`，202 Accepted；状态机翻转由 worker 事件驱动 |
 | POST   | `/tasks/{task_id}/iterate` | 基于当前版本迭代 → 新版本（活跃中返回 **409 active_version_exists**） |
-| POST   | `/tasks/{task_id}/rollback` | 回滚到指定版本（branch 模式同样受 409 约束；switch 模式仅切指针不受约束） |
+| POST   | `/tasks/{task_id}/rollback` | 回滚到指定版本（branch 与 switch 均要求任务当前无活跃版本，活跃中返回 409；详见 §6.5） |
 | GET    | `/tasks/{task_id}/versions` | 版本列表（树） |
 | GET    | `/versions/{version_id}` | 版本详情 |
 | GET    | `/versions/{version_id}/events?after_id=...` | 事件流（用于断线后补齐） |
@@ -785,7 +785,7 @@ User → API: POST /tasks/{id}/iterate
 - **真相之源 = DB 唯一索引** `one_active_version_per_task`。无论调用方是 API、CLI 还是内部脚本，都不会出现并行活跃版本。
 - **应用层先行检查**用于给出更友好的错误信息（提示用户当前活跃版本及其状态）。
 - **解锁触发点**：当一个 version 从 active 集合迁出（终态 succeeded/failed/cancelled）时，索引自动释放，新的迭代请求即可成功。
-- **前端配合**：在 `task.status` 活跃时禁用迭代/回滚-branch 按钮，并通过 WS 监听状态变化主动启用。
+- **前端配合**：在 `task.status` 活跃时禁用迭代/回滚（branch 与 switch 两模式）按钮，并通过 WS 监听状态变化主动启用。
 
 Worker 收到带 `parent_version_id` 的 execute 时"基于父版本产物增量改造"。实现（add-worker-rollback-handling）：
 - 继承键控于 **`parent_version_id`**（推导确定性前缀 `compute_oss_prefix(tenant, task, parent_version)`），**不**依赖 `parent_artifact_root`——该列目前无写者、API 恒发 null；若将来出现非空值，Worker 记一条告警。
