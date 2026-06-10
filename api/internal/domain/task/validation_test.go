@@ -42,6 +42,35 @@ func TestValidateTitle(t *testing.T) {
 	}
 }
 
+func TestDeriveTitle(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"short prompt verbatim", "build a music app", "build a music app"},
+		{"first non-empty line", "\n\n  build a music app  \nwith vue", "build a music app"},
+		{"all whitespace falls back", " \n\t ", "Untitled task"},
+		{"exactly 64 runes uncut", strings.Repeat("a", 64), strings.Repeat("a", 64)},
+		{"65th rune triggers ellipsis", strings.Repeat("a", 65), strings.Repeat("a", 64) + "…"},
+		{"cjk cut on rune cap", strings.Repeat("汉", 100), strings.Repeat("汉", 64) + "…"},
+		// 4-byte runes hit the byte cap (197 usable) before the rune cap:
+		// 49 runes × 4 bytes = 196 ≤ 197; the 50th would overflow.
+		{"emoji cut on byte cap", strings.Repeat("😀", 60), strings.Repeat("😀", 49) + "…"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := deriveTitle(tc.in)
+			if got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+			if len(got) > maxTitleLen {
+				t.Fatalf("derived title exceeds %d bytes: %d", maxTitleLen, len(got))
+			}
+		})
+	}
+}
+
 func TestValidateTaskType(t *testing.T) {
 	tests := []struct {
 		name    string

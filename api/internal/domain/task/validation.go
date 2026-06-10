@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // Validation limits — design D12.
@@ -20,8 +21,9 @@ var (
 	reLane     = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 )
 
-// validateTitle enforces "required, 1..200 chars, trimmed". The trim is
-// applied before length checks so all-whitespace fails the empty rule.
+// validateTitle enforces "1..200 chars, trimmed" for an EXPLICIT title. An
+// absent / all-whitespace title never reaches here — CreateTask routes it
+// through deriveTitle instead (spec: task-write-api → "Create Task Endpoint").
 func validateTitle(raw string) (string, error) {
 	t := strings.TrimSpace(raw)
 	if t == "" {
@@ -31,6 +33,42 @@ func validateTitle(raw string) (string, error) {
 		return "", newInvalidInput("title", "exceeds 200 characters")
 	}
 	return t, nil
+}
+
+// Title derivation — design add-task-title-autogen D3. The rune cap is the
+// readable-length bound; the byte cap re-asserts the tasks.title column limit
+// because 64 CJK/emoji runes can exceed 200 bytes.
+const (
+	deriveTitleMaxRunes  = 64
+	derivedTitleFallback = "Untitled task"
+)
+
+// deriveTitle builds a title from the prompt when the client supplied none:
+// the first non-empty line of the trimmed prompt, cut on a rune boundary to
+// at most 64 runes AND at most 200 bytes (ellipsis appended when cut). An
+// all-whitespace prompt falls back to a literal. Deterministic — no LLM.
+func deriveTitle(prompt string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(prompt), "\n")
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return derivedTitleFallback
+	}
+
+	const ellipsis = "…" // 3 bytes; reserved so the suffixed result stays ≤ maxTitleLen
+	maxBytes := maxTitleLen - len(ellipsis)
+	runes := 0
+	cut := len(line)
+	for i, r := range line {
+		if runes >= deriveTitleMaxRunes || i+utf8.RuneLen(r) > maxBytes {
+			cut = i
+			break
+		}
+		runes++
+	}
+	if cut == len(line) {
+		return line
+	}
+	return line[:cut] + ellipsis
 }
 
 // validateTaskType enforces the kebab-case slug. Trim is rejected because

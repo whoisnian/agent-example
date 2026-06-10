@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -114,16 +115,20 @@ type activeVersionParams struct {
 //
 //nolint:gocritic // hugeParam: value semantics intentional for an input command; the struct is read-only.
 func (s *Service) CreateTask(ctx context.Context, in CreateInput) (CreateOutput, error) {
-	title, err := validateTitle(in.Title)
-	if err != nil {
-		return CreateOutput{}, err
-	}
 	taskType, err := validateTaskType(in.TaskType)
 	if err != nil {
 		return CreateOutput{}, err
 	}
+	// Prompt before title: an absent title is derived from the prompt, so a
+	// missing prompt must surface as invalid_input(prompt), not a bad title.
 	prompt, err := validatePrompt(in.Prompt)
 	if err != nil {
+		return CreateOutput{}, err
+	}
+	var title string
+	if strings.TrimSpace(in.Title) == "" {
+		title = deriveTitle(prompt)
+	} else if title, err = validateTitle(in.Title); err != nil {
 		return CreateOutput{}, err
 	}
 	paramsJSON, err := validateParams(in.Params)

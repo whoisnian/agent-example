@@ -19,6 +19,7 @@ import (
 // source of truth for field-level rules; the handler converts only the
 // shape-level errors itself.
 type CreateTaskRequest struct {
+	// Title is optional; absent / blank → the domain derives it from Prompt.
 	Title    string          `json:"title"`
 	TaskType string          `json:"task_type"`
 	Prompt   string          `json:"prompt"`

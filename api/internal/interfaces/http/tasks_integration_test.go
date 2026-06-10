@@ -307,6 +307,81 @@ func TestCreateTaskHappy(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// 7.4b — POST /api/v1/tasks title derivation (add-task-title-autogen)
+// ---------------------------------------------------------------------------
+
+func TestCreateTitleDerived(t *testing.T) {
+	s := newSuite(t)
+	ctx := context.Background()
+
+	fetchTitle := func(t *testing.T, env envelope) string {
+		t.Helper()
+		var data struct {
+			TaskID uuid.UUID `json:"task_id"`
+		}
+		if err := json.Unmarshal(env.Data, &data); err != nil {
+			t.Fatalf("data unmarshal: %v body=%s", err, env.Data)
+		}
+		var title string
+		if err := s.pool.QueryRow(ctx,
+			"SELECT title FROM tasks WHERE id = $1", data.TaskID).Scan(&title); err != nil {
+			t.Fatalf("select title: %v", err)
+		}
+		return title
+	}
+
+	// Absent title → first non-empty prompt line.
+	st, env := postJSON(t, s.ts, "/api/v1/tasks", map[string]any{
+		"task_type": "code-gen",
+		"prompt":    "\n  build a music app  \nwith react",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("absent title: status=%d env=%+v", st, env)
+	}
+	if got := fetchTitle(t, env); got != "build a music app" {
+		t.Fatalf("derived title=%q", got)
+	}
+
+	// Long first line → 64-rune cut with ellipsis, still ≤ 200 bytes.
+	st, env = postJSON(t, s.ts, "/api/v1/tasks", map[string]any{
+		"task_type": "code-gen",
+		"prompt":    strings.Repeat("x", 100),
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("long prompt: status=%d env=%+v", st, env)
+	}
+	if got := fetchTitle(t, env); got != strings.Repeat("x", 64)+"…" {
+		t.Fatalf("truncated title=%q", got)
+	}
+
+	// All-whitespace prompt is legal input (no trim in prompt validation) and
+	// falls back to the literal.
+	st, env = postJSON(t, s.ts, "/api/v1/tasks", map[string]any{
+		"task_type": "code-gen",
+		"prompt":    "   ",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("whitespace prompt: status=%d env=%+v", st, env)
+	}
+	if got := fetchTitle(t, env); got != "Untitled task" {
+		t.Fatalf("fallback title=%q", got)
+	}
+
+	// Explicit title is preserved verbatim (trimmed), never derived.
+	st, env = postJSON(t, s.ts, "/api/v1/tasks", map[string]any{
+		"title":     "  my explicit title  ",
+		"task_type": "code-gen",
+		"prompt":    "something entirely different",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("explicit title: status=%d env=%+v", st, env)
+	}
+	if got := fetchTitle(t, env); got != "my explicit title" {
+		t.Fatalf("explicit title=%q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 7.5 — POST /iterate happy path on a terminal task
 // ---------------------------------------------------------------------------
 
@@ -534,13 +609,14 @@ func TestIterate404(t *testing.T) {
 func TestCreate400(t *testing.T) {
 	s := newSuite(t)
 
-	// Missing title.
+	// Oversize explicit title (absent title is legal — see TestCreateTitleDerived).
 	st, env := postJSON(t, s.ts, "/api/v1/tasks", map[string]any{
+		"title":     strings.Repeat("a", 201),
 		"task_type": "code-gen",
 		"prompt":    "hi",
 	})
 	if st != http.StatusBadRequest || env.Code != "invalid_input" {
-		t.Fatalf("missing title: status=%d env=%+v", st, env)
+		t.Fatalf("oversize title: status=%d env=%+v", st, env)
 	}
 
 	// Invalid task_type pattern.
