@@ -36,7 +36,7 @@ function TestApp({ path }: { path: string }): JSX.Element {
               </RequireAuth>
             }
           >
-            <Route index element={<Navigate to="/tasks" replace />} />
+            <Route index element={<Navigate to="/tasks/new" replace />} />
             <Route path="tasks" element={<TaskList />} />
             <Route path="tasks/new" element={<TaskCreate />} />
             <Route path="tasks/:id" element={<TaskDetail />} />
@@ -85,10 +85,10 @@ describe("router skeleton", () => {
     expect(await screen.findByTestId("task-detail-page")).toBeInTheDocument();
   });
 
-  it("redirects / to /tasks", () => {
+  it("redirects / to the chat-style create page", () => {
     useAuthStore.setState({ token: "test" });
     renderAt("/");
-    expect(screen.getByTestId("task-list-page")).toBeInTheDocument();
+    expect(screen.getByTestId("task-create-page")).toBeInTheDocument();
   });
 
   it("renders NotFound for unknown routes", () => {

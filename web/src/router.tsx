@@ -19,7 +19,7 @@ export const routes: RouteObject[] = [
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Navigate to="/tasks" replace /> },
+      { index: true, element: <Navigate to="/tasks/new" replace /> },
       { path: "tasks", element: <TaskList /> },
       { path: "tasks/new", element: <TaskCreate /> },
       { path: "tasks/:id", element: <TaskDetail /> },
