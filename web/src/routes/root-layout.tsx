@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 import { SideNav } from "@/components/layout/SideNav";
 import { PreviewColumn } from "@/components/layout/PreviewColumn";
 import { ArtifactPreviewPanel } from "@/features/artifacts/ArtifactPreviewPanel";
@@ -12,8 +12,13 @@ import { ArtifactPreviewPanel } from "@/features/artifacts/ArtifactPreviewPanel"
  * The inner wrapper exists so the preview column's percentage width resolves
  * against the width remaining beside the nav (the spec's proportion base),
  * not the full viewport. Center content is capped to a reading width.
+ *
+ * Exception: the Task Create route has nothing to preview, so the preview
+ * column (and its re-open affordance) is suppressed there route-driven —
+ * the store's collapse preference is deliberately left untouched.
  */
 export function RootLayout(): JSX.Element {
+  const isCreateRoute = useLocation().pathname === "/tasks/new";
   return (
     <div
       className="flex h-screen overflow-hidden bg-background text-foreground"
@@ -28,9 +33,11 @@ export function RootLayout(): JSX.Element {
             <Outlet />
           </div>
         </main>
-        <PreviewColumn>
-          <ArtifactPreviewPanel />
-        </PreviewColumn>
+        {!isCreateRoute && (
+          <PreviewColumn>
+            <ArtifactPreviewPanel />
+          </PreviewColumn>
+        )}
       </div>
     </div>
   );

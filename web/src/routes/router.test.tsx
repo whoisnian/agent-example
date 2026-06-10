@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useAuthStore } from "@/features/auth/store";
+import { useUiStore } from "@/features/ui/store";
 import { createQueryClient } from "@/services/query-client";
 import { RequireAuth } from "@/routes/require-auth";
 import { RootLayout } from "@/routes/root-layout";
@@ -73,10 +74,15 @@ describe("router skeleton", () => {
     expect(screen.getByTestId("task-list-page")).toBeInTheDocument();
   });
 
-  it("renders TaskCreate on /tasks/new", () => {
+  it("renders TaskCreate on /tasks/new with the preview column suppressed", () => {
     useAuthStore.setState({ token: "test" });
     renderAt("/tasks/new");
     expect(screen.getByTestId("task-create-page")).toBeInTheDocument();
+    // Route-driven suppression: no column, no re-open affordance, and the
+    // store's collapse preference is untouched.
+    expect(screen.queryByTestId("preview-column")).toBeNull();
+    expect(screen.queryByTestId("preview-open")).toBeNull();
+    expect(useUiStore.getState().previewCollapsed).toBe(false);
   });
 
   it("renders TaskDetail on /tasks/:id", async () => {
