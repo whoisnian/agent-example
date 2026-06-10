@@ -17,11 +17,12 @@
 ## 三栏外壳
 
 - `RootLayout`（`src/routes/root-layout.tsx`，**不要迁目录**）= 左导航 `SideNav` / 中 `Outlet` / 右 `PreviewColumn`。三栏子组件在 `src/components/layout/`。
-- **栏宽重心**：右栏为主导列（lg `w-2/5` / xl `w-1/2`，基准是扣除 nav 的剩余宽——RootLayout 内层 wrapper 即为此存在，勿移除；`max-w-4xl` 封顶）；中栏内容收在 `max-w-4xl` 居中适读容器；左导航展开 `w-56` / 折叠 `w-16`。
-- **SideNav 结构**（自上而下）：brand 行 → "New task" 主按钮（`nav-new-task`）→ 主导航 → `RecentTasks`（复用 `useTasksQuery({page:1,pageSize:8},{silent:true})`，**最近创建**序，折叠态隐藏）→ 头像式用户区。Recents 读取必须静默（不 toast），错误面是行内占位。
-- 列折叠态（`navCollapsed`/`previewCollapsed`）与右栏选中态（`selectedVersionId` + `selectedArtifactId`）在 `features/ui/store`（Zustand）。**不变式**：单独 set `selectedVersionId` 且值变化时自动清空 `selectedArtifactId`；成对写入走 `selectArtifact(versionId, artifactId)`（同时展开右栏）。
+- **栏宽重心**：右栏为主导列（lg `w-2/5` / xl `w-1/2`，基准是扣除 nav 的剩余宽——RootLayout 内层 wrapper 即为此存在，勿移除；`max-w-4xl` 封顶）；中栏内容收在 `max-w-4xl` 居中适读容器；左导航固定 `w-56`（**折叠功能已退役**，勿复活 `navCollapsed`）。
+- **SideNav 结构**（自上而下）：brand 行 → "New task" 主按钮（`nav-new-task`）→ `RecentTasks`（复用 `useTasksQuery({page:1,pageSize:8},{silent:true})`，**最近创建**序）→ 头像式用户区 = DropdownMenu 触发器（菜单含 Tasks / Cost / Settings / Logout，`nav-*` 与 `logout-button` testid 在菜单项上，激活路由项带选中态）。Recents 读取必须静默（不 toast），错误面是行内占位。
+- 右栏折叠态（`previewCollapsed`）与选中态（`selectedVersionId` + `selectedArtifactId`）在 `features/ui/store`（Zustand）。**不变式**：单独 set `selectedVersionId` 且值变化时自动清空 `selectedArtifactId`；成对写入走 `selectArtifact(versionId, artifactId)`（同时展开右栏）。
 - 任务生命周期 mutation（iterate/rollback/control）与 live task 帧需失效 `taskKeys.lists` 前缀，否则 TaskList/Recents 状态过期——新增 mutation 时记得带上。
-- **TaskDetail = 对话回合流**：紧凑头部（标题/状态/控制条/完整 TokenBar）+ 滚动主体（每版本一回合 `components/tasks/ConversationTurn`：prompt 经 `useVersionQuery` 懒取静默降级 / 结果行 / 内联产物卡片 / 非当前回合的回滚尾部）+ 底部常驻 iterate composer（活跃禁用给原因，成功清空、失败保留输入）。EventLog 只出现在 `task.current_version` 对应回合。版本树组件已退役，勿复活。
+- **TaskDetail = 对话回合流**：紧凑头部（标题/状态/控制条/完整 TokenBar）+ 滚动主体（每版本一回合 `components/tasks/ConversationTurn`：prompt 经 `useVersionQuery` 懒取静默降级 / 结果行 / 内联产物卡片（整卡点击驱动右栏预览，Download 独立）/ 非当前回合的回滚尾部）+ 底部常驻 iterate composer（活跃禁用给原因，成功清空、失败保留输入）。EventLog 以**助手消息气泡**呈现且只出现在 `task.current_version` 对应回合（status 人话化 / error destructive 配色）。版本树组件已退役，勿复活。
+- **TaskCreate = 聊天式创建入口**：居中问候 + composer 卡片（prompt + task_type chips + Advanced 折叠区 params/lane，Ctrl/Cmd+Enter 提交）。**无 title 输入**——创建请求不发 `title`，由 API 从 prompt 派生（task-write-api）；TaskList 页无页内 New task 按钮，入口只在 SideNav。
 - **Artifact 预览**：右栏 `features/artifacts/ArtifactPreviewPanel` 自带头部工具栏（选中产物标题 · 类型 + Copy / Refresh / 关闭；**全状态渲染**，no-version/loading/error/empty 也要有关闭按钮），按 store 选中态渲染产物列表 + 预览（图片 `<img>` / `text/html` 沙箱 iframe 富渲染（默认）+ 渲染/源码切换 / 文本截断 64KB / 其它仅下载），复用既有 `features/artifacts/` 数据访问，不新增 transport。`PreviewColumn` 是纯容器，不放头部。
 - **iframe 安全红线**：`sandbox="allow-scripts"`，**绝不**加 `allow-same-origin`；frame 内 HTTP 失败跨域不可探测——不要试图检测，恢复手段是工具栏 Refresh（重新 presign 重挂）。Copy 只复制帽内完整文本，截断态禁用并引导下载。
 - CSP（`index.html`）：图片预览依赖 `img-src`、HTML 渲染依赖 `frame-src`（当前均 `https:`）；文本预览经 OSS `fetch`，受 CORS 约束，失败降级为 download-only。`script-src 'self'` / `object-src 'none'` 保持锁定。

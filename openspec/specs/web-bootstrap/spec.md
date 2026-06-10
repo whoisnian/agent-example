@@ -19,13 +19,13 @@ Production build (`pnpm build`) MUST produce a static asset bundle under `dist/`
 
 ### Requirement: Application Shell
 
-The application SHALL render a persistent **three-column** shell at the React root, used by every authenticated route via a `<RootLayout>` wrapper. The three columns are: a **collapsible left navigation column**, a **center main content column** where route components mount (the Task Detail surface being the primary inhabitant), and a **collapsible right Artifact Preview column** (see `web-artifact-preview`). The shell MUST render before route data has loaded (no blocking on first paint).
+The application SHALL render a persistent **three-column** shell at the React root, used by every authenticated route via a `<RootLayout>` wrapper. The three columns are: a **fixed-width left navigation column** (not collapsible; no collapse toggle is rendered), a **center main content column** where route components mount (the Task Detail surface being the primary inhabitant), and a **collapsible right Artifact Preview column** (see `web-artifact-preview`). The shell MUST render before route data has loaded (no blocking on first paint).
 
 **Column proportions** (wide viewports, all three columns side-by-side): the right Artifact Preview column SHALL be the visually dominant column. Its width is measured against the **width remaining beside the navigation column**: at the wide breakpoint it MUST occupy 40–55% of that remaining width, and at extra-wide viewports it MUST occupy approximately half, bounded by a maximum width so ultra-wide screens do not degenerate. The center column SHALL constrain route content to a reading-width container, centered within the remaining space; the left navigation column SHALL be a narrow fixed-width column. The previous fixed narrow preview column (320px sidebar) is superseded.
 
-**Left navigation content** (top to bottom): the brand/logo row with the collapse toggle; a primary **"New task" action button** navigating to `/tasks/new`; the primary nav entries `Tasks`, `Cost`, `Settings`; a **Recents section** listing the most recent tasks (reusing the existing task-list data access, no new transport), where each row shows the task title and navigates to that task's detail page, and the row for the currently open task renders highlighted; and at the bottom the authenticated **user area rendered avatar-style** (a circular initial-of-email avatar, the user email, and a logout control). When the nav is collapsed to an icon rail, the New-task action and logout MUST remain reachable as icon affordances, and the Recents section MUST be hidden. The Recents list MUST render quiet loading and error states (no toast) and MUST NOT re-sort tasks client-side (server order — `created_at` descending per `task-read-api` — is the recency order; "recently created", not "recently active").
+**Left navigation content** (top to bottom): the brand/logo row; a primary **"New task" action button** navigating to `/tasks/new`; a **Recents section** listing the most recent tasks (reusing the existing task-list data access, no new transport), where each row shows the task title and navigates to that task's detail page, and the row for the currently open task renders highlighted; and at the bottom the authenticated **user area rendered avatar-style** (a circular initial-of-email avatar and the user email). The user area SHALL act as the trigger of a **popup menu** containing the primary navigation entries `Tasks`, `Cost`, `Settings` and the **logout control**; these entries MUST NOT render as a flat always-visible nav list. The menu entry for the currently active route MUST render with an active/selected style when the menu is open. The Recents list MUST render quiet loading and error states (no toast) and MUST NOT re-sort tasks client-side (server order — `created_at` descending per `task-read-api` — is the recency order; "recently created", not "recently active").
 
-The left-nav and right-preview collapse states MUST be held in the global UI store (Zustand), not in route/query state. The shell MUST be responsive: at wide viewports all three columns render side-by-side; at narrower viewports the right preview column MUST collapse into a button-triggered drawer/overlay and the left nav MUST be collapsible to an icon rail or top drawer, so the center content remains usable on small screens.
+Only the right-preview collapse state remains in the global UI store (Zustand); the previous left-nav collapse state is retired and MUST NOT be reintroduced. The shell MUST be responsive: at wide viewports all three columns render side-by-side; at narrower viewports the right preview column MUST collapse into a button-triggered drawer/overlay so the center content remains usable; the left navigation keeps its fixed width.
 
 The `<RootLayout>` wrapper MAY remain at its current location (`src/routes/root-layout.tsx`); its three-column child components (navigation column, center content region, right preview region) MUST live under `src/components/layout/` and MUST be built on the shadcn/ui foundation and CSS-variable theme tokens (see `web-design-system`).
 
@@ -39,14 +39,24 @@ The `<RootLayout>` wrapper MAY remain at its current location (`src/routes/root-
 - **WHEN** the viewport is at or above the wide breakpoint and the preview column is expanded
 - **THEN** the right Artifact Preview column MUST occupy 40–55% of the width remaining beside the navigation column (approximately half at extra-wide viewports, subject to its maximum-width bound), and the center column content MUST be constrained to a centered reading-width container
 
-#### Scenario: Nav highlights active route
+#### Scenario: No nav collapse affordance
 
-- **WHEN** the user is on `/tasks` or any subroute under `/tasks/...`
-- **THEN** the `Tasks` nav item MUST render with the active style
+- **WHEN** the left navigation renders
+- **THEN** it MUST NOT render a collapse/expand toggle, and the navigation column MUST keep its fixed width across routes
+
+#### Scenario: User-area menu hosts the primary navigation
+
+- **WHEN** the user activates the bottom user area
+- **THEN** a popup menu MUST open containing `Tasks`, `Cost`, `Settings` entries and a logout control, and activating an entry MUST navigate to its route and close the menu
+
+#### Scenario: Menu marks the active route
+
+- **WHEN** the user is on `/cost` and opens the user-area menu
+- **THEN** the `Cost` menu entry MUST render with the active/selected style
 
 #### Scenario: New task action navigates to creation
 
-- **WHEN** the user activates the "New task" action in the left navigation (expanded or icon-rail state)
+- **WHEN** the user activates the "New task" action in the left navigation
 - **THEN** the router MUST navigate to `/tasks/new`
 
 #### Scenario: Recents lists recent tasks and navigates
@@ -69,15 +79,15 @@ The `<RootLayout>` wrapper MAY remain at its current location (`src/routes/root-
 - **WHEN** the Recents task-list read fails
 - **THEN** the section MUST render an inline quiet error placeholder without emitting any toast
 
-#### Scenario: Avatar-style user area with logout
+#### Scenario: Avatar-style user area with logout in the menu
 
-- **WHEN** an authenticated user views the expanded left navigation
-- **THEN** the bottom user area MUST render a circular avatar derived from the user's email initial, the user email, and a working logout control; in the collapsed icon rail the avatar and logout MUST remain reachable
+- **WHEN** an authenticated user views the left navigation
+- **THEN** the bottom user area MUST render a circular avatar derived from the user's email initial and the user email, and the logout control MUST be reachable inside the user-area popup menu and MUST work
 
-#### Scenario: Columns collapse via the UI store
+#### Scenario: Preview column collapses via the UI store
 
-- **WHEN** the user toggles the left-nav or right-preview collapse control
-- **THEN** the corresponding collapse flag in the global UI store MUST flip and the column MUST collapse/expand accordingly, with the state surviving route changes within the session
+- **WHEN** the user toggles the right-preview collapse control
+- **THEN** the preview collapse flag in the global UI store MUST flip and the column MUST collapse/expand accordingly, with the state surviving route changes within the session
 
 #### Scenario: Narrow viewport degrades gracefully
 
