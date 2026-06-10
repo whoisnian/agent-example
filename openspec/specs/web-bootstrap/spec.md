@@ -19,7 +19,7 @@ Production build (`pnpm build`) MUST produce a static asset bundle under `dist/`
 
 ### Requirement: Application Shell
 
-The application SHALL render a persistent **three-column** shell at the React root, used by every authenticated route via a `<RootLayout>` wrapper. The three columns are: a **fixed-width left navigation column** (not collapsible; no collapse toggle is rendered), a **center main content column** where route components mount (the Task Detail surface being the primary inhabitant), and a **collapsible right Artifact Preview column** (see `web-artifact-preview`). The shell MUST render before route data has loaded (no blocking on first paint).
+The application SHALL render a persistent **three-column** shell at the React root, used by every authenticated route via a `<RootLayout>` wrapper. **Exception**: on the Task Create route (`/tasks/new`) the right Artifact Preview column (including its collapsed-state re-open affordance) MUST NOT render at all — the chat composer is the full-focus surface and there is no version to preview; the suppression is route-driven and MUST NOT mutate the user's preview-collapse preference in the UI store. The three columns are: a **fixed-width left navigation column** (not collapsible; no collapse toggle is rendered), a **center main content column** where route components mount (the Task Detail surface being the primary inhabitant), and a **collapsible right Artifact Preview column** (see `web-artifact-preview`). The shell MUST render before route data has loaded (no blocking on first paint).
 
 **Column proportions** (wide viewports, all three columns side-by-side): the right Artifact Preview column SHALL be the visually dominant column. Its width is measured against the **width remaining beside the navigation column**: at the wide breakpoint it MUST occupy 40–55% of that remaining width, and at extra-wide viewports it MUST occupy approximately half, bounded by a maximum width so ultra-wide screens do not degenerate. The center column SHALL constrain route content to a reading-width container, centered within the remaining space; the left navigation column SHALL be a narrow fixed-width column. The previous fixed narrow preview column (320px sidebar) is superseded.
 
@@ -88,6 +88,11 @@ The `<RootLayout>` wrapper MAY remain at its current location (`src/routes/root-
 
 - **WHEN** the user toggles the right-preview collapse control
 - **THEN** the preview collapse flag in the global UI store MUST flip and the column MUST collapse/expand accordingly, with the state surviving route changes within the session
+
+#### Scenario: Task Create suppresses the preview column
+
+- **WHEN** an authenticated user is on `/tasks/new`
+- **THEN** the right preview column and its re-open affordance MUST NOT render, and navigating to another route MUST restore the column per the unchanged store collapse flag
 
 #### Scenario: Narrow viewport degrades gracefully
 

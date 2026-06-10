@@ -16,7 +16,7 @@
 
 ## 三栏外壳
 
-- `RootLayout`（`src/routes/root-layout.tsx`，**不要迁目录**）= 左导航 `SideNav` / 中 `Outlet` / 右 `PreviewColumn`。三栏子组件在 `src/components/layout/`。
+- `RootLayout`（`src/routes/root-layout.tsx`，**不要迁目录**）= 左导航 `SideNav` / 中 `Outlet` / 右 `PreviewColumn`。三栏子组件在 `src/components/layout/`。**例外**：`/tasks/new` 路由不渲染右栏（路由驱动抑制，含 re-open 按钮；**不要**用改写 `previewCollapsed` 的方式实现，会污染用户偏好）。
 - **栏宽重心**：右栏为主导列（lg `w-2/5` / xl `w-1/2`，基准是扣除 nav 的剩余宽——RootLayout 内层 wrapper 即为此存在，勿移除；`max-w-4xl` 封顶）；中栏内容收在 `max-w-4xl` 居中适读容器；左导航固定 `w-56`（**折叠功能已退役**，勿复活 `navCollapsed`）。
 - **SideNav 结构**（自上而下）：brand 行 → "New task" 主按钮（`nav-new-task`）→ `RecentTasks`（复用 `useTasksQuery({page:1,pageSize:8},{silent:true})`，**最近创建**序）→ 头像式用户区 = DropdownMenu 触发器（菜单含 Tasks / Cost / Settings / Logout，`nav-*` 与 `logout-button` testid 在菜单项上，激活路由项带选中态）。Recents 读取必须静默（不 toast），错误面是行内占位。
 - 右栏折叠态（`previewCollapsed`）与选中态（`selectedVersionId` + `selectedArtifactId`）在 `features/ui/store`（Zustand）。**不变式**：单独 set `selectedVersionId` 且值变化时自动清空 `selectedArtifactId`；成对写入走 `selectArtifact(versionId, artifactId)`（同时展开右栏）。

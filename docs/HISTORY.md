@@ -103,3 +103,28 @@ seaweedfs 通过 weed mini 快速提供 S3 Bucket，不需要引入 amazon/aws-c
 /opsx:apply
 /opsx:archive
 ```
+
+### 前端优化
+```md
+参考 openspec/changes/archive/2026-06-10-refactor-web-shadcn-three-column，已进行过一轮前端重构，但仍与 ~/Pictures/Screenshot.png 有较大差距
+主题不需要变更，主要处理 2/3/4/5，右侧产物预览作为视觉主体，左侧导航栏菜单补充，中间栏任务详情采用对话流的样式，需要支持产物富渲染，可拆分为两个 proposal
+不需要维持版本树的形式，可以像对话一样在每轮迭代结束后给出版本回滚按钮和产物列表
+
+1. 2026-06-10-refactor-web-shell-layout
+2. 2026-06-10-refactor-web-conversation-rich-preview
+
+web 前端界面依旧需要优化：
+左侧栏 side-nav，不需要 nav-collapse-toggle 折叠展开按钮，Tasks/Cost/Settings 都可以作为最下方 user-area 的子菜单。
+中间栏 content-slot，New task 页面参考 ~/Pictures/Screenshot_new_chat.png 中对话框的设计，保持和聊天界面风格一致，标题由后端服务自动生成；Tasks 页面不需要右上角 New task 按钮；任务详情页面参考 ~/Pictures/Screenshot.png，AI 返回的执行过程也参考聊天界面以对话形式展示，产物展示为卡片形式，点击卡片再展开右侧预览。
+右侧栏 preview-column，artifact-select 按钮的点击区域上下扩展到所在 div，方便点击；Source/Render 修改为带 icon 的更明显的按钮。
+
+1. 2026-06-10-add-task-title-autogen
+2. 2026-06-10-refactor-web-chat-style-polish
+
+预览 html 时出现报错 Framing 'http://localhost:9000/' violates the following Content Security Policy directive: "frame-src https:". The request has been blocked
+打开 http://localhost:5173 时默认跳转到 /tasks，现在可以默认跳转到 /tasks/new 了
+/tasks/new 页面应始终关闭右侧栏
+
+1. 2026-06-10-update-web-root-redirect
+2. 2026-06-10-hide-preview-on-task-create
+```
