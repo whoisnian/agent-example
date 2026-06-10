@@ -3,9 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- img-src/frame-src: presigned OSS previews — `https:` for real OSS plus
+         the enumerated local-dev OSS origin (docker-compose.dev.yml, http). -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: https:; frame-src https:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: https: http://localhost:9000; frame-src https: http://localhost:9000; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     />
     <title>Agent Task Platform</title>
   </head>
