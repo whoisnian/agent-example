@@ -100,7 +100,7 @@ The router SHALL declare the following routes (placeholder rows display the rout
 
 | Path | Component | Notes |
 |---|---|---|
-| `/` | redirect → `/tasks` | |
+| `/` | redirect → `/tasks/new` | chat-style creation is the landing surface |
 | `/tasks` | `TaskList` | |
 | `/tasks/new` | `TaskCreate` | |
 | `/tasks/:id` | `TaskDetail` | reads `:id` from params |
@@ -110,6 +110,10 @@ The router SHALL declare the following routes (placeholder rows display the rout
 | `*` | `NotFoundPlaceholder` | |
 
 Unauthenticated access to any route except `/login` MUST redirect to `/login`. Authentication state is read from the auth store (token presence in `localStorage`). Token validity is established by `LoginPage` against the API and re-checked lazily: an invalid or expired token surfaces as a `401` on the first authenticated request, which clears the session and redirects to `/login` (see `web-data-access` 401 Handling).
+
+#### Scenario: Authenticated root lands on the composer
+- **WHEN** an authenticated user navigates to `/`
+- **THEN** the router MUST redirect (replace) to `/tasks/new` and render the Task Create composer
 
 #### Scenario: Unauthenticated redirect
 - **WHEN** the user navigates to `/tasks` without a token in `localStorage`
