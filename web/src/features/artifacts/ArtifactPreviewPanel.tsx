@@ -1,5 +1,6 @@
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { Copy, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,6 +25,10 @@ function isTextLike(mime: string | null): boolean {
   return /(json|yaml|xml|javascript|x-sh|csv)/.test(mime);
 }
 
+function isHtml(mime: string | null): boolean {
+  return mime === "text/html";
+}
+
 /** mime, or a neutral placeholder when null. */
 function mimeLabel(a: ArtifactMeta): string {
   return a.mime ?? "—";
@@ -34,36 +39,144 @@ function sizeLabel(a: ArtifactMeta): string {
   return a.bytes === null ? "—" : formatBytes(a.bytes);
 }
 
+interface ToolbarProps {
+  /** Selected artifact for the title; null falls back to the generic title. */
+  artifact: ArtifactMeta | null;
+  /** Copy is enabled iff a handler is present; otherwise reason explains why. */
+  onCopy?: (() => void) | undefined;
+  copyReason?: string | undefined;
+  onRefresh?: (() => void) | undefined;
+  /** Render/source toggle for HTML artifacts (null = not applicable). */
+  viewToggle?: ReactNode;
+  children: ReactNode;
+}
+
 /**
- * Right-column Artifact Preview. Anchored to the UI store's `selectedVersionId`
- * (set by the Task Detail version tree). Lists the selected version's artifacts
- * and renders a lightweight preview for a single user-selected artifact. Reuses
- * the existing `features/artifacts/` data access; introduces no new transport.
+ * Panel chrome: the header toolbar (title · type, Copy, Refresh, close) above
+ * the content area. Rendered in EVERY panel state — the panel is mounted
+ * shell-wide, so the close control must stay reachable even with no version
+ * selected or while the list is loading/empty/failed.
+ */
+function PanelChrome({
+  artifact,
+  onCopy,
+  copyReason,
+  onRefresh,
+  viewToggle,
+  children,
+}: ToolbarProps): JSX.Element {
+  const togglePreview = useUiStore((s) => s.togglePreview);
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div
+        data-testid="preview-toolbar"
+        className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-3"
+      >
+        <span
+          data-testid="preview-title"
+          className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
+        >
+          {artifact ? `${artifact.kind} · ${mimeLabel(artifact)}` : "Artifact Preview"}
+        </span>
+        {viewToggle}
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          data-testid="preview-copy"
+          disabled={!onCopy}
+          title={onCopy ? "Copy content" : copyReason}
+          aria-label="Copy content"
+          onClick={onCopy}
+        >
+          <Copy className="size-4" aria-hidden />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          data-testid="preview-refresh"
+          disabled={!onRefresh}
+          title={onRefresh ? "Re-mint the URL and reload the preview" : "Select an artifact first"}
+          aria-label="Refresh preview"
+          onClick={onRefresh}
+        >
+          <RefreshCw className="size-4" aria-hidden />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          data-testid="preview-close"
+          aria-label="Collapse artifact preview"
+          onClick={togglePreview}
+        >
+          <X className="size-4" aria-hidden />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Right-column Artifact Preview. Anchored to the UI store's selection pair
+ * (`selectedVersionId` + `selectedArtifactId`), written by the conversation
+ * turns' artifact cards and by the panel's own rows (one shared selection).
+ * Lists the selected version's artifacts and previews the selected artifact.
+ * Reuses the existing `features/artifacts/` data access; no new transport.
  */
 export function ArtifactPreviewPanel(): JSX.Element {
   const versionId = useUiStore((s) => s.selectedVersionId);
 
   if (!versionId) {
     return (
-      <p
-        className="p-4 text-sm text-muted-foreground"
-        data-testid="preview-no-version"
-      >
-        Select a version to preview its artifacts.
-      </p>
+      <PanelChrome artifact={null} copyReason="Select an artifact first">
+        <p className="p-4 text-sm text-muted-foreground" data-testid="preview-no-version">
+          Select a version to preview its artifacts.
+        </p>
+      </PanelChrome>
     );
   }
 
-  // Key by versionId so the selected-artifact state resets on version change
-  // (a remount) rather than via a synchronous setState-in-effect.
+  // Key by versionId so per-version local state (refresh nonce, html view)
+  // resets on version change via a remount.
   return <VersionArtifacts key={versionId} versionId={versionId} />;
+}
+
+interface LoadedText {
+  artifactId: string;
+  text: string;
+  truncated: boolean;
 }
 
 function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
   const query = useVersionArtifactsQuery(versionId);
   const download = useArtifactPresignMutation();
   const pushToast = useUiStore((s) => s.pushToast);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selectedArtifactId = useUiStore((s) => s.selectedArtifactId);
+  const setSelectedArtifactId = useUiStore((s) => s.setSelectedArtifactId);
+
+  // Refresh remounts the preview body (re-mints presign, replays the load).
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  // HTML artifacts default to the rendered view; "source" reuses the text path.
+  const [htmlView, setHtmlView] = useState<"render" | "source">("render");
+  // The loaded preview text (for Copy), reported up by the preview body.
+  const [loaded, setLoaded] = useState<LoadedText | null>(null);
+
+  // Selection changes (panel row OR conversation card) reset the view + buffer.
+  // Adjusted during render (not in an effect) per the React guidance.
+  const [prevSelectedId, setPrevSelectedId] = useState(selectedArtifactId);
+  if (prevSelectedId !== selectedArtifactId) {
+    setPrevSelectedId(selectedArtifactId);
+    setHtmlView("render");
+    setLoaded(null);
+  }
+
+  const artifacts = query.data?.artifacts ?? [];
+  // A dangling selection (artifact not in this version's list) renders as
+  // no-artifact-selected — never an error.
+  const selected = artifacts.find((a) => a.id === selectedArtifactId) ?? null;
 
   const onDownload = (artifactId: string): void => {
     // Re-mint every click: the prior URL is short-lived and never reused.
@@ -76,129 +189,191 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
     });
   };
 
+  // --- toolbar wiring ---
+  const clipboardAvailable =
+    typeof navigator !== "undefined" && typeof navigator.clipboard?.writeText === "function";
+  const copyText = selected && loaded && loaded.artifactId === selected.id ? loaded : null;
+  let copyReason = "Select an artifact first";
+  if (selected) {
+    if (!clipboardAvailable) copyReason = "Clipboard unavailable in this context";
+    else if (!copyText) copyReason = "No text content loaded to copy";
+    else if (copyText.truncated)
+      copyReason = "Content exceeds the preview cap — download the full file";
+  }
+  const canCopy = !!copyText && !copyText.truncated && clipboardAvailable;
+  const onCopy = canCopy
+    ? (): void => {
+        void navigator.clipboard.writeText(copyText.text).then(
+          () => pushToast({ level: "success", message: "Copied to clipboard" }),
+          () => pushToast({ level: "error", message: "Copy failed" }),
+        );
+      }
+    : undefined;
+  const onRefresh = selected
+    ? (): void => {
+        setLoaded(null);
+        setRefreshNonce((n) => n + 1);
+      }
+    : undefined;
+  const viewToggle =
+    selected && isHtml(selected.mime) ? (
+      <Button
+        variant="ghost"
+        size="sm"
+        className="h-8 px-2 text-xs"
+        data-testid="preview-view-toggle"
+        aria-label={htmlView === "render" ? "View source" : "View rendered"}
+        onClick={() => setHtmlView((v) => (v === "render" ? "source" : "render"))}
+      >
+        {htmlView === "render" ? "Source" : "Render"}
+      </Button>
+    ) : null;
+
+  const chrome = {
+    artifact: selected,
+    onCopy,
+    copyReason,
+    onRefresh,
+    viewToggle,
+  };
+
   if (query.isPending) {
     return (
-      <div data-testid="artifact-list-loading" className="space-y-2 p-4">
-        <Skeleton className="h-6 w-full" />
-        <Skeleton className="h-6 w-3/4" />
-      </div>
+      <PanelChrome {...chrome}>
+        <div data-testid="artifact-list-loading" className="space-y-2 p-4">
+          <Skeleton className="h-6 w-full" />
+          <Skeleton className="h-6 w-3/4" />
+        </div>
+      </PanelChrome>
     );
   }
 
   // A 404 (version_not_found) is a defensive no-op here; show a neutral error.
   if (query.error || !query.data) {
     return (
-      <p data-testid="artifact-list-error" className="p-4 text-sm text-destructive">
-        Failed to load artifacts.
-      </p>
+      <PanelChrome {...chrome}>
+        <p data-testid="artifact-list-error" className="p-4 text-sm text-destructive">
+          Failed to load artifacts.
+        </p>
+      </PanelChrome>
     );
   }
 
-  const artifacts = query.data.artifacts;
   if (artifacts.length === 0) {
     return (
-      <p data-testid="artifact-list-empty" className="p-4 text-sm text-muted-foreground">
-        No artifacts.
-      </p>
+      <PanelChrome {...chrome}>
+        <p data-testid="artifact-list-empty" className="p-4 text-sm text-muted-foreground">
+          No artifacts.
+        </p>
+      </PanelChrome>
     );
   }
 
-  const selected = artifacts.find((a) => a.id === selectedId) ?? null;
-
   return (
-    <div className="flex h-full flex-col">
-      <ul data-testid="artifact-list" className="flex flex-col gap-1 p-2">
-        {artifacts.map((a) => (
-          <li key={a.id} data-testid="artifact-row" data-artifact-id={a.id}>
-            <div
-              className={cn(
-                "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs",
-                a.id === selectedId
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent/50",
-              )}
-            >
-              <button
-                type="button"
-                onClick={() => setSelectedId(a.id)}
-                className="flex flex-1 items-center gap-2 truncate text-left"
-                data-testid="artifact-select"
-                aria-pressed={a.id === selectedId}
+    <PanelChrome {...chrome}>
+      <div className="flex h-full flex-col">
+        <ul data-testid="artifact-list" className="flex flex-col gap-1 p-2">
+          {artifacts.map((a) => (
+            <li key={a.id} data-testid="artifact-row" data-artifact-id={a.id}>
+              <div
+                className={cn(
+                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs",
+                  a.id === selected?.id
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-accent/50",
+                )}
               >
-                <span className="text-muted-foreground">{a.kind}</span>
-                <span className="truncate font-mono text-foreground">
-                  {mimeLabel(a)}
-                </span>
-                <span className="ml-auto shrink-0 font-mono text-muted-foreground">
-                  {sizeLabel(a)}
-                </span>
-              </button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 shrink-0 px-2"
-                data-testid="artifact-download"
-                disabled={download.isPending}
-                onClick={() => onDownload(a.id)}
-              >
-                Download
-              </Button>
-            </div>
-          </li>
-        ))}
-      </ul>
+                <button
+                  type="button"
+                  onClick={() => setSelectedArtifactId(a.id)}
+                  className="flex flex-1 items-center gap-2 truncate text-left"
+                  data-testid="artifact-select"
+                  aria-pressed={a.id === selected?.id}
+                >
+                  <span className="text-muted-foreground">{a.kind}</span>
+                  <span className="truncate font-mono text-foreground">{mimeLabel(a)}</span>
+                  <span className="ml-auto shrink-0 font-mono text-muted-foreground">
+                    {sizeLabel(a)}
+                  </span>
+                </button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 px-2"
+                  data-testid="artifact-download"
+                  disabled={download.isPending}
+                  onClick={() => onDownload(a.id)}
+                >
+                  Download
+                </Button>
+              </div>
+            </li>
+          ))}
+        </ul>
 
-      {selected ? (
-        <div className="min-h-0 flex-1 border-t border-border">
-          {/* Keyed by artifact id so each selection remounts with a fresh,
-              lazily-derived initial state (no setState-in-effect). */}
-          <ArtifactPreviewBody
-            key={selected.id}
-            artifact={selected}
-            onDownload={onDownload}
-          />
-        </div>
-      ) : (
-        <p
-          className="border-t border-border p-4 text-xs text-muted-foreground"
-          data-testid="artifact-preview-hint"
-        >
-          Select an artifact to preview it.
-        </p>
-      )}
-    </div>
+        {selected ? (
+          <div className="min-h-0 flex-1 border-t border-border">
+            {/* Keyed so a new selection, a Refresh, or a render/source toggle
+                remounts with fresh state (each remount re-mints the presign). */}
+            <ArtifactPreviewBody
+              key={`${selected.id}:${refreshNonce}:${htmlView}`}
+              artifact={selected}
+              htmlRender={isHtml(selected.mime) && htmlView === "render"}
+              onDownload={onDownload}
+              onTextLoaded={(text, truncated) =>
+                setLoaded({ artifactId: selected.id, text, truncated })
+              }
+            />
+          </div>
+        ) : (
+          <p
+            className="border-t border-border p-4 text-xs text-muted-foreground"
+            data-testid="artifact-preview-hint"
+          >
+            Select an artifact to preview it.
+          </p>
+        )}
+      </div>
+    </PanelChrome>
   );
 }
 
 type PreviewState =
   | { phase: "loading" }
   | { phase: "image"; url: string }
+  | { phase: "html"; url: string }
   | { phase: "text"; text: string; truncated: boolean }
   | { phase: "binary" }
+  | { phase: "presign-error" }
   | { phase: "error" };
 
 /**
- * Lightweight preview for a single artifact. Images load via <img> from a fresh
- * presigned URL (CSP `img-src` must permit OSS). Text-like artifacts are fetched
- * (subject to OSS CORS) and truncated to TEXT_PREVIEW_CAP_BYTES; a fetch failure
- * degrades to a single inline error with download-only. Other types are
- * download-only with no inline preview. Presign is re-minted per selection and
- * never cached.
+ * Preview for a single artifact. Images load via <img> from a fresh presigned
+ * URL (CSP `img-src`). HTML artifacts in the rendered view load the presigned
+ * URL in a sandboxed iframe (`allow-scripts`, never `allow-same-origin`; CSP
+ * `frame-src`) — an in-frame HTTP failure is NOT detectable cross-origin, so
+ * recovery is the toolbar Refresh, while a presign failure renders an inline
+ * error. Text-like artifacts (and the HTML source view) are fetched (subject
+ * to OSS CORS) and truncated to TEXT_PREVIEW_CAP_BYTES. Other types are
+ * download-only. Presign is re-minted per mount and never cached.
  */
 function ArtifactPreviewBody({
   artifact,
+  htmlRender,
   onDownload,
+  onTextLoaded,
 }: {
   artifact: ArtifactMeta;
+  htmlRender: boolean;
   onDownload: (id: string) => void;
+  onTextLoaded?: ((text: string, truncated: boolean) => void) | undefined;
 }): JSX.Element {
   const presign = useArtifactPresignMutation();
   const mime = artifact.mime;
-  const previewable = isImage(mime) || isTextLike(mime);
+  const previewable = htmlRender || isImage(mime) || isTextLike(mime);
   // Initial phase is derived synchronously at mount (this body is keyed by
-  // artifact id, so a new selection remounts): "loading" for previewable types,
-  // "binary" for everything else. The effect only ever setState()s after an
-  // await, never synchronously.
+  // artifact id + nonce + view, so any change remounts): "loading" for
+  // previewable types, "binary" for everything else.
   const [state, setState] = useState<PreviewState>(() =>
     previewable ? { phase: "loading" } : { phase: "binary" },
   );
@@ -207,10 +382,23 @@ function ArtifactPreviewBody({
     if (!previewable) return;
     let cancelled = false;
     void (async () => {
+      let url: string;
       try {
         // Re-mint a short-lived URL for THIS artifact only (not cached).
-        const { url } = await presign.mutateAsync(artifact.id);
-        if (cancelled) return;
+        ({ url } = await presign.mutateAsync(artifact.id));
+      } catch {
+        // Presign failure is reliably detectable → inline error + Refresh.
+        if (!cancelled) setState({ phase: "presign-error" });
+        return;
+      }
+      if (cancelled) return;
+      try {
+        if (htmlRender) {
+          // Mount the iframe immediately on a fresh URL; what happens inside
+          // the sandboxed cross-origin frame is not observable from here.
+          setState({ phase: "html", url });
+          return;
+        }
         if (isImage(mime)) {
           setState({ phase: "image", url });
           return;
@@ -221,11 +409,9 @@ function ArtifactPreviewBody({
         const full = await res.text();
         if (cancelled) return;
         const truncated = full.length > TEXT_PREVIEW_CAP_BYTES;
-        setState({
-          phase: "text",
-          text: truncated ? full.slice(0, TEXT_PREVIEW_CAP_BYTES) : full,
-          truncated,
-        });
+        const text = truncated ? full.slice(0, TEXT_PREVIEW_CAP_BYTES) : full;
+        setState({ phase: "text", text, truncated });
+        onTextLoaded?.(text, truncated);
       } catch {
         if (!cancelled) setState({ phase: "error" });
       }
@@ -234,7 +420,7 @@ function ArtifactPreviewBody({
     return () => {
       cancelled = true;
     };
-    // Keyed by artifact id (remount per selection); presign identity is stable.
+    // Keyed remount per selection/refresh/view; identities are stable in between.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -254,6 +440,19 @@ function ArtifactPreviewBody({
       <div data-testid="artifact-preview-loading" className="space-y-2 p-4">
         <Skeleton className="h-24 w-full" />
       </div>
+    );
+  }
+
+  if (state.phase === "html") {
+    return (
+      <iframe
+        data-testid="preview-html-frame"
+        src={state.url}
+        // Scripts may run, but in an opaque origin: NEVER add allow-same-origin.
+        sandbox="allow-scripts"
+        title={`Rendered preview of ${artifact.kind}`}
+        className="size-full border-0 bg-background"
+      />
     );
   }
 
@@ -284,6 +483,18 @@ function ArtifactPreviewBody({
             Preview truncated — {downloadButton} to view the full file.
           </p>
         )}
+      </div>
+    );
+  }
+
+  if (state.phase === "presign-error") {
+    return (
+      <div
+        data-testid="preview-presign-error"
+        className="flex flex-col items-start gap-2 p-4 text-xs text-muted-foreground"
+      >
+        <span>Could not prepare the preview — use Refresh to retry.</span>
+        {downloadButton}
       </div>
     );
   }

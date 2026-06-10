@@ -43,25 +43,31 @@ afterEach(() => {
 });
 
 describe("TaskDetail", () => {
-  it("renders header, version tree, and event log", async () => {
+  it("renders the header, conversation turns, and the current turn's event log", async () => {
     render(wrap("task-1"));
     expect(await screen.findByTestId("task-detail-page")).toBeInTheDocument();
-    expect(await screen.findByTestId("version-tree")).toBeInTheDocument();
-    expect(await screen.findByTestId("event-log")).toBeInTheDocument();
+    const turns = await screen.findAllByTestId("conversation-turn");
+    expect(turns).toHaveLength(1);
+    // ver-1 is the current version → its turn carries the event log inline.
+    expect(await within(turns[0]!).findByTestId("event-log")).toBeInTheDocument();
+    expect(within(turns[0]!).getByTestId("current-marker")).toBeInTheDocument();
   });
 
-  it("disables Iterate while the task is active", async () => {
+  it("pins the composer and disables it while the task is active", async () => {
     server.use(
       http.get("http://localhost/api/v1/tasks/:id", ({ params }) =>
         HttpResponse.json(detailEnvelope(String(params["id"]), "running")),
       ),
     );
     render(wrap("task-1"));
-    const btn = await screen.findByTestId("iterate-button");
-    expect(btn).toBeDisabled();
+    // The composer is persistent — present even while disabled, with a reason.
+    const prompt = await screen.findByTestId("iterate-prompt");
+    expect(prompt).toBeDisabled();
+    expect(prompt).toHaveAttribute("title", expect.stringContaining("busy"));
+    expect(screen.getByTestId("iterate-submit")).toBeDisabled();
   });
 
-  it("enables Iterate in a terminal state and submits", async () => {
+  it("submits from the composer in a terminal state and clears it on success", async () => {
     let iterated = false;
     server.use(
       http.post("http://localhost/api/v1/tasks/:id/iterate", () => {
@@ -75,15 +81,16 @@ describe("TaskDetail", () => {
       }),
     );
     render(wrap("task-1"));
-    const btn = await screen.findByTestId("iterate-button");
-    expect(btn).toBeEnabled();
-    await userEvent.click(btn);
-    await userEvent.type(screen.getByTestId("iterate-prompt"), "add a page");
+    const prompt = await screen.findByTestId("iterate-prompt");
+    expect(prompt).toBeEnabled();
+    await userEvent.type(prompt, "add a page");
     await userEvent.click(screen.getByTestId("iterate-submit"));
     await waitFor(() => expect(iterated).toBe(true));
+    // Success clears the composer input.
+    await waitFor(() => expect(screen.getByTestId("iterate-prompt")).toHaveValue(""));
   });
 
-  it("surfaces a 409 conflict naming the active version", async () => {
+  it("surfaces a 409 conflict naming the active version and keeps the typed prompt", async () => {
     server.use(
       http.post("http://localhost/api/v1/tasks/:id/iterate", () =>
         HttpResponse.json(
@@ -98,13 +105,14 @@ describe("TaskDetail", () => {
       ),
     );
     render(wrap("task-1"));
-    await userEvent.click(await screen.findByTestId("iterate-button"));
-    await userEvent.type(screen.getByTestId("iterate-prompt"), "x");
+    await userEvent.type(await screen.findByTestId("iterate-prompt"), "x");
     await userEvent.click(screen.getByTestId("iterate-submit"));
     await waitFor(() => {
       const toasts = useUiStore.getState().toasts;
       expect(toasts.some((t) => t.message.includes("ver-9"))).toBe(true);
     });
+    // Failure preserves the input.
+    expect(screen.getByTestId("iterate-prompt")).toHaveValue("x");
   });
 
   it("renders a not-found state on 404", async () => {
@@ -259,7 +267,7 @@ describe("TaskDetail", () => {
       }),
     );
     render(wrap("task-1"));
-    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    const row = (await screen.findAllByTestId("conversation-turn"))[1]!;
     await userEvent.click(within(row).getByTestId("rollback-button"));
     await userEvent.click(within(row).getByTestId("rollback-branch"));
     await userEvent.type(within(row).getByTestId("rollback-prompt"), "go back");
@@ -293,7 +301,7 @@ describe("TaskDetail", () => {
       }),
     );
     render(wrap("task-1"));
-    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    const row = (await screen.findAllByTestId("conversation-turn"))[1]!;
     await userEvent.click(within(row).getByTestId("rollback-button"));
     await userEvent.click(within(row).getByTestId("rollback-switch"));
     await waitFor(() => expect(body).toEqual({ target_version_id: "ver-2", mode: "switch" }));
@@ -323,7 +331,7 @@ describe("TaskDetail", () => {
       }),
     );
     render(wrap("task-1"));
-    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    const row = (await screen.findAllByTestId("conversation-turn"))[1]!;
     await userEvent.click(within(row).getByTestId("rollback-button"));
     await userEvent.click(within(row).getByTestId("rollback-switch"));
     await waitFor(() => {
@@ -351,7 +359,7 @@ describe("TaskDetail", () => {
       ),
     );
     render(wrap("task-1"));
-    const row = (await screen.findAllByTestId("version-node"))[1]!;
+    const row = (await screen.findAllByTestId("conversation-turn"))[1]!;
     await userEvent.click(within(row).getByTestId("rollback-button"));
     await userEvent.click(within(row).getByTestId("rollback-switch"));
     await waitFor(() => {

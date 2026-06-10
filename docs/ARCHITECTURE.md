@@ -102,7 +102,7 @@
 
 | 组件 | 职责 | 状态 | 扩展方式 |
 |------|------|------|----------|
-| Web Client | 任务交互、版本树展示、实时进度、成本面板 | 无状态 | CDN + 多副本 |
+| Web Client | 任务交互、对话式版本回合流、实时进度、成本面板 | 无状态 | CDN + 多副本 |
 | API Gateway | 入口鉴权、限流、路由、WS 终止 | 无状态 | 水平扩展 |
 | Backend API | 业务逻辑、任务编排、版本管理 | 无状态 | 水平扩展 |
 | Realtime Gateway | WebSocket 长连接，扇出事件 | 弱状态（连接） | 一致性哈希分片 |
@@ -126,7 +126,7 @@ src/
 │   ├── TaskCreate/         # 任务创建表单（支持模板）
 │   ├── TaskList/           # 任务列表 + 状态筛选 + 累计成本列
 │   ├── TaskDetail/         # 任务详情：实时日志 / 中间产物 / 控制按钮 / 成本面板
-│   ├── VersionTree/        # 版本树可视化（react-flow），节点上展示该版本成本
+│   ├── ConversationTurn/   # 对话回合（每版本一回合：prompt / 产物卡片 / 回滚）
 │   ├── ArtifactViewer/     # 预览代码包 / Markdown / 文件树
 │   ├── CostDashboard/      # 用户视角累计成本（按天/任务/模型聚合）
 │   └── Settings/
@@ -144,16 +144,16 @@ src/
 ```
 
 关键设计：
-- **三栏外壳（shadcn/ui）**：应用外壳为三栏布局 —— 左**导航列**（Logo + Tasks/Cost/Settings + 用户区/登出，可折叠为图标条）/ 中**路由内容区**（TaskDetail 为主）/ 右**Artifact 预览列**（可折叠，窄屏抽屉化）。`RootLayout` 在 `routes/root-layout.tsx`，三栏子组件在 `components/layout/`。列折叠态与右栏「选中版本」(`selectedVersionId`) 归 Zustand（`features/ui/store`）。VersionTree 由「行内展开」改为「行选中驱动右栏预览」。
+- **三栏外壳（shadcn/ui）**：应用外壳为三栏布局 —— 左**导航列**（窄列，自上而下：Logo + "New task" 主按钮 + Tasks/Cost/Settings + Recents 最近任务列表 + 头像式用户区/登出，可折叠为图标条，折叠态隐藏 Recents）/ 中**路由内容区**（居中适读宽度容器，TaskDetail 为主）/ 右**Artifact 预览列**（**主导列**：lg 取剩余宽 40%、xl 取 50%、有最大宽上限；可折叠，窄屏抽屉化）。`RootLayout` 在 `routes/root-layout.tsx`，三栏子组件在 `components/layout/`。列折叠态与右栏「选中版本」(`selectedVersionId`) 归 Zustand（`features/ui/store`）。Recents 复用任务列表查询（最近**创建**序、静默错误面）；任务生命周期 mutation 与 live task 帧失效列表前缀以保持其新鲜。TaskDetail 为**对话式回合流**：紧凑头部 + 滚动回合主体 + 底部常驻迭代输入框；回合内产物卡片激活右栏预览（「选中产物」`selectedArtifactId` 与 `selectedVersionId` 成对写入，单独换版本时清空产物选中）。右栏面板自带头部工具栏（选中产物标题 · 类型 + Copy / Refresh / 关闭）。
 - **设计系统**：组件基座为 shadcn/ui（vendored 到 `components/ui/`，`cn()` 在 `lib/cn.ts`），主题走 shadcn 标准 **CSS 变量**（`globals.css` 的 `:root`/`.dark`，`tailwind.config.js` 以 `hsl(var(--token))` 映射，`darkMode:["class"]`，MVP 默认深色放 `:root`）。颜色纪律：禁裸 hex（eslint `no-restricted-syntax`），允许 `hsl(var(--*))` 形式的 arbitrary 值。图片预览需 CSP `img-src` 含 OSS（当前 `https:`）；文本预览经 OSS `fetch`（受 CORS 约束，失败降级为 download-only）。
 - **状态分层**：本地 UI 状态用 Zustand；服务端状态用 React Query（自带缓存、失效、轮询兜底）。
 - **实时通道**：MVP 默认 WebSocket，失败降级为 5s 轮询；SSE 与更复杂的多级降级为 Post-MVP。
 - **大文件上传**：前端拿临时 STS 凭证后直传 OSS，不走后端 API，避免后端带宽瓶颈。
-- **版本树**：MVP 限制为父子树（每个版本最多一个 parent，无 merge），客户端虚拟滚动加载。
+- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`）整页渲染，需 CSP `frame-src`（当前 `https:`）；frame 内加载失败不可探测，恢复手段为工具栏 Refresh（重新 presign 重载）。
 - **互斥提交保护**：前端在 task.status 处于活跃态时禁用"迭代/回滚"按钮并提示原因；提交时仍以后端 409 为准（后端是真相之源）。
 - **成本展示**：
   - TaskDetail 顶栏显示该 task 累计 cost（USD）+ token 数（input/output/cached 分项），以及当前 running 版本的实时累计；
-  - VersionTree 每个节点 hover 时显示该 version 的成本与耗时；
+  - 每个对话回合的结果行展示该 version 的成本徽章（hover 显示分项与耗时）；
   - CostDashboard 提供按日期 / task_type / model 聚合的图表。
 
 ### 3.2 后端 API（Golang）
@@ -1082,7 +1082,7 @@ CI/CD
 
 **必须有（must）**
 - 单租户（或固定多用户、无配额隔离），账号体系最简 JWT。
-- 前端：TaskCreate / TaskList / TaskDetail（实时日志 + 控制 + 成本面板）/ VersionTree（含每版本成本）/ CostDashboard（按任务/按日聚合）。
+- 前端：TaskCreate / TaskList / TaskDetail（对话式回合流：实时日志 + 控制 + 成本面板 + 每回合成本/回滚/产物）/ CostDashboard（按任务/按日聚合）。
 - 后端 API：§5.1 表中所有路径；含成本查询；含 409 互斥保护。
 - Worker：deepagents 基础 agent，code-gen 与 research 两个 task_type；Tool + Subagent 两类插件；子进程沙箱即可。
 - 持久化：PostgreSQL 单实例 + 每日备份；OSS 单 bucket（按前缀分类）；RabbitMQ 单节点托管或 3 节点 quorum 起步。

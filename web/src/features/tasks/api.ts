@@ -26,10 +26,16 @@ export interface ListTasksParams {
 export function listTasks(
   { page, pageSize, status }: ListTasksParams,
   signal?: AbortSignal,
+  silent?: boolean,
 ): Promise<TaskListPage> {
   const q = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
   if (status) q.set("status", status);
-  return apiFetch<TaskListPage>(`/api/v1/tasks?${q.toString()}`, signal ? { signal } : {});
+  return apiFetch<TaskListPage>(`/api/v1/tasks?${q.toString()}`, {
+    ...(signal ? { signal } : {}),
+    // Quiet consumers (the nav Recents list) suppress the transport toast and
+    // own their error surface inline; the page-level list keeps the default.
+    ...(silent ? { toastOnError: false } : {}),
+  });
 }
 
 export function getTask(id: string, signal?: AbortSignal): Promise<TaskDetail> {
@@ -41,7 +47,11 @@ export function listVersions(taskId: string, signal?: AbortSignal): Promise<Vers
 }
 
 export function getVersion(versionId: string, signal?: AbortSignal): Promise<VersionDetail> {
-  return apiFetch<VersionDetail>(`/api/v1/versions/${versionId}`, signal ? { signal } : {});
+  return apiFetch<VersionDetail>(`/api/v1/versions/${versionId}`, {
+    ...(signal ? { signal } : {}),
+    // Conversation turns own the (silent) degrade path; no transport toast.
+    toastOnError: false,
+  });
 }
 
 export function listVersionEvents(

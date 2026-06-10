@@ -68,3 +68,43 @@ describe("ui store — three-column layout state", () => {
     expect(useUiStore.getState().selectedVersionId).toBeNull();
   });
 });
+
+describe("ui store — artifact selection invariant", () => {
+  beforeEach(() => {
+    useUiStore.setState({
+      previewCollapsed: false,
+      selectedVersionId: null,
+      selectedArtifactId: null,
+    });
+  });
+
+  it("selectArtifact writes the pair atomically and expands the preview", () => {
+    useUiStore.setState({ previewCollapsed: true });
+    useUiStore.getState().selectArtifact("v-1", "a-1");
+    const s = useUiStore.getState();
+    expect(s.selectedVersionId).toBe("v-1");
+    expect(s.selectedArtifactId).toBe("a-1");
+    expect(s.previewCollapsed).toBe(false);
+  });
+
+  it("a lone version change clears the artifact selection (no dangling)", () => {
+    useUiStore.getState().selectArtifact("v-1", "a-1");
+    // e.g. the detail page re-anchoring to a new current_version after iterate.
+    useUiStore.getState().setSelectedVersionId("v-2");
+    expect(useUiStore.getState().selectedVersionId).toBe("v-2");
+    expect(useUiStore.getState().selectedArtifactId).toBeNull();
+  });
+
+  it("re-setting the same version keeps the artifact selection", () => {
+    useUiStore.getState().selectArtifact("v-1", "a-1");
+    useUiStore.getState().setSelectedVersionId("v-1");
+    expect(useUiStore.getState().selectedArtifactId).toBe("a-1");
+  });
+
+  it("setSelectedArtifactId switches the artifact within the version", () => {
+    useUiStore.getState().selectArtifact("v-1", "a-1");
+    useUiStore.getState().setSelectedArtifactId("a-2");
+    expect(useUiStore.getState().selectedVersionId).toBe("v-1");
+    expect(useUiStore.getState().selectedArtifactId).toBe("a-2");
+  });
+});

@@ -16,8 +16,8 @@ export interface RollbackControlProps {
 }
 
 /**
- * Per-version rollback picker for a VersionTree row. Presentational: the parent
- * (TaskDetail, via VersionTree) owns the mutation, toasts, and the version id —
+ * Per-version rollback picker for a conversation turn's footer. Presentational:
+ * the parent (TaskDetail, via ConversationTurn) owns the mutation and the id —
  * this only picks a mode and, for branch, an optional prompt. Mirrors the
  * ControlBar ↔ TaskDetail split; a disabled action explains why via `title`.
  * `switch` is immediate; `branch` reveals an optional prompt (blank is valid —

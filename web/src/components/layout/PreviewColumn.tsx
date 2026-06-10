@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { PanelRightOpen, X } from "lucide-react";
+import { PanelRightOpen } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/features/ui/store";
@@ -8,8 +8,9 @@ import { useUiStore } from "@/features/ui/store";
  * Right column of the three-column shell — the responsive container for the
  * Artifact Preview. On `lg+` it is a static column; below `lg` it becomes a
  * right-side drawer/overlay with a backdrop, keeping the center content usable.
- * Collapse state lives in the UI store. The preview *content* is passed as
- * children (the artifacts surface is owned by features/artifacts).
+ * Collapse state lives in the UI store. Pure chrome: the panel content
+ * (including its header toolbar with the close control) is passed as children
+ * (owned by features/artifacts).
  */
 export function PreviewColumn({ children }: { children: ReactNode }): JSX.Element {
   const collapsed = useUiStore((s) => s.previewCollapsed);
@@ -47,27 +48,16 @@ export function PreviewColumn({ children }: { children: ReactNode }): JSX.Elemen
         aria-hidden={collapsed}
         className={cn(
           "flex w-80 shrink-0 flex-col border-l border-border bg-card",
+          // Dominant column on lg+: percentages resolve against the width
+          // remaining beside the nav (see RootLayout's inner wrapper), capped
+          // so ultra-wide screens don't degenerate.
+          "lg:w-2/5 lg:max-w-4xl xl:w-1/2",
           // Drawer on small screens; static column on lg+.
           "fixed inset-y-0 right-0 z-40 transition-transform lg:static lg:z-auto lg:translate-x-0",
           collapsed ? "translate-x-full lg:hidden" : "translate-x-0 lg:flex",
         )}
       >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-3">
-          <span className="text-sm font-medium text-foreground">
-            Artifact Preview
-          </span>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            onClick={togglePreview}
-            aria-label="Collapse artifact preview"
-            data-testid="preview-close"
-          >
-            <X className="size-4" aria-hidden />
-          </Button>
-        </div>
-        <div className="flex-1 overflow-auto">{children}</div>
+        <div className="min-h-0 flex-1">{children}</div>
       </aside>
     </>
   );

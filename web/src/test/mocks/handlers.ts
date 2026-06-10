@@ -106,6 +106,10 @@ export const handlers = [
     ok({ items: [versionNodeFixture("ver-1", null, 1, "succeeded")] }),
   ),
 
+  http.get("http://localhost/api/v1/versions/:id", ({ params }) =>
+    ok(versionDetailFixture(String(params["id"]), 1, "succeeded")),
+  ),
+
   http.get("http://localhost/api/v1/versions/:id/events", () =>
     ok({
       items: [
@@ -281,6 +285,32 @@ export function versionNodeFixture(
     is_active: status === "pending" || status === "running",
     artifact_root: null,
     created_at: "2026-05-26T00:00:00Z",
+    cost: zeroCost(),
+  };
+}
+
+/** A VersionDetail-shaped fixture (the `GET /versions/{id}` read): full
+ *  version row incl. `prompt`, plus runs + cost. Conversation turns read the
+ *  prompt from here. */
+export function versionDetailFixture(
+  id: string,
+  versionNo: number,
+  status: string,
+): Record<string, unknown> {
+  return {
+    version: {
+      id,
+      task_id: "task-1",
+      parent_id: null,
+      version_no: versionNo,
+      prompt: `Prompt for ${id}`,
+      params: null,
+      status,
+      is_active: status === "pending" || status === "running",
+      artifact_root: null,
+      created_at: "2026-05-26T00:00:00Z",
+    },
+    runs: [],
     cost: zeroCost(),
   };
 }

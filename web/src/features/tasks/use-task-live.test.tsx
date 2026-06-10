@@ -95,6 +95,8 @@ describe("useTaskLive", () => {
     await waitFor(() =>
       expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.detail("t1") }),
     );
+    // The list prefix refreshes too, so TaskList and the nav Recents follow.
+    expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.lists });
   });
 
   it("unsubscribes on unmount", async () => {

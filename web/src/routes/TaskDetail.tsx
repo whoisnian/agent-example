@@ -1,12 +1,12 @@
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/tasks/StatusBadge";
 import { CostBadge } from "@/components/tasks/CostBadge";
 import { ControlBar } from "@/components/tasks/ControlBar";
-import { VersionTree } from "@/components/tasks/VersionTree";
+import { ConversationTurn } from "@/components/tasks/ConversationTurn";
 import { EventLog } from "@/components/tasks/EventLog";
 import { TokenBar } from "@/components/costs/TokenBar";
 import { ApiError } from "@/services/http";
@@ -67,8 +67,19 @@ export function TaskDetail(): JSX.Element {
   const iterate = useIterateTaskMutation();
   const control = useControlTaskMutation();
   const rollback = useRollbackTaskMutation();
-  const [showIterate, setShowIterate] = useState(false);
   const [iteratePrompt, setIteratePrompt] = useState("");
+
+  // Follow new turns/events with the scroll only when the user is already near
+  // the bottom; never steal the position while they are reading back.
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const versionCount = versionsQuery.data?.items.length ?? 0;
+  const eventCount = eventsQuery.data?.items.length ?? 0;
+  useEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [versionCount, eventCount]);
 
   // Roll back to a historical version. The requested mode is read here (the two
   // response bodies share no discriminator); both responses carry version_no.
@@ -165,7 +176,7 @@ export function TaskDetail(): JSX.Element {
       { taskId: id, body: { prompt: iteratePrompt } },
       {
         onSuccess: () => {
-          setShowIterate(false);
+          // Clear on success only — a failed submission keeps the typed prompt.
           setIteratePrompt("");
         },
         onError: (err) => {
@@ -183,88 +194,109 @@ export function TaskDetail(): JSX.Element {
     );
   };
 
+  const versions = versionsQuery.data?.items ?? null;
+  const byId = new Map((versions ?? []).map((v) => [v.id, v]));
+  const busyReason = isActive
+    ? "Task is busy — wait for the active version to finish"
+    : undefined;
+
   return (
-    <section data-testid="task-detail-page">
-      <div className="mb-4 flex items-center gap-3">
-        <h1 className="text-2xl font-semibold text-foreground">{loadedTask.title}</h1>
-        <StatusBadge status={loadedTask.status} />
-        <span className="text-sm text-muted-foreground">{loadedTask.task_type}</span>
-        <CostBadge cost={detail.cost} />
-        <ControlBar status={loadedTask.status} pending={control.isPending} onAction={onControl} />
-      </div>
-
-      <div data-testid="task-cost-panel" className="mb-6">
-        <h2 className="mb-2 text-lg font-medium text-foreground">Cost</h2>
-        {costQuery.data ? (
-          <TokenBar cost={costQuery.data.total} />
-        ) : costQuery.isPending ? (
-          <p className="text-sm text-muted-foreground">Loading cost…</p>
-        ) : (
-          // A 404 here is a defensive no-op (the page is already gated by the
-          // task query); render nothing rather than a second not-found screen.
-          <p className="text-sm text-muted-foreground">Cost unavailable.</p>
-        )}
-      </div>
-
-      <div className="mb-6">
-        <h2 className="mb-2 text-lg font-medium text-foreground">Versions</h2>
-        {versionsQuery.data ? (
-          <VersionTree
-            versions={versionsQuery.data.items}
-            currentVersionId={currentVersionId}
-            taskActive={isActive}
-            onRollback={onRollback}
-            rollbackPending={rollback.isPending}
-          />
-        ) : (
-          <p className="text-sm text-muted-foreground">Loading versions…</p>
-        )}
-        <div className="mt-3">
-          <Button
-            data-testid="iterate-button"
-            disabled={isActive}
-            title={isActive ? "Task is busy — wait for the active version to finish" : undefined}
-            onClick={() => setShowIterate((v) => !v)}
-          >
-            Iterate
-          </Button>
-          {showIterate ? (
-            <div className="mt-2 flex max-w-xl flex-col gap-2">
-              <textarea
-                data-testid="iterate-prompt"
-                value={iteratePrompt}
-                onChange={(e) => setIteratePrompt(e.target.value)}
-                rows={3}
-                placeholder="Describe the change for the next version…"
-                className="rounded-md border border-input bg-background px-2 py-1 text-foreground"
-              />
-              <div>
-                <Button
-                  data-testid="iterate-submit"
-                  disabled={iterate.isPending}
-                  onClick={submitIterate}
-                >
-                  {iterate.isPending ? "Submitting…" : "Submit iteration"}
-                </Button>
-              </div>
-            </div>
-          ) : null}
+    <section data-testid="task-detail-page" className="flex h-full min-h-0 flex-col">
+      {/* Compact header: identity row + the full cost breakdown as a slim bar. */}
+      <div className="flex shrink-0 flex-col gap-2 border-b border-border pb-3">
+        <div className="flex items-center gap-3">
+          <h1 className="truncate text-xl font-semibold text-foreground">{loadedTask.title}</h1>
+          <StatusBadge status={loadedTask.status} />
+          <span className="text-sm text-muted-foreground">{loadedTask.task_type}</span>
+          <CostBadge cost={detail.cost} />
+          <ControlBar status={loadedTask.status} pending={control.isPending} onAction={onControl} />
+        </div>
+        <div data-testid="task-cost-panel">
+          {costQuery.data ? (
+            <TokenBar cost={costQuery.data.total} />
+          ) : costQuery.isPending ? (
+            <p className="text-sm text-muted-foreground">Loading cost…</p>
+          ) : (
+            // A 404 here is a defensive no-op (the page is already gated by the
+            // task query); render nothing rather than a second not-found screen.
+            <p className="text-sm text-muted-foreground">Cost unavailable.</p>
+          )}
         </div>
       </div>
 
-      <div>
-        <h2 className="mb-2 text-lg font-medium text-foreground">Events</h2>
-        {currentVersionId ? (
-          eventsQuery.data ? (
-            <EventLog events={eventsQuery.data.items} />
+      {/* Conversation body: one turn per version, ascending version_no. */}
+      <div
+        ref={bodyRef}
+        data-testid="conversation-body"
+        className="min-h-0 flex-1 overflow-y-auto py-4"
+      >
+        {versions ? (
+          versions.length === 0 ? (
+            <p data-testid="conversation-empty" className="text-sm text-muted-foreground">
+              No versions yet.
+            </p>
           ) : (
-            <p className="text-sm text-muted-foreground">Loading events…</p>
+            <ol className="flex flex-col gap-6">
+              {versions.map((v) => {
+                const parent = v.parent_id ? byId.get(v.parent_id) : undefined;
+                // A fork (rollback-branch) is a parent that is NOT the
+                // immediately preceding version number.
+                const forked = parent && parent.version_no !== v.version_no - 1;
+                const isCurrent = v.id === currentVersionId;
+                return (
+                  <ConversationTurn
+                    key={v.id}
+                    version={v}
+                    originNo={forked ? parent.version_no : undefined}
+                    isCurrent={isCurrent}
+                    taskActive={isActive}
+                    onRollback={onRollback}
+                    rollbackPending={rollback.isPending}
+                  >
+                    {isCurrent ? (
+                      eventsQuery.data ? (
+                        <EventLog events={eventsQuery.data.items} />
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Loading events…</p>
+                      )
+                    ) : null}
+                  </ConversationTurn>
+                );
+              })}
+            </ol>
           )
         ) : (
-          <p data-testid="no-current-version" className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground">Loading versions…</p>
+        )}
+        {versions && !currentVersionId ? (
+          <p data-testid="no-current-version" className="mt-4 text-sm text-muted-foreground">
             No current version yet.
           </p>
-        )}
+        ) : null}
+      </div>
+
+      {/* Persistent iterate composer (replaces the toggle-revealed form). */}
+      <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
+        <textarea
+          data-testid="iterate-prompt"
+          value={iteratePrompt}
+          onChange={(e) => setIteratePrompt(e.target.value)}
+          rows={3}
+          disabled={isActive || iterate.isPending}
+          title={busyReason}
+          placeholder="Describe the change for the next version…"
+          className="resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground disabled:opacity-50"
+        />
+        <div className="flex justify-end">
+          <Button
+            data-testid="iterate-submit"
+            disabled={isActive || iterate.isPending}
+            title={busyReason}
+            onClick={submitIterate}
+          >
+            {iterate.isPending ? "Submitting…" : "Iterate"}
+          </Button>
+        </div>
       </div>
     </section>
   );

@@ -23,11 +23,18 @@ export interface UiState {
   previewCollapsed: boolean;
   /** Version id anchoring the right preview panel; null = nothing selected. */
   selectedVersionId: string | null;
+  /** Artifact id previewed in the right panel; null = list only. Shared by the
+   *  conversation turns and the panel rows (one selection, two entry points). */
+  selectedArtifactId: string | null;
   toggleNav: () => void;
   togglePreview: () => void;
   setNavCollapsed: (v: boolean) => void;
   setPreviewCollapsed: (v: boolean) => void;
   setSelectedVersionId: (id: string | null) => void;
+  setSelectedArtifactId: (id: string | null) => void;
+  /** Atomic pair write (conversation artifact card): selects the version AND
+   *  the artifact, and expands the preview column if it was collapsed. */
+  selectArtifact: (versionId: string, artifactId: string) => void;
 }
 
 let counter = 0;
@@ -51,9 +58,25 @@ export const useUiStore = create<UiState>()((set) => ({
   navCollapsed: false,
   previewCollapsed: false,
   selectedVersionId: null,
+  selectedArtifactId: null,
   toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
   togglePreview: () => set((s) => ({ previewCollapsed: !s.previewCollapsed })),
   setNavCollapsed: (v) => set({ navCollapsed: v }),
   setPreviewCollapsed: (v) => set({ previewCollapsed: v }),
-  setSelectedVersionId: (id) => set({ selectedVersionId: id }),
+  // Invariant: a lone version change (e.g. the detail page re-anchoring to a
+  // new current_version after iterate/rollback) clears the artifact selection
+  // so it can never dangle across versions. Only selectArtifact writes both.
+  setSelectedVersionId: (id) =>
+    set((s) =>
+      id === s.selectedVersionId
+        ? { selectedVersionId: id }
+        : { selectedVersionId: id, selectedArtifactId: null },
+    ),
+  setSelectedArtifactId: (id) => set({ selectedArtifactId: id }),
+  selectArtifact: (versionId, artifactId) =>
+    set({
+      selectedVersionId: versionId,
+      selectedArtifactId: artifactId,
+      previewCollapsed: false,
+    }),
 }));

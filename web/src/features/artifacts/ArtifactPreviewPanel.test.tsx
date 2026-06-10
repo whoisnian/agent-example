@@ -23,13 +23,28 @@ function wrap(): JSX.Element {
 const realLocation = window.location;
 let assignSpy: ReturnType<typeof vi.fn>;
 
+/** Install a clipboard stub (jsdom has none); returns the writeText spy. */
+function stubClipboard(): ReturnType<typeof vi.fn> {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  return writeText;
+}
+
 beforeEach(() => {
   assignSpy = vi.fn();
   Object.defineProperty(window, "location", {
     configurable: true,
     value: { href: realLocation.href, assign: assignSpy },
   });
-  useUiStore.setState({ toasts: [], selectedVersionId: "ver-1" });
+  useUiStore.setState({
+    toasts: [],
+    selectedVersionId: "ver-1",
+    selectedArtifactId: null,
+    previewCollapsed: false,
+  });
 });
 
 afterEach(() => {
@@ -37,14 +52,240 @@ afterEach(() => {
     configurable: true,
     value: realLocation,
   });
-  useUiStore.setState({ toasts: [], selectedVersionId: null });
+   
+  delete (navigator as any).clipboard;
+  useUiStore.setState({
+    toasts: [],
+    selectedVersionId: null,
+    selectedArtifactId: null,
+    previewCollapsed: false,
+  });
 });
+
+/** MSW override: the selected version lists a single text/html artifact. */
+function htmlArtifactList(): void {
+  server.use(
+    http.get("http://localhost/api/v1/versions/:id/artifacts", ({ params }) =>
+      HttpResponse.json({
+        code: 0,
+        message: "ok",
+        data: {
+          version_id: String(params["id"]),
+          artifacts: [
+            {
+              id: "art-html",
+              kind: "file",
+              mime: "text/html",
+              bytes: 512,
+              sha256: null,
+              created_at: "2026-05-26T00:00:00Z",
+            },
+          ],
+        },
+        trace_id: "t",
+      }),
+    ),
+  );
+}
 
 describe("ArtifactPreviewPanel", () => {
   it("shows a placeholder when no version is selected", () => {
     useUiStore.setState({ selectedVersionId: null });
     render(wrap());
     expect(screen.getByTestId("preview-no-version")).toBeInTheDocument();
+  });
+
+  // --- header toolbar ---
+
+  it("renders the toolbar in contentless states with a working close control", async () => {
+    useUiStore.setState({ selectedVersionId: null });
+    render(wrap());
+    // Generic title fallback; Copy/Refresh disabled; close always reachable.
+    expect(screen.getByTestId("preview-title")).toHaveTextContent("Artifact Preview");
+    expect(screen.getByTestId("preview-copy")).toBeDisabled();
+    expect(screen.getByTestId("preview-refresh")).toBeDisabled();
+
+    await userEvent.click(screen.getByTestId("preview-close"));
+    expect(useUiStore.getState().previewCollapsed).toBe(true);
+  });
+
+  it("shows the selected artifact's identity in the toolbar", async () => {
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    // art-1 fixture: kind "file", mime "text/markdown".
+    expect(screen.getByTestId("preview-title")).toHaveTextContent("text/markdown");
+  });
+
+  it("treats a dangling artifact selection as no-artifact-selected", async () => {
+    useUiStore.setState({ selectedArtifactId: "art-gone" });
+    render(wrap());
+    await screen.findByTestId("artifact-list");
+    // Not in this version's list → list-only rendering, generic title, no error.
+    expect(screen.getByTestId("artifact-preview-hint")).toBeInTheDocument();
+    expect(screen.getByTestId("preview-title")).toHaveTextContent("Artifact Preview");
+  });
+
+  it("panel rows write the shared store selection", async () => {
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    expect(useUiStore.getState().selectedArtifactId).toBe("art-1");
+  });
+
+  // --- Copy ---
+
+  it("copies the fully loaded text and confirms", async () => {
+    const writeText = stubClipboard();
+    server.use(
+      http.get("https://oss.test/download/:id", () => HttpResponse.text("copy me")),
+    );
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    await screen.findByTestId("artifact-preview-text");
+
+    const copy = screen.getByTestId("preview-copy");
+    expect(copy).toBeEnabled();
+    await userEvent.click(copy);
+    expect(writeText).toHaveBeenCalledWith("copy me");
+    await waitFor(() =>
+      expect(
+        useUiStore.getState().toasts.some((t) => t.level === "success" && /copied/i.test(t.message)),
+      ).toBe(true),
+    );
+  });
+
+  it("refuses to copy truncated content (disabled with a reason)", async () => {
+    stubClipboard();
+    const big = "x".repeat(TEXT_PREVIEW_CAP_BYTES + 100);
+    server.use(http.get("https://oss.test/download/:id", () => HttpResponse.text(big)));
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    await screen.findByTestId("artifact-preview-truncated");
+
+    const copy = screen.getByTestId("preview-copy");
+    expect(copy).toBeDisabled();
+    expect(copy).toHaveAttribute("title", expect.stringContaining("download"));
+  });
+
+  it("disables Copy when the clipboard API is unavailable", async () => {
+    // No stubClipboard() — jsdom has no navigator.clipboard.
+    server.use(
+      http.get("https://oss.test/download/:id", () => HttpResponse.text("plain")),
+    );
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    await screen.findByTestId("artifact-preview-text");
+    expect(screen.getByTestId("preview-copy")).toBeDisabled();
+  });
+
+  // --- Refresh ---
+
+  it("Refresh re-mints the presigned URL and replays the preview", async () => {
+    let presignCalls = 0;
+    server.use(
+      http.get("http://localhost/api/v1/artifacts/:id/presign", ({ params }) => {
+        presignCalls += 1;
+        return HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: {
+            url: `https://oss.test/download/${String(params["id"])}?n=${presignCalls}`,
+            expires_at: "2026-05-26T00:05:00Z",
+            bytes: 10,
+            mime: "text/markdown",
+            sha256: null,
+          },
+          trace_id: "t",
+        });
+      }),
+      http.get("https://oss.test/download/:id", () => HttpResponse.text("v")),
+    );
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    await screen.findByTestId("artifact-preview-text");
+    expect(presignCalls).toBe(1);
+
+    await userEvent.click(screen.getByTestId("preview-refresh"));
+    await screen.findByTestId("artifact-preview-text");
+    await waitFor(() => expect(presignCalls).toBe(2));
+  });
+
+  // --- HTML rich preview ---
+
+  it("renders an HTML artifact in a sandboxed iframe by default", async () => {
+    htmlArtifactList();
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+
+    const frame = await screen.findByTestId("preview-html-frame");
+    expect(frame.getAttribute("src")).toMatch(/^https:\/\/oss\.test\/download\/art-html/);
+    // Scripts may run, but never with the app's origin.
+    expect(frame).toHaveAttribute("sandbox", "allow-scripts");
+    expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
+  });
+
+  it("toggles between rendered and source views without re-selecting", async () => {
+    htmlArtifactList();
+    server.use(
+      http.get("https://oss.test/download/:id", () =>
+        HttpResponse.text("<html><body>hi</body></html>"),
+      ),
+    );
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    await screen.findByTestId("preview-html-frame");
+
+    await userEvent.click(screen.getByTestId("preview-view-toggle"));
+    const text = await screen.findByTestId("artifact-preview-text");
+    expect(text).toHaveTextContent("hi");
+    expect(useUiStore.getState().selectedArtifactId).toBe("art-html");
+
+    await userEvent.click(screen.getByTestId("preview-view-toggle"));
+    expect(await screen.findByTestId("preview-html-frame")).toBeInTheDocument();
+  });
+
+  it("a rendered-view presign failure shows an inline error (no iframe, no toast)", async () => {
+    htmlArtifactList();
+    server.use(
+      http.get("http://localhost/api/v1/artifacts/:id/presign", () =>
+        HttpResponse.json(
+          { code: "internal_error", message: "boom", data: null, trace_id: "t" },
+          { status: 500 },
+        ),
+      ),
+    );
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+
+    expect(await screen.findByTestId("preview-presign-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("preview-html-frame")).toBeNull();
+    expect(useUiStore.getState().toasts).toHaveLength(0);
   });
 
   it("lists the selected version's artifacts in server order", async () => {

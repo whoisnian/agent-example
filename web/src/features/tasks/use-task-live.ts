@@ -34,6 +34,9 @@ export function useTaskLive(
       if (event.topic.startsWith("task:")) {
         void queryClient.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
         void queryClient.invalidateQueries({ queryKey: taskKeys.versions(taskId) });
+        // Status frames are low-frequency; refresh the list prefix so the
+        // TaskList page and nav Recents reflect the running task's status.
+        void queryClient.invalidateQueries({ queryKey: taskKeys.lists });
       } else if (event.topic.startsWith("version:") && currentVersionId) {
         void queryClient.invalidateQueries({ queryKey: taskKeys.events(currentVersionId) });
         void queryClient.invalidateQueries({ queryKey: taskKeys.versions(taskId) });

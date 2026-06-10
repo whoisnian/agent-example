@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
+import { Link, NavLink, useNavigate } from "react-router-dom";
 import {
   Bot,
   DollarSign,
@@ -7,11 +7,13 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
+  Plus,
   Settings,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
+import { RecentTasks } from "@/components/layout/RecentTasks";
 import { useAuthStore } from "@/features/auth/store";
 import { useUiStore } from "@/features/ui/store";
 
@@ -28,9 +30,10 @@ const items: readonly NavItem[] = [
 ] as const;
 
 /**
- * Left navigation column of the three-column shell. Holds the logo, primary
- * nav, a recent-tasks entry, and (folded in from the retired TopBar) the
- * authenticated user area + logout. Collapses to an icon rail via the UI store.
+ * Left navigation column of the three-column shell. Top to bottom: brand row,
+ * the "New task" primary action, primary nav, the Recents task list (hidden on
+ * the icon rail), and the avatar-style user area + logout (folded in from the
+ * retired TopBar). Collapses to an icon rail via the UI store.
  */
 export function SideNav(): JSX.Element {
   const navigate = useNavigate();
@@ -48,7 +51,7 @@ export function SideNav(): JSX.Element {
     <nav
       className={cn(
         "flex shrink-0 flex-col border-r border-border bg-card transition-[width]",
-        collapsed ? "w-16" : "w-60",
+        collapsed ? "w-16" : "w-56",
       )}
       aria-label="Primary"
       data-testid="side-nav"
@@ -79,8 +82,23 @@ export function SideNav(): JSX.Element {
         </Button>
       </div>
 
+      {/* New task primary action */}
+      <div className={cn("flex px-2 pt-1", collapsed && "justify-center")}>
+        <Button
+          asChild
+          size={collapsed ? "icon" : "sm"}
+          className={cn(collapsed ? "size-8" : "w-full justify-start gap-3")}
+          title={collapsed ? "New task" : undefined}
+        >
+          <Link to="/tasks/new" aria-label="New task" data-testid="nav-new-task">
+            <Plus className="size-4 shrink-0" aria-hidden />
+            {!collapsed && <span>New task</span>}
+          </Link>
+        </Button>
+      </div>
+
       {/* Primary nav */}
-      <ul className="flex flex-1 flex-col gap-1 p-2">
+      <ul className="flex flex-col gap-1 p-2">
         {items.map((item) => {
           const Icon = item.icon;
           return (
@@ -107,14 +125,30 @@ export function SideNav(): JSX.Element {
         })}
       </ul>
 
-      {/* User area + logout (folded in from the retired TopBar) */}
+      {/* Recents (expanded only) takes the remaining height; a spacer keeps
+          the user area pinned to the bottom on the icon rail. */}
+      {collapsed ? <div className="flex-1" /> : <RecentTasks />}
+
+      {/* Avatar-style user area + logout (folded in from the retired TopBar) */}
       <div
-        className="flex flex-col gap-2 border-t border-border p-2"
+        className={cn(
+          "flex gap-2 border-t border-border p-2",
+          collapsed ? "flex-col items-center" : "items-center",
+        )}
         data-testid="user-area"
       >
+        {user ? (
+          <div
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-medium uppercase text-primary-foreground"
+            title={user.email}
+            data-testid="user-avatar"
+          >
+            {user.email.charAt(0)}
+          </div>
+        ) : null}
         {user && !collapsed ? (
           <span
-            className="truncate px-2 text-xs text-muted-foreground"
+            className="min-w-0 flex-1 truncate text-xs text-muted-foreground"
             data-testid="user-email"
           >
             {user.email}
@@ -122,15 +156,14 @@ export function SideNav(): JSX.Element {
         ) : null}
         <Button
           variant="ghost"
-          size={collapsed ? "icon" : "sm"}
-          className={cn(!collapsed && "justify-start gap-3")}
+          size="icon"
+          className="size-8 shrink-0"
           onClick={onLogout}
           aria-label="Logout"
-          title={collapsed ? "Logout" : undefined}
+          title="Logout"
           data-testid="logout-button"
         >
-          <LogOut className="size-4 shrink-0" aria-hidden />
-          {!collapsed && <span>Logout</span>}
+          <LogOut className="size-4" aria-hidden />
         </Button>
       </div>
     </nav>

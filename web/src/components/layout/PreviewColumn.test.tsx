@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PreviewColumn } from "@/components/layout/PreviewColumn";
 import { useUiStore } from "@/features/ui/store";
@@ -23,13 +23,15 @@ describe("PreviewColumn (right column shell)", () => {
     expect(screen.queryByTestId("preview-open")).toBeNull();
   });
 
-  it("close control collapses the column and exposes a re-open affordance", async () => {
+  // The close control now lives in the panel's header toolbar (see
+  // ArtifactPreviewPanel.test); the column only reacts to the store flag.
+  it("collapsing via the store hides the column and exposes a re-open affordance", () => {
     render(
       <PreviewColumn>
         <div>body</div>
       </PreviewColumn>,
     );
-    await userEvent.click(screen.getByTestId("preview-close"));
+    act(() => useUiStore.getState().togglePreview());
     expect(useUiStore.getState().previewCollapsed).toBe(true);
     expect(screen.getByTestId("preview-column")).toHaveAttribute(
       "aria-hidden",

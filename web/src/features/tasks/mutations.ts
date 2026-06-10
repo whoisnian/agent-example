@@ -46,9 +46,11 @@ export function useIterateTaskMutation(): UseMutationResult<
     mutationFn: ({ taskId, body }: IterateVars) => iterateTask(taskId, body),
     meta: { silent: true },
     onSettled: (_data, _err, { taskId }) => {
-      // Refetch task + versions whether we succeeded or hit a 409 race.
+      // Refetch task + versions whether we succeeded or hit a 409 race; the
+      // list prefix keeps TaskList and the nav Recents status dots current.
       void qc.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
       void qc.invalidateQueries({ queryKey: taskKeys.versions(taskId) });
+      void qc.invalidateQueries({ queryKey: taskKeys.lists });
     },
   });
 }
@@ -75,6 +77,7 @@ export function useRollbackTaskMutation(): UseMutationResult<
       // both need the task + versions caches refreshed (also on a 409 race).
       void qc.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
       void qc.invalidateQueries({ queryKey: taskKeys.versions(taskId) });
+      void qc.invalidateQueries({ queryKey: taskKeys.lists });
     },
   });
 }
@@ -101,6 +104,7 @@ export function useControlTaskMutation(): UseMutationResult<
       // even if the live frame is delayed/dropped.
       void qc.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
       void qc.invalidateQueries({ queryKey: taskKeys.versions(taskId) });
+      void qc.invalidateQueries({ queryKey: taskKeys.lists });
     },
   });
 }
