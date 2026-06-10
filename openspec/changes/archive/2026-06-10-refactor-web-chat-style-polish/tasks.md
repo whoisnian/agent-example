@@ -31,4 +31,5 @@
 
 - [x] 7.1 `npm run typecheck && npm run lint && npm run test && npm run build` 全绿
 - [x] 7.2 `openspec validate refactor-web-chat-style-polish` 通过
-- [ ] 7.3 对照两张参考图人工核对：SideNav 结构、New task 页、详情页事件气泡与产物卡片、右栏切换按钮
+- [x] 7.3 对照两张参考图人工核对：SideNav 结构、New task 页、详情页事件气泡与产物卡片、右栏切换按钮
+  - 2026-06-11 本地 dev 栈人工核对通过（用户确认）：SideNav 菜单 / New task composer / 产物卡片驱动预览 / Render-Source 切换均符合预期
