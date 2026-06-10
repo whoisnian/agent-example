@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, suppress
 from typing import TYPE_CHECKING
 
 from worker.agents import build_agent_registry
@@ -141,7 +141,7 @@ async def serve(settings: Settings) -> int:
             consumer.stop()
 
         for sig in (signal.SIGTERM, signal.SIGINT):
-            with __import__("contextlib").suppress(NotImplementedError):
+            with suppress(NotImplementedError):
                 loop.add_signal_handler(sig, _request_shutdown)
 
         consumer_task = asyncio.create_task(consumer.run(), name="consumer")
@@ -156,11 +156,13 @@ async def serve(settings: Settings) -> int:
             logger.warning("drain_timeout_force_exit")
             metrics.forced_shutdown_total.inc()
             consumer_task.cancel()
-            with __import__("contextlib").suppress(Exception):
+            # CancelledError derives from BaseException, so a bare
+            # ``suppress(Exception)`` lets the cancellation escape ``serve``.
+            with suppress(asyncio.CancelledError, Exception):
                 await consumer_task
 
         control_task.cancel()
-        with __import__("contextlib").suppress(Exception):
+        with suppress(asyncio.CancelledError, Exception):
             await control_task
 
     shutdown_tracing()

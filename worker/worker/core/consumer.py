@@ -94,11 +94,26 @@ class TaskConsumer:
         """
         self._log.info("consumer_starting")
         async with self._queue.iterator(no_ack=False) as it:
-            async for message in it:
-                if self._stop.is_set():
-                    await message.nack(requeue=True)
-                    break
-                await self._handle_message(message)
+            # An idle iterator blocks inside ``__anext__`` and never observes
+            # ``self._stop``; only ``it.close()`` wakes that wait (it cancels
+            # the consumer tag, requeues buffered deliveries, and ends the
+            # async-for). Without this watcher an idle worker sits out the
+            # full drain timeout on SIGINT/SIGTERM.
+            stop_watcher = asyncio.create_task(self._close_on_stop(it), name="consumer-stop")
+            try:
+                async for message in it:
+                    if self._stop.is_set():
+                        await message.nack(requeue=True)
+                        break
+                    await self._handle_message(message)
+            finally:
+                stop_watcher.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stop_watcher
+
+    async def _close_on_stop(self, it: aio_pika.abc.AbstractQueueIterator) -> None:
+        await self._stop.wait()
+        await it.close()
 
     def stop(self) -> None:
         self._stop.set()

@@ -87,11 +87,11 @@ async def _drain_queue(
 
 
 async def test_unimplemented_dispatch_round_trip(
-    rmq_container,  # type: ignore[no-untyped-def]
+    rmq_url: str,
     pg_pool,  # type: ignore[no-untyped-def]
     minio_container,  # type: ignore[no-untyped-def]
 ) -> None:
-    url = rmq_container.get_connection_url()
+    url = rmq_url
     mq = MqConnection(url)
     await mq.connect()
     channel = await mq.channel()
@@ -100,7 +100,7 @@ async def test_unimplemented_dispatch_round_trip(
 
     worker_id = "wk-test"
     lane = "default"
-    execute_q, _ctl_q = await declare_worker_queues(channel, lane=lane, worker_id=worker_id)
+    execute_q, _ctl_q, _ctl_x = await declare_worker_queues(channel, lane=lane, worker_id=worker_id)
 
     persistence = Persistence(pg_pool, heartbeat_interval_seconds=5.0)
     endpoint = (
@@ -193,14 +193,14 @@ async def test_unimplemented_dispatch_round_trip(
 
 
 async def test_registered_agent_success_round_trip(
-    rmq_container,  # type: ignore[no-untyped-def]
+    rmq_url: str,
     pg_pool,  # type: ignore[no-untyped-def]
     minio_container,  # type: ignore[no-untyped-def]
     tmp_path,  # type: ignore[no-untyped-def]
 ) -> None:
     """A registered agent that returns normally drives the consumer success path:
     mark_run_terminal(succeeded) + a status=succeeded event + ack (no DLX)."""
-    url = rmq_container.get_connection_url()
+    url = rmq_url
     mq = MqConnection(url)
     await mq.connect()
     channel = await mq.channel()
@@ -209,7 +209,7 @@ async def test_registered_agent_success_round_trip(
 
     worker_id = "wk-success"
     lane = "default"
-    execute_q, _ctl_q = await declare_worker_queues(channel, lane=lane, worker_id=worker_id)
+    execute_q, _ctl_q, _ctl_x = await declare_worker_queues(channel, lane=lane, worker_id=worker_id)
 
     persistence = Persistence(pg_pool, heartbeat_interval_seconds=5.0)
     endpoint = (
@@ -307,6 +307,62 @@ async def test_registered_agent_success_round_trip(
     finally:
         consumer.stop()
         consumer_task.cancel()
+        with __import__("contextlib").suppress(Exception):
+            await consumer_task
+        await mq.close()
+
+
+async def test_idle_consumer_stops_promptly(rmq_url: str) -> None:  # type: ignore[no-untyped-def]
+    """``stop()`` on an idle consumer must end ``run()`` well before the drain
+    timeout — regression for the SIGINT hang where the queue iterator stayed
+    blocked in ``__anext__`` until ``drain_timeout_force_exit``."""
+    from typing import cast
+
+    url = rmq_url
+    mq = MqConnection(url)
+    await mq.connect()
+    channel = await mq.channel()
+    await _bootstrap_exchanges(channel)
+    await assert_topology(channel)
+
+    worker_id = "wk-idle"
+    lane = "idle"
+    execute_q, _ctl_q, _ctl_x = await declare_worker_queues(channel, lane=lane, worker_id=worker_id)
+
+    metrics = build_metrics()
+    logger = structlog.get_logger().bind(worker_id=worker_id)
+    consumer = TaskConsumer(
+        worker_id=worker_id,
+        lane=lane,
+        mq_channel=channel,
+        queue=execute_q,
+        # Stand-ins: the idle path touches neither persistence nor OSS.
+        persistence=cast(Persistence, object()),
+        oss_client=cast(OssClient, object()),
+        event_publisher=EventPublisher(mq, metrics=metrics, logger=logger),
+        cost_publisher=CostEventPublisher(mq, metrics=metrics, logger=logger),
+        dispatcher=ExecutionDispatcher(_empty_registry()),
+        control_listener=ControlListener(
+            worker_id=worker_id, mq=mq, redis_url=None, metrics=metrics, logger=logger
+        ),
+        metrics=metrics,
+        logger=logger,
+        heartbeat_interval=1.0,
+        checkpoint_inline_bytes=8 * 1024,
+    )
+
+    consumer_task = asyncio.create_task(consumer.run())
+    try:
+        # Let the consumer reach the blocking ``__anext__`` wait.
+        await asyncio.sleep(1.0)
+        assert not consumer_task.done()
+
+        consumer.stop()
+        # Must return promptly (drain timeout default is 60s).
+        await asyncio.wait_for(consumer_task, timeout=5.0)
+    finally:
+        if not consumer_task.done():
+            consumer_task.cancel()
         with __import__("contextlib").suppress(Exception):
             await consumer_task
         await mq.close()

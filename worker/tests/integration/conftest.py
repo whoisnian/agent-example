@@ -113,6 +113,20 @@ def rmq_container() -> Iterator[Any]:
         yield rmq
 
 
+@pytest.fixture(scope="session")
+def rmq_url(rmq_container: Any) -> str:
+    """AMQP URL for the live broker.
+
+    testcontainers 4.x dropped ``RabbitMqContainer.get_connection_url``; build
+    the URL from connection params instead. An empty path means vhost ``/``.
+    """
+    host = rmq_container.get_container_host_ip()
+    port = rmq_container.get_exposed_port(rmq_container.port)
+    vhost = rmq_container.vhost
+    path = "" if vhost == "/" else f"/{vhost}"
+    return f"amqp://{rmq_container.username}:{rmq_container.password}@{host}:{port}{path}"
+
+
 # --- MinIO -----------------------------------------------------------------
 
 
