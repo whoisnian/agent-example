@@ -258,10 +258,16 @@ describe("ArtifactPreviewPanel", () => {
     );
     await screen.findByTestId("preview-html-frame");
 
-    await userEvent.click(screen.getByTestId("preview-view-toggle"));
+    // Prominent icon+label button: names the view it switches TO in each state.
+    const toggle = screen.getByTestId("preview-view-toggle");
+    expect(toggle).toHaveTextContent("Source");
+    expect(toggle.querySelector("svg")).not.toBeNull();
+
+    await userEvent.click(toggle);
     const text = await screen.findByTestId("artifact-preview-text");
     expect(text).toHaveTextContent("hi");
     expect(useUiStore.getState().selectedArtifactId).toBe("art-html");
+    expect(screen.getByTestId("preview-view-toggle")).toHaveTextContent("Render");
 
     await userEvent.click(screen.getByTestId("preview-view-toggle"));
     expect(await screen.findByTestId("preview-html-frame")).toBeInTheDocument();

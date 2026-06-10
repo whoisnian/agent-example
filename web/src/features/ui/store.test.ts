@@ -32,32 +32,27 @@ describe("ui store — toasts", () => {
 describe("ui store — three-column layout state", () => {
   beforeEach(() => {
     useUiStore.setState({
-      navCollapsed: false,
       previewCollapsed: false,
       selectedVersionId: null,
     });
   });
 
-  it("defaults: both columns expanded, no version selected", () => {
+  it("defaults: preview expanded, no version selected (nav collapse retired)", () => {
     const s = useUiStore.getState();
-    expect(s.navCollapsed).toBe(false);
     expect(s.previewCollapsed).toBe(false);
     expect(s.selectedVersionId).toBeNull();
+    expect("navCollapsed" in s).toBe(false);
   });
 
-  it("toggleNav / togglePreview flip their flags", () => {
-    useUiStore.getState().toggleNav();
-    expect(useUiStore.getState().navCollapsed).toBe(true);
+  it("togglePreview flips the flag", () => {
     useUiStore.getState().togglePreview();
     expect(useUiStore.getState().previewCollapsed).toBe(true);
-    useUiStore.getState().toggleNav();
-    expect(useUiStore.getState().navCollapsed).toBe(false);
+    useUiStore.getState().togglePreview();
+    expect(useUiStore.getState().previewCollapsed).toBe(false);
   });
 
-  it("setNavCollapsed / setPreviewCollapsed set explicit values", () => {
-    useUiStore.getState().setNavCollapsed(true);
+  it("setPreviewCollapsed sets an explicit value", () => {
     useUiStore.getState().setPreviewCollapsed(true);
-    expect(useUiStore.getState().navCollapsed).toBe(true);
     expect(useUiStore.getState().previewCollapsed).toBe(true);
   });
 

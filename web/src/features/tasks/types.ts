@@ -145,7 +145,8 @@ export interface EventPage {
 // ---- write DTOs ----
 
 export interface CreateTaskRequest {
-  title: string;
+  /** Optional — when omitted the API derives the title from the prompt. */
+  title?: string;
   task_type: string;
   prompt: string;
   params?: unknown;

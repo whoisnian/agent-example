@@ -5,6 +5,20 @@ import { server } from "./mocks/server";
 // Tests resolve relative paths through this base; matches scaffold convention.
 process.env["VITE_API_BASE_URL"] ??= "http://localhost";
 
+// jsdom lacks ResizeObserver / scrollIntoView, which Radix popper-positioned
+// components (DropdownMenu) require to open. Minimal no-op polyfills.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+if (typeof window !== "undefined" && !window.HTMLElement.prototype.scrollIntoView) {
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+}
+
 beforeAll(() => {
   server.listen({ onUnhandledRequest: "error" });
 });

@@ -17,8 +17,8 @@ export interface UiState {
   clearToasts: () => void;
 
   // Three-column shell layout state (local UI state → Zustand, not React Query).
-  /** Left navigation column collapsed to an icon rail / hidden. */
-  navCollapsed: boolean;
+  // The left nav is fixed-width by spec (refactor-web-chat-style-polish); its
+  // former collapse state is retired — do not reintroduce.
   /** Right Artifact Preview column collapsed / drawer-closed. */
   previewCollapsed: boolean;
   /** Version id anchoring the right preview panel; null = nothing selected. */
@@ -26,9 +26,7 @@ export interface UiState {
   /** Artifact id previewed in the right panel; null = list only. Shared by the
    *  conversation turns and the panel rows (one selection, two entry points). */
   selectedArtifactId: string | null;
-  toggleNav: () => void;
   togglePreview: () => void;
-  setNavCollapsed: (v: boolean) => void;
   setPreviewCollapsed: (v: boolean) => void;
   setSelectedVersionId: (id: string | null) => void;
   setSelectedArtifactId: (id: string | null) => void;
@@ -55,13 +53,10 @@ export const useUiStore = create<UiState>()((set) => ({
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   clearToasts: () => set({ toasts: [] }),
 
-  navCollapsed: false,
   previewCollapsed: false,
   selectedVersionId: null,
   selectedArtifactId: null,
-  toggleNav: () => set((s) => ({ navCollapsed: !s.navCollapsed })),
   togglePreview: () => set((s) => ({ previewCollapsed: !s.previewCollapsed })),
-  setNavCollapsed: (v) => set({ navCollapsed: v }),
   setPreviewCollapsed: (v) => set({ previewCollapsed: v }),
   // Invariant: a lone version change (e.g. the detail page re-anchoring to a
   // new current_version after iterate/rollback) clears the artifact selection

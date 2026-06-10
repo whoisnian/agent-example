@@ -1,4 +1,5 @@
 import type { JSX, ReactNode } from "react";
+import { FileText } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/features/ui/store";
@@ -119,9 +120,9 @@ function TurnPrompt({ versionId }: { versionId: string }): JSX.Element | null {
 }
 
 /**
- * Inline artifact list for the turn's version. Empty list → the section is
- * omitted entirely (no empty-state noise in the conversation). Activating an
- * entry drives the right preview panel via the store's atomic pair write;
+ * Inline artifact cards for the turn's version. Empty list → the section is
+ * omitted entirely (no empty-state noise in the conversation). Activating a
+ * card drives the right preview panel via the store's atomic pair write;
  * Download re-mints a presigned URL per click and navigates straight to OSS.
  */
 function TurnArtifacts({ versionId }: { versionId: string }): JSX.Element | null {
@@ -153,30 +154,35 @@ function TurnArtifacts({ versionId }: { versionId: string }): JSX.Element | null
   if (artifacts.length === 0) return null;
 
   return (
-    <ul className="flex flex-col gap-1">
+    <ul className="flex flex-col gap-2">
       {artifacts.map((a) => (
         <li
           key={a.id}
           data-testid="turn-artifact-item"
           data-artifact-id={a.id}
-          className="flex items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 text-xs"
+          className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:border-ring"
         >
+          {/* The whole card (minus Download) is the activation hit area. */}
           <button
             type="button"
             data-testid="turn-artifact-select"
             onClick={() => selectArtifact(versionId, a.id)}
-            className="flex flex-1 items-center gap-2 truncate text-left hover:text-foreground"
+            className="flex min-w-0 flex-1 items-center gap-3 text-left"
           >
-            <span className="text-muted-foreground">{a.kind}</span>
-            <span className="truncate font-mono text-foreground">{a.mime ?? "—"}</span>
-            <span className="ml-auto shrink-0 font-mono text-muted-foreground">
-              {a.bytes === null ? "—" : formatBytes(a.bytes)}
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+              <FileText className="size-4" aria-hidden />
+            </span>
+            <span className="flex min-w-0 flex-col">
+              <span className="truncate text-sm font-medium text-foreground">{a.kind}</span>
+              <span className="truncate font-mono text-xs text-muted-foreground">
+                {a.mime ?? "—"} · {a.bytes === null ? "—" : formatBytes(a.bytes)}
+              </span>
             </span>
           </button>
           <Button
-            variant="ghost"
+            variant="outline"
             size="sm"
-            className="h-7 shrink-0 px-2"
+            className="h-8 shrink-0 px-3"
             data-testid="turn-artifact-download"
             disabled={download.isPending}
             onClick={() => onDownload(a.id)}

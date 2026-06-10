@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { Copy, RefreshCw, X } from "lucide-react";
+import { Code, Copy, Eye, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -215,17 +215,28 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
         setRefreshNonce((n) => n + 1);
       }
     : undefined;
+  // A prominent icon+label button (spec: not a text-only ghost affordance).
   const viewToggle =
     selected && isHtml(selected.mime) ? (
       <Button
-        variant="ghost"
+        variant="outline"
         size="sm"
-        className="h-8 px-2 text-xs"
+        className="h-8 gap-1.5 px-2.5 text-xs"
         data-testid="preview-view-toggle"
         aria-label={htmlView === "render" ? "View source" : "View rendered"}
         onClick={() => setHtmlView((v) => (v === "render" ? "source" : "render"))}
       >
-        {htmlView === "render" ? "Source" : "Render"}
+        {htmlView === "render" ? (
+          <>
+            <Code className="size-3.5" aria-hidden />
+            Source
+          </>
+        ) : (
+          <>
+            <Eye className="size-3.5" aria-hidden />
+            Render
+          </>
+        )}
       </Button>
     ) : null;
 
@@ -277,16 +288,18 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
             <li key={a.id} data-testid="artifact-row" data-artifact-id={a.id}>
               <div
                 className={cn(
-                  "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs",
+                  "flex items-stretch gap-2 rounded-md pr-2 text-xs",
                   a.id === selected?.id
                     ? "bg-accent text-accent-foreground"
                     : "hover:bg-accent/50",
                 )}
               >
+                {/* Padding lives on the button so the selection hit area
+                    spans the full row height (spec: full-row selection). */}
                 <button
                   type="button"
                   onClick={() => setSelectedArtifactId(a.id)}
-                  className="flex flex-1 items-center gap-2 truncate text-left"
+                  className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
                   data-testid="artifact-select"
                   aria-pressed={a.id === selected?.id}
                 >
@@ -299,7 +312,7 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 shrink-0 px-2"
+                  className="h-7 shrink-0 self-center px-2"
                   data-testid="artifact-download"
                   disabled={download.isPending}
                   onClick={() => onDownload(a.id)}

@@ -9,7 +9,7 @@ import { createQueryClient } from "@/services/query-client";
 import { server } from "@/test/mocks/server";
 import { __resetRealtimeForTests } from "@/services/ws";
 import { useUiStore } from "@/features/ui/store";
-import { taskInfoFixture, versionNodeFixture, zeroCost } from "@/test/mocks/handlers";
+import { eventFixture, taskInfoFixture, versionNodeFixture, zeroCost } from "@/test/mocks/handlers";
 import { TaskDetail } from "@/routes/TaskDetail";
 
 function wrap(id: string): JSX.Element {
@@ -51,6 +51,35 @@ describe("TaskDetail", () => {
     // ver-1 is the current version → its turn carries the event log inline.
     expect(await within(turns[0]!).findByTestId("event-log")).toBeInTheDocument();
     expect(within(turns[0]!).getByTestId("current-marker")).toBeInTheDocument();
+  });
+
+  it("renders events as readable assistant content (status humanized, error destructive)", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/versions/:id/events", () =>
+        HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: {
+            items: [
+              eventFixture(1, 1, "status", { status: "running" }),
+              eventFixture(2, 2, "error", { code: "internal", message: "boom" }),
+            ],
+            next_after_id: 2,
+          },
+          trace_id: "t",
+        }),
+      ),
+    );
+    render(wrap("task-1"));
+    const log = await screen.findByTestId("event-log");
+    const rows = within(log).getAllByTestId("event-row");
+    expect(rows[0]).toHaveTextContent("Status →");
+    expect(rows[0]).toHaveTextContent("running");
+    // No raw-JSON-only rendering for the humanized kinds.
+    expect(rows[0]).not.toHaveTextContent('{"status"');
+    expect(rows[1]).toHaveClass("text-destructive");
+    expect(rows[1]).toHaveTextContent("internal");
+    expect(rows[1]).toHaveTextContent("boom");
   });
 
   it("pins the composer and disables it while the task is active", async () => {

@@ -48,6 +48,7 @@ function GatedTree({ initial }: { initial: string }): JSX.Element {
           >
             <Route path="tasks" element={<div data-testid="tasks-stub" />} />
             <Route path="tasks/new" element={<div data-testid="task-create-stub" />} />
+            <Route path="cost" element={<div data-testid="cost-stub" />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -59,8 +60,7 @@ describe("SideNav (left navigation column)", () => {
   beforeEach(() => {
     window.localStorage.clear();
     useAuthStore.setState({ token: null, user: null });
-    // Expanded nav so the user email is visible (it hides on the icon rail).
-    useUiStore.setState({ navCollapsed: false, toasts: [] });
+    useUiStore.setState({ toasts: [] });
   });
 
   it("shows the logged-in user's email", () => {
@@ -74,17 +74,13 @@ describe("SideNav (left navigation column)", () => {
     renderNav();
     expect(screen.queryByTestId("user-email")).toBeNull();
     expect(screen.queryByTestId("user-avatar")).toBeNull();
-    expect(screen.getByTestId("logout-button")).toBeInTheDocument();
+    expect(screen.getByTestId("user-area")).toBeInTheDocument();
   });
 
-  it("collapse toggle hides the brand name and user email", async () => {
+  it("renders no collapse toggle", () => {
     useAuthStore.setState({ token: "t", user: USER });
     renderNav();
-    expect(screen.getByTestId("user-email")).toBeInTheDocument();
-    await userEvent.click(screen.getByTestId("nav-collapse-toggle"));
-    expect(screen.queryByTestId("user-email")).toBeNull();
-    // Nav links remain (icon-only) so navigation still works when collapsed.
-    expect(screen.getByTestId("nav-tasks")).toBeInTheDocument();
+    expect(screen.queryByTestId("nav-collapse-toggle")).toBeNull();
   });
 
   it("renders an avatar derived from the user's email initial", () => {
@@ -93,14 +89,39 @@ describe("SideNav (left navigation column)", () => {
     expect(screen.getByTestId("user-avatar")).toHaveTextContent("d");
   });
 
-  it("keeps the avatar and logout reachable on the icon rail", () => {
+  it("user-area menu hosts Tasks / Cost / Settings / Logout", async () => {
     useAuthStore.setState({ token: "t", user: USER });
-    useUiStore.setState({ navCollapsed: true });
     renderNav();
-    expect(screen.getByTestId("user-avatar")).toBeInTheDocument();
+    expect(screen.queryByTestId("nav-tasks")).toBeNull();
+
+    await userEvent.click(screen.getByTestId("user-area"));
+
+    expect(await screen.findByTestId("nav-tasks")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-cost")).toBeInTheDocument();
+    expect(screen.getByTestId("nav-settings")).toBeInTheDocument();
     expect(screen.getByTestId("logout-button")).toBeInTheDocument();
-    expect(screen.getByTestId("nav-new-task")).toBeInTheDocument();
-    expect(screen.queryByTestId("recent-tasks")).toBeNull();
+  });
+
+  it("menu entry navigates and closes the menu", async () => {
+    useAuthStore.setState({ token: "t", user: USER });
+    render(<GatedTree initial="/tasks" />);
+    expect(screen.getByTestId("tasks-stub")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("user-area"));
+    await userEvent.click(await screen.findByTestId("nav-cost"));
+
+    expect(await screen.findByTestId("cost-stub")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId("nav-cost")).toBeNull());
+  });
+
+  it("menu marks the active route entry", async () => {
+    useAuthStore.setState({ token: "t", user: USER });
+    renderNav("/cost");
+
+    await userEvent.click(screen.getByTestId("user-area"));
+
+    expect(await screen.findByTestId("nav-cost")).toHaveClass("bg-accent");
+    expect(screen.getByTestId("nav-tasks")).not.toHaveClass("bg-accent");
   });
 
   it("New task action navigates to /tasks/new", async () => {
@@ -159,17 +180,16 @@ describe("SideNav (left navigation column)", () => {
     expect(useUiStore.getState().toasts).toHaveLength(0);
   });
 
-  it("logout clears the session and gating routes /tasks → /login", async () => {
+  it("logout (in the menu) clears the session and gating routes /tasks → /login", async () => {
     useAuthStore.setState({ token: "t", user: USER });
     render(<GatedTree initial="/tasks" />);
     expect(screen.getByTestId("tasks-stub")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId("logout-button"));
+    await userEvent.click(screen.getByTestId("user-area"));
+    await userEvent.click(await screen.findByTestId("logout-button"));
 
     expect(useAuthStore.getState().token).toBeNull();
     expect(useAuthStore.getState().user).toBeNull();
-    await waitFor(() =>
-      expect(screen.getByTestId("login-stub")).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByTestId("login-stub")).toBeInTheDocument());
   });
 });

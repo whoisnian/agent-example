@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/tasks/StatusBadge";
 import { CostBadge } from "@/components/tasks/CostBadge";
@@ -25,12 +25,8 @@ export function TaskList(): JSX.Element {
 
   return (
     <section data-testid="task-list-page">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Tasks</h1>
-        <Button asChild data-testid="new-task-button">
-          <Link to="/tasks/new">New task</Link>
-        </Button>
-      </div>
+      {/* Creation lives in the shell's left-nav "New task" action — no page button. */}
+      <h1 className="mb-4 text-2xl font-semibold text-foreground">Tasks</h1>
 
       <div className="mb-4">
         <label className="text-sm text-muted-foreground">
