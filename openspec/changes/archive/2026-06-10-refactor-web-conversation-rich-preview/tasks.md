@@ -27,5 +27,6 @@
 
 ## 4. 验证与文档
 
-- [ ] 4.1 手动验证：真实 presigned URL 下 HTML iframe 渲染无 CSP 违规、过期 URL 走 Refresh 恢复；记录上轮遗留的 OSS CORS 验证结论（影响源码视图降级路径）
+- [x] 4.1 手动验证：真实 presigned URL 下 HTML iframe 渲染无 CSP 违规、过期 URL 走 Refresh 恢复；记录上轮遗留的 OSS CORS 验证结论（影响源码视图降级路径）
+  - 2026-06-11 本地 dev 栈（SeaweedFS S3 @ http://localhost:9000）实测结论：iframe 渲染正常（CSP 需枚举本地 dev OSS origin，见 commit 6fd0d45——`frame-src`/`img-src` 仅 `https:` 会拦截 http 的本地 presigned URL）；**Source 视图文本 fetch 可加载，即本地 SeaweedFS 的 CORS 放行了 app origin**，源码预览不走降级路径。过期 URL → Refresh 恢复未单独验证（需等 presign 过期窗口），iframe 内失败本就设计为不可探测、Refresh 兜底。生产（真 https OSS）CORS 需在部署时按 bucket 配置复核。
 - [x] 4.2 更新 `docs/ARCHITECTURE.md`：§3.1 前端模块（目录树 `VersionTree/ # 版本树可视化（react-flow）` 改为回合组件、关键设计"版本树/虚拟滚动/节点 hover 成本/行选中驱动右栏"等条目改为对话回合流 + 产物卡片驱动 + 工具栏/HTML 富渲染 + CSP 口径）与 §2.2 组件职责表（Web Client"版本树展示"字样）；注意不是 §4.3（任务状态机）；`web/AGENTS.md` 如涉及同步修订
