@@ -48,6 +48,9 @@ class Metrics:
     agent_steps_total: Counter
     agent_step_duration_seconds: Histogram
 
+    # Semantic title generation
+    title_generation_failures_total: Counter
+
 
 def build_metrics(registry: CollectorRegistry | None = None) -> Metrics:
     """Create and register the worker metric set on the given registry.
@@ -138,6 +141,11 @@ def build_metrics(registry: CollectorRegistry | None = None) -> Metrics:
         agent_step_duration_seconds=Histogram(
             "worker_agent_step_duration_seconds",
             "Wall-clock seconds per completed agent step.",
+            registry=reg,
+        ),
+        title_generation_failures_total=Counter(
+            "worker_title_generation_failures_total",
+            "Semantic title generations that failed (LLM error/timeout/publish/empty output).",
             registry=reg,
         ),
     )

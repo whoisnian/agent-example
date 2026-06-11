@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from worker.core.persistence import Persistence
     from worker.core.publisher import CostEventPublisher, EventPublisher
     from worker.core.storage import OssClient
+    from worker.core.title import TitleGenerator
 
 
 _DEFAULT_TENANT_ID = "default-tenant"
@@ -67,6 +68,7 @@ class TaskConsumer:
         logger: structlog.stdlib.BoundLogger,
         heartbeat_interval: float,
         checkpoint_inline_bytes: int,
+        title_generator: TitleGenerator | None = None,
     ) -> None:
         self._worker_id = worker_id
         self._lane = lane
@@ -82,6 +84,7 @@ class TaskConsumer:
         self._log = logger.bind(component="consumer", lane=lane)
         self._heartbeat_interval = heartbeat_interval
         self._checkpoint_inline_bytes = checkpoint_inline_bytes
+        self._title_generator = title_generator
         self._tracer = get_tracer("worker.consumer")
         self._stop = asyncio.Event()
 
@@ -259,6 +262,12 @@ class TaskConsumer:
                     seq=ctx.next_event_seq(),
                     traceparent=traceparent,
                 )
+
+                # Semantic title generation: after status=running, before agent
+                # dispatch. Best-effort — never raises, never blocks past its
+                # internal timeout (spec: "Semantic Title Generation").
+                if self._title_generator is not None:
+                    await self._title_generator.maybe_generate(ctx, msg)
 
                 # Run heartbeat as a sibling task; dispatch is awaited inline
                 # so its exception type (e.g. AgentNotImplementedError) is

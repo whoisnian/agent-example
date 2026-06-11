@@ -98,6 +98,14 @@ class Settings(BaseSettings):
         ge=0,
         description="Per-delivery critic retry budget per step (design D13).",
     )
+    worker_title_model_key: str | None = Field(
+        default=None,
+        description=(
+            "ModelFactory key for semantic title generation (WORKER_TITLE_MODEL_KEY); "
+            "when unset, falls back to the model key of the agent registered for the "
+            "message's task_type."
+        ),
+    )
 
     @field_validator("log_level")
     @classmethod

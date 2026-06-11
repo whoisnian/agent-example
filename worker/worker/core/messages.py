@@ -31,6 +31,10 @@ class TaskExecuteMessage(BaseModel):
     parent_version_id: UUID | None = None
     parent_artifact_root: str | None = None
     deadline_ts: int | None = None
+    # Create-only flag: set by the API only on the create path when the task
+    # title was derived (placeholder) rather than user-supplied. Iterate /
+    # rollback / any republish never set it; absent means False.
+    gen_title: bool = False
     # Optional tenant context; carried for OSS prefix resolution. When absent
     # we fall back to a deterministic placeholder so the scaffold runs.
     tenant_id: str | None = None

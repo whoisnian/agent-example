@@ -28,6 +28,7 @@ from worker.core.mq_connection import (
 from worker.core.persistence import Persistence
 from worker.core.publisher import CostEventPublisher, EventPublisher
 from worker.core.storage import OssClient
+from worker.core.title import TitleGenerator
 from worker.core.tracing import setup_tracing, shutdown_tracing
 from worker.plugins.loader import load_plugins
 
@@ -105,6 +106,12 @@ async def serve(settings: Settings) -> int:
         )
         logger.info("agents_registered", count=len(agent_registry))
         dispatcher = ExecutionDispatcher(agent_registry)
+        title_generator = TitleGenerator(
+            model_factory=model_factory,
+            agent_registry=agent_registry,
+            title_model_key=settings.worker_title_model_key,
+            metrics=metrics,
+        )
 
         control = ControlListener(
             worker_id=settings.worker_id,
@@ -130,6 +137,7 @@ async def serve(settings: Settings) -> int:
             logger=logger,
             heartbeat_interval=settings.heartbeat_interval,
             checkpoint_inline_bytes=settings.checkpoint_inline_bytes,
+            title_generator=title_generator,
         )
 
         shutdown_event = asyncio.Event()
