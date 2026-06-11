@@ -145,11 +145,11 @@ src/
 
 关键设计：
 - **三栏外壳（shadcn/ui）**：应用外壳为三栏布局 —— 左**导航列**（窄列，自上而下：Logo + "New task" 主按钮 + Tasks/Cost/Settings + Recents 最近任务列表 + 头像式用户区/登出，可折叠为图标条，折叠态隐藏 Recents）/ 中**路由内容区**（居中适读宽度容器，TaskDetail 为主）/ 右**Artifact 预览列**（**主导列**：lg 取剩余宽 40%、xl 取 50%、有最大宽上限；可折叠，窄屏抽屉化）。`RootLayout` 在 `routes/root-layout.tsx`，三栏子组件在 `components/layout/`。列折叠态与右栏「选中版本」(`selectedVersionId`) 归 Zustand（`features/ui/store`）。Recents 复用任务列表查询（最近**创建**序、静默错误面）；任务生命周期 mutation 与 live task 帧失效列表前缀以保持其新鲜。TaskDetail 为**对话式回合流**：紧凑头部 + 滚动回合主体 + 底部常驻迭代输入框；回合内产物卡片激活右栏预览（「选中产物」`selectedArtifactId` 与 `selectedVersionId` 成对写入，单独换版本时清空产物选中）。右栏面板自带头部工具栏（选中产物标题 · 类型 + Copy / Refresh / 关闭）。
-- **设计系统**：组件基座为 shadcn/ui（vendored 到 `components/ui/`，`cn()` 在 `lib/cn.ts`），主题走 shadcn 标准 **CSS 变量**（`globals.css` 的 `:root`/`.dark`，`tailwind.config.js` 以 `hsl(var(--token))` 映射，`darkMode:["class"]`，MVP 默认深色放 `:root`）。颜色纪律：禁裸 hex（eslint `no-restricted-syntax`），允许 `hsl(var(--*))` 形式的 arbitrary 值。图片预览需 CSP `img-src` 含 OSS（当前 `https:`）；文本预览经 OSS `fetch`（受 CORS 约束，失败降级为 download-only）。
+- **设计系统**：组件基座为 shadcn/ui（vendored 到 `components/ui/`，`cn()` 在 `lib/cn.ts`），主题走 shadcn 标准 **CSS 变量**（`globals.css` 的 `:root`/`.dark`，`tailwind.config.js` 以 `hsl(var(--token))` 映射，`darkMode:["class"]`，MVP 默认深色放 `:root`）。颜色纪律：禁裸 hex（eslint `no-restricted-syntax`），允许 `hsl(var(--*))` 形式的 arbitrary 值。产物预览**同源**（经 API 下载代理，见 §5 路由表）：CSP 收紧为 `img-src 'self' data:` / `frame-src 'self'` / `connect-src 'self' ws: wss:`，不放行任何 OSS 来源；文本预览是同源 `fetch`，无 CORS 门槛。
 - **状态分层**：本地 UI 状态用 Zustand；服务端状态用 React Query（自带缓存、失效、轮询兜底）。
 - **实时通道**：MVP 默认 WebSocket，失败降级为 5s 轮询；SSE 与更复杂的多级降级为 Post-MVP。
 - **大文件上传**：前端拿临时 STS 凭证后直传 OSS，不走后端 API，避免后端带宽瓶颈。
-- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`）整页渲染，需 CSP `frame-src`（当前 `https:`）；frame 内加载失败不可探测，恢复手段为工具栏 Refresh（重新 presign 重载）。
+- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`；下载响应自带 `Content-Security-Policy: sandbox allow-scripts` 双保险）整页渲染，加载源是同源 API 下载代理（CSP `frame-src 'self'`）；frame 跑在 opaque origin，内部加载失败不可探测，恢复手段为工具栏 Refresh（重新 presign 重载）。
 - **互斥提交保护**：前端在 task.status 处于活跃态时禁用"迭代/回滚"按钮并提示原因；提交时仍以后端 409 为准（后端是真相之源）。
 - **成本展示**：
   - TaskDetail 顶栏显示该 task 累计 cost（USD）+ token 数（input/output/cached 分项），以及当前 running 版本的实时累计；
@@ -526,7 +526,8 @@ CREATE INDEX ON outbox (status, next_retry_at);
 | GET    | `/versions/{version_id}` | 版本详情 |
 | GET    | `/versions/{version_id}/events?after_id=...` | 事件流（用于断线后补齐） |
 | GET    | `/versions/{version_id}/artifacts` | 产物列表（元数据；不含 `oss_key`） — capability `artifacts-api` |
-| GET    | `/artifacts/{id}/presign` | 取临时下载链接（S3 预签名 GET，单对象作用域，TTL 由 `OSS_PRESIGN_TTL` 控制） — capability `artifacts-api` |
+| GET    | `/artifacts/{id}/presign` | 取临时下载链接：API 本地签发的**相对路径** `/artifacts/{id}/download?token=...`（HS256 token，单产物作用域，TTL 由 `OSS_PRESIGN_TTL` 控制；mint 时校验所有权） — capability `artifacts-api` |
+| GET    | `/artifacts/{id}/download?token=...` | **下载反向代理**：校验 token 后从 OSS 流式转发产物字节（浏览器不接触 `OSS_ENDPOINT`；token 即授权，public route）。**显式偏离** `add-artifacts-api` D1/D2「产物字节不经过 API」：拓扑解耦（OSS 无需浏览器可达）优先于进程带宽，回退路径保留（presign 契约未变，签发者可换回 OSS）— capability `artifacts-api`（change `add-artifact-download-proxy`） |
 | POST   | `/uploads/sts` | 颁发 OSS 上传临时凭证 — **[Deferred]** 输入上传侧（SeaweedFS STS），与下载预签名机制不同；MVP 暂无文件上传流程，留到后续独立变更（见 `add-artifacts-api` design D5） |
 | GET    | `/tasks/{task_id}/cost` | 任务累计成本（按版本展开 + 合计） — capability `task-cost-api` |
 | GET    | `/versions/{version_id}/cost` | 单版本成本（聚合 + 可选明细） — capability `task-cost-api` |
