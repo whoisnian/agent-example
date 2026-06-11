@@ -83,7 +83,13 @@ func (h *EventIngestHandler) Handle(ctx context.Context, d amqp.Delivery) error 
 
 	h.metrics.EventsIngestedTotal.WithLabelValues(in.Kind).Inc()
 	if transitioned {
-		h.metrics.EventStatusTransitionsTotal.Inc()
+		// For kind=title, "transitioned" means the title was applied — keep
+		// the state-machine transition counter honest by counting separately.
+		if in.Kind == "title" {
+			h.metrics.EventTitleAppliedTotal.Inc()
+		} else {
+			h.metrics.EventStatusTransitionsTotal.Inc()
+		}
 	}
 	h.logger.Info("event_ingested",
 		slog.String("task_id", in.TaskID.String()),

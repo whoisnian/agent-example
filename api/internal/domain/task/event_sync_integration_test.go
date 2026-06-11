@@ -15,8 +15,10 @@ import (
 	"errors"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -339,5 +341,179 @@ func TestUnknownStatusPersistOnly(t *testing.T) {
 	})
 	if len(rows) != 1 {
 		t.Errorf("event rows = %d, want 1 (persisted)", len(rows))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// kind=title — semantic title updates (add-semantic-task-title)
+// ---------------------------------------------------------------------------
+
+func titleEvent(taskID, versionID, runID uuid.UUID, seq int64, title string) IngestEventInput {
+	payload, _ := json.Marshal(map[string]string{"title": title})
+	return IngestEventInput{
+		TaskID: taskID, VersionID: versionID, RunID: runID,
+		Seq: seq, Kind: "title", Payload: payload,
+	}
+}
+
+func (s *ingestSuite) taskTitle(t *testing.T, id uuid.UUID) string {
+	t.Helper()
+	row, err := s.queries.GetTaskByID(context.Background(), toPgUUID(id))
+	if err != nil {
+		t.Fatalf("GetTaskByID: %v", err)
+	}
+	return row.Title
+}
+
+func (s *ingestSuite) eventCount(t *testing.T, taskID uuid.UUID) int {
+	t.Helper()
+	rows, err := s.queries.ListEventsAfter(context.Background(), sqlc.ListEventsAfterParams{
+		TaskID: toPgUUID(taskID), ID: 0, Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("ListEventsAfter: %v", err)
+	}
+	return len(rows)
+}
+
+func TestIngestTitleUpdatesTaskTitle(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	applied, err := s.svc.IngestEvent(context.Background(),
+		titleEvent(taskID, versionID, runID, 1, "重构用户认证模块"))
+	if err != nil {
+		t.Fatalf("IngestEvent: %v", err)
+	}
+	if !applied {
+		t.Error("expected applied=true")
+	}
+	if got := s.taskTitle(t, taskID); got != "重构用户认证模块" {
+		t.Errorf("title = %q, want 重构用户认证模块", got)
+	}
+	// Title events never touch the state machine.
+	if got := s.taskStatus(t, taskID); got != "pending" {
+		t.Errorf("task status = %q, want pending (unchanged)", got)
+	}
+	if got := s.eventCount(t, taskID); got != 1 {
+		t.Errorf("event rows = %d, want 1", got)
+	}
+}
+
+func TestIngestTitleAppliesAfterTerminal(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	_, _ = s.svc.IngestEvent(context.Background(), statusEvent(taskID, versionID, runID, 1, "running"))
+	_, _ = s.svc.IngestEvent(context.Background(), statusEvent(taskID, versionID, runID, 2, "succeeded"))
+
+	// Fast run: the title event lands after the task is terminal — still applies.
+	applied, err := s.svc.IngestEvent(context.Background(),
+		titleEvent(taskID, versionID, runID, 3, "Late but welcome"))
+	if err != nil {
+		t.Fatalf("IngestEvent title: %v", err)
+	}
+	if !applied {
+		t.Error("expected applied=true after terminal status")
+	}
+	if got := s.taskTitle(t, taskID); got != "Late but welcome" {
+		t.Errorf("title = %q", got)
+	}
+	if got := s.taskStatus(t, taskID); got != "succeeded" {
+		t.Errorf("task status = %q, want succeeded (unchanged)", got)
+	}
+}
+
+func TestIngestTitleRedeliveryNoop(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	if _, err := s.svc.IngestEvent(context.Background(),
+		titleEvent(taskID, versionID, runID, 1, "First title")); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// Overwrite the title out-of-band, then redeliver the same (run_id, seq):
+	// the duplicate must not re-apply (insert no-op covers the title write).
+	if _, err := s.pool.Exec(context.Background(),
+		`UPDATE tasks SET title = 'manual' WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("manual update: %v", err)
+	}
+	applied, err := s.svc.IngestEvent(context.Background(),
+		titleEvent(taskID, versionID, runID, 1, "First title"))
+	if err != nil {
+		t.Fatalf("redeliver: %v", err)
+	}
+	if applied {
+		t.Error("expected applied=false on redelivery")
+	}
+	if got := s.taskTitle(t, taskID); got != "manual" {
+		t.Errorf("title = %q, want manual (redelivery must not re-apply)", got)
+	}
+	if got := s.eventCount(t, taskID); got != 1 {
+		t.Errorf("event rows = %d, want 1 (dedupe)", got)
+	}
+}
+
+func TestIngestTitleEmptyOrMissingPersistOnly(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	// Whitespace-only payload.title → event row only, no title change.
+	applied, err := s.svc.IngestEvent(context.Background(),
+		titleEvent(taskID, versionID, runID, 1, "   \n\t "))
+	if err != nil {
+		t.Fatalf("whitespace title: %v", err)
+	}
+	if applied {
+		t.Error("expected applied=false for whitespace title")
+	}
+
+	// Missing payload.title entirely.
+	applied, err = s.svc.IngestEvent(context.Background(), IngestEventInput{
+		TaskID: taskID, VersionID: versionID, RunID: runID,
+		Seq: 2, Kind: "title", Payload: json.RawMessage(`{"unexpected":"shape"}`),
+	})
+	if err != nil {
+		t.Fatalf("missing title: %v", err)
+	}
+	if applied {
+		t.Error("expected applied=false for missing title")
+	}
+
+	if got := s.taskTitle(t, taskID); got != "ingest test" {
+		t.Errorf("title = %q, want seeded title unchanged", got)
+	}
+	if got := s.eventCount(t, taskID); got != 2 {
+		t.Errorf("event rows = %d, want 2 (both persisted)", got)
+	}
+}
+
+func TestIngestTitleOversizedTruncated(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	long := strings.Repeat("汉", 100) // 100 runes / 300 bytes
+	applied, err := s.svc.IngestEvent(context.Background(),
+		titleEvent(taskID, versionID, runID, 1, long))
+	if err != nil {
+		t.Fatalf("IngestEvent: %v", err)
+	}
+	if !applied {
+		t.Error("expected applied=true")
+	}
+	got := s.taskTitle(t, taskID)
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("title %q should end with ellipsis", got)
+	}
+	if n := utf8.RuneCountInString(got); n > 64 {
+		t.Errorf("title runes = %d, want <= 64 (including ellipsis)", n)
+	}
+	if n := len(got); n > 200 {
+		t.Errorf("title bytes = %d, want <= 200", n)
 	}
 }

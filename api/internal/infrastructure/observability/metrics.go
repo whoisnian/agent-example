@@ -34,6 +34,7 @@ type Metrics struct {
 	// Event-ingest / status-sync metrics
 	EventsIngestedTotal         *prometheus.CounterVec
 	EventStatusTransitionsTotal prometheus.Counter
+	EventTitleAppliedTotal      prometheus.Counter
 	EventIngestMalformedTotal   prometheus.Counter
 	EventConsumerConnected      prometheus.Gauge
 
@@ -153,6 +154,10 @@ func NewMetrics() *Metrics {
 			Name: "event_status_transitions_total",
 			Help: "Version/task state-machine transitions actually applied from ingested events.",
 		}),
+		EventTitleAppliedTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "event_title_applied_total",
+			Help: "Semantic task titles applied from ingested kind=title events (add-semantic-task-title).",
+		}),
 		EventIngestMalformedTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "event_ingest_malformed_total",
 			Help: "Undecodable / invalid task-event deliveries dead-lettered without requeue.",
@@ -267,6 +272,7 @@ func NewMetrics() *Metrics {
 		m.TasksRolledBackTotal,
 		m.EventsIngestedTotal,
 		m.EventStatusTransitionsTotal,
+		m.EventTitleAppliedTotal,
 		m.EventIngestMalformedTotal,
 		m.EventConsumerConnected,
 		m.CostEventsConsumedTotal,

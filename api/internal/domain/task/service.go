@@ -107,6 +107,10 @@ type activeVersionParams struct {
 	parentVersionID    *uuid.UUID
 	parentArtifactRoot *string
 	versionNo          int32
+	// genTitle marks the execute payload for worker-side semantic title
+	// generation. Only CreateTask's derived-title path sets it (whitelist
+	// semantics) — iterate / rollback rely on the zero value.
+	genTitle bool
 }
 
 // CreateTask implements the happy path in design D2 for "no prior task":
@@ -126,7 +130,8 @@ func (s *Service) CreateTask(ctx context.Context, in CreateInput) (CreateOutput,
 		return CreateOutput{}, err
 	}
 	var title string
-	if strings.TrimSpace(in.Title) == "" {
+	titleDerived := strings.TrimSpace(in.Title) == ""
+	if titleDerived {
 		title = deriveTitle(prompt)
 	} else if title, err = validateTitle(in.Title); err != nil {
 		return CreateOutput{}, err
@@ -182,6 +187,7 @@ func (s *Service) CreateTask(ctx context.Context, in CreateInput) (CreateOutput,
 		parentVersionID:    nil,
 		parentArtifactRoot: nil,
 		versionNo:          1,
+		genTitle:           titleDerived,
 	}, &versionID)
 	if err != nil {
 		return CreateOutput{}, err
@@ -434,6 +440,7 @@ func (s *Service) createActiveVersion(
 		p.taskType, p.prompt, p.lane, p.paramsJSON,
 		p.parentVersionID, p.parentArtifactRoot,
 		s.Clock.Now(), s.DefaultDeadline,
+		p.genTitle,
 	)
 	if err != nil {
 		return activeVersionResult{}, fmt.Errorf("build payload: %w", err)

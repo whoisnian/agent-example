@@ -30,6 +30,11 @@ type statusPayload struct {
 	Status string `json:"status"`
 }
 
+// titlePayload is the shape of a `kind=title` event body (add-semantic-task-title).
+type titlePayload struct {
+	Title string `json:"title"`
+}
+
 // IngestEvent persists one worker event and, for `status`/`error` events,
 // drives the version + task state machine in the same transaction
 // (add-event-ingest-status-sync). It is the authoritative writer of
@@ -50,15 +55,37 @@ func (s *Service) IngestEvent(ctx context.Context, in IngestEventInput) (transit
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := s.Queries.WithTx(tx)
 
-	if err := q.InsertTaskEvent(ctx, sqlc.InsertTaskEventParams{
+	inserted, err := q.InsertTaskEvent(ctx, sqlc.InsertTaskEventParams{
 		TaskID:    toPgUUID(in.TaskID),
 		VersionID: toPgUUID(in.VersionID),
 		RunID:     toPgUUID(in.RunID),
 		Seq:       in.Seq,
 		Kind:      in.Kind,
 		Payload:   []byte(in.Payload),
-	}); err != nil {
+	})
+	if err != nil {
 		return false, fmt.Errorf("insert task_event: %w", err)
+	}
+
+	// `kind=title` updates tasks.title in the same tx (add-semantic-task-title).
+	// A duplicate delivery (inserted == 0) must not re-apply; a fresh event is
+	// last-write-wins with no terminal guard. Not a state-machine transition.
+	if in.Kind == "title" {
+		applied := false
+		if inserted > 0 {
+			var p titlePayload
+			// Malformed/absent payload.title → sanitizer yields "" → skipped;
+			// the event row above is still committed.
+			_ = json.Unmarshal(in.Payload, &p)
+			applied, err = s.ApplyGeneratedTitle(ctx, q, in.TaskID, p.Title)
+			if err != nil {
+				return false, err
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit: %w", err)
+		}
+		return applied, nil
 	}
 
 	// Resolve the version status this event drives, if any. Branch on kind
@@ -103,4 +130,29 @@ func (s *Service) IngestEvent(ctx context.Context, in IngestEventInput) (transit
 		return false, fmt.Errorf("commit: %w", err)
 	}
 	return versionRows > 0 || taskRows > 0, nil
+}
+
+// ApplyGeneratedTitle sanitizes a worker-generated semantic title and persists
+// it on the tasks row through the dedicated query — never an ad-hoc UPDATE
+// (spec: task-event-ingest → "Title events update the task title"). An empty
+// or all-whitespace title is silently skipped. The caller passes the
+// tx-bound queries so the write shares the event-insert transaction.
+func (s *Service) ApplyGeneratedTitle(
+	ctx context.Context,
+	q *sqlc.Queries,
+	taskID uuid.UUID,
+	raw string,
+) (bool, error) {
+	title := sanitizeGeneratedTitle(raw)
+	if title == "" {
+		return false, nil
+	}
+	rows, err := q.UpdateTaskTitle(ctx, sqlc.UpdateTaskTitleParams{
+		ID:    toPgUUID(taskID),
+		Title: title,
+	})
+	if err != nil {
+		return false, fmt.Errorf("update task title: %w", err)
+	}
+	return rows > 0, nil
 }

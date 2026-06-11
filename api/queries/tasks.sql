@@ -79,6 +79,17 @@ WHERE tenant_id = $1
   AND user_id = $2
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text);
 
+-- name: UpdateTaskTitle :execrows
+-- Semantic title write driven by a worker `kind=title` event
+-- (add-semantic-task-title). Last-write-wins by design, no terminal guard —
+-- a fast run may finish before its title event is consumed. Sanitation and
+-- truncation happen in the Domain Service (ApplyGeneratedTitle); this is not
+-- a state-machine transition.
+UPDATE tasks
+SET title = $2,
+    updated_at = now()
+WHERE id = $1;
+
 -- name: UpdateTaskStatus :execrows
 -- Event-ingest state-machine CAS (add-event-ingest-status-sync). Only the
 -- task's current (active) version may drive tasks.status, so the update is

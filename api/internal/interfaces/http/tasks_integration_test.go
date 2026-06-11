@@ -716,3 +716,109 @@ func createAndTerminate(t *testing.T, s *suite, taskType, prompt, terminalStatus
 
 // silence unused import warnings if a helper goes away.
 var _ = fmt.Sprintf
+
+// ---------------------------------------------------------------------------
+// 7.4c — gen_title whitelist flag on execute payloads (add-semantic-task-title)
+// ---------------------------------------------------------------------------
+
+// outboxPayload fetches and decodes the execute payload for a version.
+func outboxPayload(t *testing.T, s *suite, versionID uuid.UUID) map[string]any {
+	t.Helper()
+	var raw []byte
+	if err := s.pool.QueryRow(context.Background(),
+		`SELECT payload FROM outbox WHERE aggregate_id = $1`, versionID).Scan(&raw); err != nil {
+		t.Fatalf("outbox payload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	return payload
+}
+
+func TestCreateGenTitleFlag(t *testing.T) {
+	s := newSuite(t)
+
+	// Derived title (absent in request) → gen_title: true in the execute payload.
+	st, env := postJSON(t, s.ts, "/api/v1/tasks", map[string]any{
+		"task_type": "code-gen",
+		"prompt":    "build a music app",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("derived: status=%d env=%+v", st, env)
+	}
+	var data struct {
+		VersionID uuid.UUID `json:"version_id"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("data unmarshal: %v", err)
+	}
+	if payload := outboxPayload(t, s, data.VersionID); payload["gen_title"] != true {
+		t.Fatalf("derived-title payload gen_title=%v, want true", payload["gen_title"])
+	}
+
+	// Explicit title → the whitelist flag is entirely absent (omitempty).
+	st, env = postJSON(t, s.ts, "/api/v1/tasks", map[string]any{
+		"title":     "my explicit title",
+		"task_type": "code-gen",
+		"prompt":    "build a music app",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("explicit: status=%d env=%+v", st, env)
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("data unmarshal: %v", err)
+	}
+	if payload := outboxPayload(t, s, data.VersionID); payload["gen_title"] != nil {
+		t.Fatalf("explicit-title payload gen_title=%v, want absent", payload["gen_title"])
+	}
+}
+
+// Regression guards for the whitelist semantics: iterate / rollback execute
+// payloads never carry gen_title (absent == false, ARCHITECTURE §5.3) — not a
+// new contract, just pinning the only-create-sets-it invariant.
+func TestIterateAndRollbackPayloadsOmitGenTitle(t *testing.T) {
+	s := newSuite(t)
+	taskID, v1ID := createAndTerminate(t, s, "code-gen", "v1 prompt", "succeeded", "artifacts/v1/")
+
+	st, env := postJSON(t, s.ts, "/api/v1/tasks/"+taskID.String()+"/iterate", map[string]any{
+		"prompt": "iterate v2",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("iterate: status=%d env=%+v", st, env)
+	}
+	var data struct {
+		VersionID uuid.UUID `json:"version_id"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("data unmarshal: %v", err)
+	}
+	if payload := outboxPayload(t, s, data.VersionID); payload["gen_title"] != nil {
+		t.Fatalf("iterate payload gen_title=%v, want absent", payload["gen_title"])
+	}
+
+	// Terminate v2 so rollback-branch passes the mutex, then branch from v1.
+	// status drives the generated is_active column, releasing the mutex.
+	if _, err := s.pool.Exec(context.Background(),
+		`UPDATE task_versions SET status = 'succeeded' WHERE id = $1`,
+		data.VersionID); err != nil {
+		t.Fatalf("terminate v2: %v", err)
+	}
+	if _, err := s.pool.Exec(context.Background(),
+		`UPDATE tasks SET status = 'succeeded' WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("terminate task: %v", err)
+	}
+	st, env = postJSON(t, s.ts, "/api/v1/tasks/"+taskID.String()+"/rollback", map[string]any{
+		"target_version_id": v1ID.String(),
+		"mode":              "branch",
+	})
+	if st != http.StatusCreated {
+		t.Fatalf("rollback: status=%d env=%+v", st, env)
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("data unmarshal: %v", err)
+	}
+	if payload := outboxPayload(t, s, data.VersionID); payload["gen_title"] != nil {
+		t.Fatalf("rollback payload gen_title=%v, want absent", payload["gen_title"])
+	}
+}

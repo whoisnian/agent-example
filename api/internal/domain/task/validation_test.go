@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestValidateTitle(t *testing.T) {
@@ -187,5 +188,46 @@ func TestIsActive(t *testing.T) {
 		if IsActive(s) {
 			t.Fatalf("%s should NOT be active", s)
 		}
+	}
+}
+
+func TestSanitizeGeneratedTitle(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"clean title verbatim", "Refactor the auth module", "Refactor the auth module"},
+		{"trimmed", "  重构用户认证模块  ", "重构用户认证模块"},
+		{"empty", "", ""},
+		{"all whitespace", "   \n\t ", ""},
+		// 64 runes exactly (CJK, 192 bytes) — within both limits, untouched.
+		{"exact 64 runes passes", strings.Repeat("汉", 64), strings.Repeat("汉", 64)},
+		// 65 runes — final string including the ellipsis must stay ≤ 64 runes.
+		{"rune-bound truncation", strings.Repeat("汉", 65), strings.Repeat("汉", 63) + "…"},
+		// ASCII over both limits.
+		{"long ascii", strings.Repeat("x", 300), strings.Repeat("x", 63) + "…"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeGeneratedTitle(tt.in); got != tt.want {
+				t.Fatalf("sanitizeGeneratedTitle(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeGeneratedTitleByteBound(t *testing.T) {
+	// 60 emoji runes ≤ 64 runes but 240 bytes > 200 → byte-bound truncation;
+	// the final string including the ellipsis must stay within both limits.
+	got := sanitizeGeneratedTitle(strings.Repeat("🚀", 60))
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("expected ellipsis suffix, got %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n > 64 {
+		t.Fatalf("runes = %d, want <= 64", n)
+	}
+	if n := len(got); n > 200 {
+		t.Fatalf("bytes = %d, want <= 200", n)
 	}
 }

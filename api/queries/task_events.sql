@@ -1,6 +1,8 @@
--- name: InsertTaskEvent :exec
+-- name: InsertTaskEvent :execrows
 -- Idempotent on (run_id, seq). Duplicate inserts from the Realtime Gateway
--- on Worker retries are silently dropped.
+-- on Worker retries are silently dropped. Returns rows affected so the
+-- title-event branch can skip its side effect on a duplicate delivery
+-- (add-semantic-task-title).
 INSERT INTO task_events (
     task_id, version_id, run_id, seq, kind, payload
 ) VALUES (

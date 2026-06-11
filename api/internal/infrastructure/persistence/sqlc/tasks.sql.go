@@ -294,3 +294,28 @@ func (q *Queries) UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusPara
 	}
 	return result.RowsAffected(), nil
 }
+
+const updateTaskTitle = `-- name: UpdateTaskTitle :execrows
+UPDATE tasks
+SET title = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type UpdateTaskTitleParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Title string      `json:"title"`
+}
+
+// Semantic title write driven by a worker `kind=title` event
+// (add-semantic-task-title). Last-write-wins by design, no terminal guard —
+// a fast run may finish before its title event is consumed. Sanitation and
+// truncation happen in the Domain Service (ApplyGeneratedTitle); this is not
+// a state-machine transition.
+func (q *Queries) UpdateTaskTitle(ctx context.Context, arg UpdateTaskTitleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateTaskTitle, arg.ID, arg.Title)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}

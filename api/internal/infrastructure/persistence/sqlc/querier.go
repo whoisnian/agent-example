@@ -131,8 +131,10 @@ type Querier interface {
 	// `'task.exchange'` explicitly; control writers pass `'task.control'`.
 	InsertOutbox(ctx context.Context, arg InsertOutboxParams) (InsertOutboxRow, error)
 	// Idempotent on (run_id, seq). Duplicate inserts from the Realtime Gateway
-	// on Worker retries are silently dropped.
-	InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) error
+	// on Worker retries are silently dropped. Returns rows affected so the
+	// title-event branch can skip its side effect on a duplicate delivery
+	// (add-semantic-task-title).
+	InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) (int64, error)
 	ListArtifactsByVersion(ctx context.Context, versionID pgtype.UUID) ([]Artifact, error)
 	// All pricing rows in force at now() — the source for GET /api/v1/pricing.
 	// Owner-agnostic; every authenticated caller receives the same body.
@@ -236,6 +238,12 @@ type Querier interface {
 	// gated on current_version = $3 — a stale event for a superseded version is
 	// a no-op. Same terminal + real-transition guards as UpdateVersionStatus.
 	UpdateTaskStatus(ctx context.Context, arg UpdateTaskStatusParams) (int64, error)
+	// Semantic title write driven by a worker `kind=title` event
+	// (add-semantic-task-title). Last-write-wins by design, no terminal guard —
+	// a fast run may finish before its title event is consumed. Sanitation and
+	// truncation happen in the Domain Service (ApplyGeneratedTitle); this is not
+	// a state-machine transition.
+	UpdateTaskTitle(ctx context.Context, arg UpdateTaskTitleParams) (int64, error)
 	// Event-ingest state-machine CAS (add-event-ingest-status-sync). The WHERE
 	// clause carries two guards so the update is safe under at-least-once,
 	// out-of-order delivery:

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -69,6 +70,39 @@ func deriveTitle(prompt string) string {
 		return line
 	}
 	return line[:cut] + ellipsis
+}
+
+// sanitizeGeneratedTitle normalizes a worker-generated semantic title before
+// it is persisted by ApplyGeneratedTitle (add-semantic-task-title): trim, then
+// rune-boundary truncation so the FINAL string — including the appended
+// ellipsis — stays within 64 runes AND 200 bytes (same rule as the worker's
+// sanitizer, so a worker-clean title is never re-truncated). Returns "" when
+// the input is unusable; the caller skips the update.
+func sanitizeGeneratedTitle(raw string) string {
+	t := strings.TrimSpace(raw)
+	if t == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(t) <= deriveTitleMaxRunes && len(t) <= maxTitleLen {
+		return t
+	}
+	const ellipsis = "…" // 1 rune / 3 bytes, counted inside both limits
+	maxRunes := deriveTitleMaxRunes - 1
+	maxBytes := maxTitleLen - len(ellipsis)
+	runes := 0
+	cut := len(t)
+	for i, r := range t {
+		if runes >= maxRunes || i+utf8.RuneLen(r) > maxBytes {
+			cut = i
+			break
+		}
+		runes++
+	}
+	prefix := strings.TrimRightFunc(t[:cut], unicode.IsSpace)
+	if prefix == "" {
+		return ""
+	}
+	return prefix + ellipsis
 }
 
 // validateTaskType enforces the kebab-case slug. Trim is rejected because

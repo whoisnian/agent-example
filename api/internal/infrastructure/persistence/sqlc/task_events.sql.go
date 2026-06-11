@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const insertTaskEvent = `-- name: InsertTaskEvent :exec
+const insertTaskEvent = `-- name: InsertTaskEvent :execrows
 INSERT INTO task_events (
     task_id, version_id, run_id, seq, kind, payload
 ) VALUES (
@@ -30,9 +30,11 @@ type InsertTaskEventParams struct {
 }
 
 // Idempotent on (run_id, seq). Duplicate inserts from the Realtime Gateway
-// on Worker retries are silently dropped.
-func (q *Queries) InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) error {
-	_, err := q.db.Exec(ctx, insertTaskEvent,
+// on Worker retries are silently dropped. Returns rows affected so the
+// title-event branch can skip its side effect on a duplicate delivery
+// (add-semantic-task-title).
+func (q *Queries) InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertTaskEvent,
 		arg.TaskID,
 		arg.VersionID,
 		arg.RunID,
@@ -40,7 +42,10 @@ func (q *Queries) InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams
 		arg.Kind,
 		arg.Payload,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listEventsAfter = `-- name: ListEventsAfter :many

@@ -25,6 +25,10 @@ type ExecutePayload struct {
 	ParentVersionID    *uuid.UUID      `json:"parent_version_id"`
 	ParentArtifactRoot *string         `json:"parent_artifact_root"`
 	DeadlineTS         int64           `json:"deadline_ts"`
+	// GenTitle is a create-only whitelist flag: true only when the create path
+	// derived a placeholder title, asking the worker to generate a semantic one.
+	// Iterate / rollback / republish never set it; absent means false.
+	GenTitle bool `json:"gen_title,omitempty"`
 }
 
 // buildExecutePayload assembles the payload bytes. The function is the single
@@ -41,6 +45,7 @@ func buildExecutePayload(
 	parentArtifactRoot *string,
 	now time.Time,
 	deadline time.Duration,
+	genTitle bool,
 ) ([]byte, error) {
 	pl := ExecutePayload{
 		MsgID:              msgID,
@@ -56,6 +61,7 @@ func buildExecutePayload(
 		ParentVersionID:    parentVersionID,
 		ParentArtifactRoot: parentArtifactRoot,
 		DeadlineTS:         now.Add(deadline).Unix(),
+		GenTitle:           genTitle,
 	}
 	return json.Marshal(pl)
 }
