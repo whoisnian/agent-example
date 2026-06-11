@@ -128,3 +128,26 @@ web 前端界面依旧需要优化：
 1. 2026-06-10-update-web-root-redirect
 2. 2026-06-10-hide-preview-on-task-create
 ```
+
+### 2026-06-11-add-artifact-download-proxy
+```md
+按照 docs/DEVELOPMENT.md 启动服务，通过局域网地址 http://10.0.3.201:5173 访问应用时，产物预览默认加载 http://localhost:9000/worker-bucket/default-tenant/019ebxxx...... 失败
+让 API 提供产物下载的反向代理路由
+用 openspec 发起 add-artifact-download-proxy 提案
+新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
+整理 commit 并提交到远端仓库
+
+/opsx:apply
+/opsx:archive
+```
+
+### 2026-06-12-add-semantic-task-title
+```md
+之前已经通过 openspec/changes/archive/2026-06-10-add-task-title-autogen 配置了标题自动生成，但实现效果较差，需要优化为语义化标题
+用 openspec 发起 add-semantic-task-title 提案
+新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
+整理 commit 并提交到远端仓库
+
+/opsx:apply
+/opsx:archive
+```
