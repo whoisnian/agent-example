@@ -24,8 +24,8 @@
 - **TaskDetail = 对话回合流**：紧凑头部（标题/状态/控制条/完整 TokenBar）+ 滚动主体（每版本一回合 `components/tasks/ConversationTurn`：prompt 经 `useVersionQuery` 懒取静默降级 / 结果行 / 内联产物卡片（整卡点击驱动右栏预览，Download 独立）/ 非当前回合的回滚尾部）+ 底部常驻 iterate composer（活跃禁用给原因，成功清空、失败保留输入）。EventLog 以**助手消息气泡**呈现且只出现在 `task.current_version` 对应回合（status 人话化 / error destructive 配色）。版本树组件已退役，勿复活。
 - **TaskCreate = 聊天式创建入口**：居中问候 + composer 卡片（prompt + task_type chips + Advanced 折叠区 params/lane，Ctrl/Cmd+Enter 提交）。**无 title 输入**——创建请求不发 `title`，由 API 从 prompt 派生（task-write-api）；TaskList 页无页内 New task 按钮，入口只在 SideNav。
 - **Artifact 预览**：右栏 `features/artifacts/ArtifactPreviewPanel` 自带头部工具栏（选中产物标题 · 类型 + Copy / Refresh / 关闭；**全状态渲染**，no-version/loading/error/empty 也要有关闭按钮），按 store 选中态渲染产物列表 + 预览（图片 `<img>` / `text/html` 沙箱 iframe 富渲染（默认）+ 渲染/源码切换 / 文本截断 64KB / 其它仅下载），复用既有 `features/artifacts/` 数据访问，不新增 transport。`PreviewColumn` 是纯容器，不放头部。
-- **iframe 安全红线**：`sandbox="allow-scripts"`，**绝不**加 `allow-same-origin`；frame 内 HTTP 失败跨域不可探测——不要试图检测，恢复手段是工具栏 Refresh（重新 presign 重挂）。Copy 只复制帽内完整文本，截断态禁用并引导下载。
-- CSP（`index.html`）：图片预览依赖 `img-src`、HTML 渲染依赖 `frame-src`（当前均 `https:`）；文本预览经 OSS `fetch`，受 CORS 约束，失败降级为 download-only。`script-src 'self'` / `object-src 'none'` 保持锁定。
+- **iframe 安全红线**：`sandbox="allow-scripts"`，**绝不**加 `allow-same-origin`（frame 跑在 opaque origin；下载响应自带 `CSP: sandbox allow-scripts` 双保险）；frame 内 HTTP 失败不可探测——不要试图检测，恢复手段是工具栏 Refresh（重新 presign 重挂）。Copy 只复制帽内完整文本，截断态禁用并引导下载。
+- CSP（`index.html`）：产物预览**同源**（presign 返回 API 相对路径 `/api/v1/artifacts/{id}/download?token=...`，字节经 API 反向代理，浏览器不接触 OSS）——`img-src 'self' data:`、`frame-src 'self'`、`connect-src 'self' ws: wss:`，**不放行任何 OSS 来源或 `http:`/`https:` 通配**；文本预览是同源 `fetch`，无 CORS 门槛。`script-src 'self'` / `object-src 'none'` 保持锁定。
 
 ## 测试与约定
 

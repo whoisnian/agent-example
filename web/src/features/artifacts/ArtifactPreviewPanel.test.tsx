@@ -142,7 +142,7 @@ describe("ArtifactPreviewPanel", () => {
   it("copies the fully loaded text and confirms", async () => {
     const writeText = stubClipboard();
     server.use(
-      http.get("https://oss.test/download/:id", () => HttpResponse.text("copy me")),
+      http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text("copy me")),
     );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
@@ -165,7 +165,7 @@ describe("ArtifactPreviewPanel", () => {
   it("refuses to copy truncated content (disabled with a reason)", async () => {
     stubClipboard();
     const big = "x".repeat(TEXT_PREVIEW_CAP_BYTES + 100);
-    server.use(http.get("https://oss.test/download/:id", () => HttpResponse.text(big)));
+    server.use(http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text(big)));
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
     await userEvent.click(
@@ -181,7 +181,7 @@ describe("ArtifactPreviewPanel", () => {
   it("disables Copy when the clipboard API is unavailable", async () => {
     // No stubClipboard() — jsdom has no navigator.clipboard.
     server.use(
-      http.get("https://oss.test/download/:id", () => HttpResponse.text("plain")),
+      http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text("plain")),
     );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
@@ -203,7 +203,7 @@ describe("ArtifactPreviewPanel", () => {
           code: 0,
           message: "ok",
           data: {
-            url: `https://oss.test/download/${String(params["id"])}?n=${presignCalls}`,
+            url: `/api/v1/artifacts/${String(params["id"])}/download?n=${presignCalls}`,
             expires_at: "2026-05-26T00:05:00Z",
             bytes: 10,
             mime: "text/markdown",
@@ -212,7 +212,7 @@ describe("ArtifactPreviewPanel", () => {
           trace_id: "t",
         });
       }),
-      http.get("https://oss.test/download/:id", () => HttpResponse.text("v")),
+      http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text("v")),
     );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
@@ -238,7 +238,7 @@ describe("ArtifactPreviewPanel", () => {
     );
 
     const frame = await screen.findByTestId("preview-html-frame");
-    expect(frame.getAttribute("src")).toMatch(/^https:\/\/oss\.test\/download\/art-html/);
+    expect(frame.getAttribute("src")).toMatch(/^\/api\/v1\/artifacts\/art-html\/download/);
     // Scripts may run, but never with the app's origin.
     expect(frame).toHaveAttribute("sandbox", "allow-scripts");
     expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
@@ -247,7 +247,7 @@ describe("ArtifactPreviewPanel", () => {
   it("toggles between rendered and source views without re-selecting", async () => {
     htmlArtifactList();
     server.use(
-      http.get("https://oss.test/download/:id", () =>
+      http.get("http://localhost/api/v1/artifacts/:id/download", () =>
         HttpResponse.text("<html><body>hi</body></html>"),
       ),
     );
@@ -319,7 +319,7 @@ describe("ArtifactPreviewPanel", () => {
     expect(await screen.findByTestId("artifact-list-empty")).toBeInTheDocument();
   });
 
-  it("Download re-mints a fresh URL and navigates to OSS", async () => {
+  it("Download re-mints a fresh URL and navigates to the same-origin download URL", async () => {
     let presignCalls = 0;
     server.use(
       http.get("http://localhost/api/v1/artifacts/:id/presign", ({ params }) => {
@@ -328,7 +328,7 @@ describe("ArtifactPreviewPanel", () => {
           code: 0,
           message: "ok",
           data: {
-            url: `https://oss.test/download/${String(params["id"])}?n=${presignCalls}`,
+            url: `/api/v1/artifacts/${String(params["id"])}/download?n=${presignCalls}`,
             expires_at: "2026-05-26T00:05:00Z",
             bytes: 10,
             mime: "text/markdown",
@@ -345,7 +345,7 @@ describe("ArtifactPreviewPanel", () => {
 
     await userEvent.click(download);
     await waitFor(() => expect(assignSpy).toHaveBeenCalledTimes(1));
-    expect(assignSpy).toHaveBeenLastCalledWith("https://oss.test/download/art-1?n=1");
+    expect(assignSpy).toHaveBeenLastCalledWith("/api/v1/artifacts/art-1/download?n=1");
 
     await userEvent.click(download);
     await waitFor(() => expect(assignSpy).toHaveBeenCalledTimes(2));
@@ -374,7 +374,7 @@ describe("ArtifactPreviewPanel", () => {
 
   it("previews a text artifact inline (fetched + rendered)", async () => {
     server.use(
-      http.get("https://oss.test/download/:id", () =>
+      http.get("http://localhost/api/v1/artifacts/:id/download", () =>
         HttpResponse.text("# Hello from the artifact"),
       ),
     );
@@ -394,7 +394,7 @@ describe("ArtifactPreviewPanel", () => {
   it("truncates a text artifact larger than the byte cap", async () => {
     const big = "x".repeat(TEXT_PREVIEW_CAP_BYTES + 100);
     server.use(
-      http.get("https://oss.test/download/:id", () => HttpResponse.text(big)),
+      http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text(big)),
     );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
@@ -408,9 +408,9 @@ describe("ArtifactPreviewPanel", () => {
     ).toBeInTheDocument();
   });
 
-  it("degrades to a single inline error when the text fetch fails (CORS/network)", async () => {
+  it("degrades to a single inline error when the text fetch fails (network)", async () => {
     server.use(
-      http.get("https://oss.test/download/:id", () =>
+      http.get("http://localhost/api/v1/artifacts/:id/download", () =>
         HttpResponse.error(),
       ),
     );
@@ -469,7 +469,7 @@ describe("ArtifactPreviewPanel", () => {
           code: 0,
           message: "ok",
           data: {
-            url: `https://oss.test/download/${String(params["id"])}?img=1`,
+            url: `/api/v1/artifacts/${String(params["id"])}/download?img=1`,
             expires_at: "2026-05-26T00:05:00Z",
             bytes: 2048,
             mime: "image/png",
@@ -488,6 +488,6 @@ describe("ArtifactPreviewPanel", () => {
     );
     const imgWrap = await screen.findByTestId("artifact-preview-image");
     const img = within(imgWrap).getByRole("img");
-    expect(img).toHaveAttribute("src", "https://oss.test/download/art-img?img=1");
+    expect(img).toHaveAttribute("src", "/api/v1/artifacts/art-img/download?img=1");
   });
 });

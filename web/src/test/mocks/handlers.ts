@@ -196,16 +196,33 @@ export const handlers = [
     }),
   ),
 
-  // Presign: a fake single-object GET URL + advisory expiry + echoed metadata.
+  // Presign: an API-relative signed download URL + advisory expiry + echoed
+  // metadata (add-artifact-download-proxy — `url` is an opaque relative path
+  // served by the API download proxy, never an OSS origin).
   // Tests server.use() the artifact_not_found (404) and internal_error (500) variants.
   http.get("http://localhost/api/v1/artifacts/:id/presign", ({ params }) =>
     ok({
-      url: `https://oss.test/download/${String(params["id"])}?sig=stub`,
+      url: `/api/v1/artifacts/${String(params["id"])}/download?token=stub-token`,
       expires_at: "2026-05-26T00:05:00Z",
       bytes: 12_288,
       mime: "text/markdown",
       sha256: "a".repeat(64),
     }),
+  ),
+
+  // Download proxy: canned bytes with a real Content-Type so text previews can
+  // res.text() the body. Tests server.use() failure variants per case.
+  http.get(
+    "http://localhost/api/v1/artifacts/:id/download",
+    () =>
+      new HttpResponse("# Mock artifact\n\nstub bytes", {
+        status: 200,
+        headers: {
+          "Content-Type": "text/markdown",
+          "Content-Security-Policy": "sandbox allow-scripts",
+          "X-Content-Type-Options": "nosniff",
+        },
+      }),
   ),
 ];
 

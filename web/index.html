@@ -3,11 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- img-src/frame-src: presigned OSS previews — `https:` for real OSS plus
-         the enumerated local-dev OSS origin (docker-compose.dev.yml, http). -->
+    <!-- Artifact previews are same-origin (API download proxy,
+         add-artifact-download-proxy): no OSS origin in img-src/frame-src, and
+         connect-src drops the http:/https: blanket that existed solely for the
+         cross-origin OSS text fetch (ws:/wss: stay for the realtime client). -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss: http: https:; img-src 'self' data: https: http://localhost:9000; frame-src https: http://localhost:9000; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     />
     <title>Agent Task Platform</title>
   </head>

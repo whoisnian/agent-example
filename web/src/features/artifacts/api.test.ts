@@ -51,7 +51,7 @@ describe("getVersionArtifacts", () => {
 describe("getArtifactPresign", () => {
   it("parses the presign result with echoed metadata", async () => {
     const res = await getArtifactPresign("art-1");
-    expect(res.url).toMatch(/^https:\/\/oss\.test\/download\/art-1/);
+    expect(res.url).toMatch(/^\/api\/v1\/artifacts\/art-1\/download\?token=/);
     expect(res.expires_at).toBe("2026-05-26T00:05:00Z");
     expect(res.bytes).toBe(12_288);
     expect(res.mime).toBe("text/markdown");

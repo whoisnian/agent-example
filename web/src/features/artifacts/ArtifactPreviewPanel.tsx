@@ -2,6 +2,7 @@ import type { JSX, ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { Code, Copy, Eye, RefreshCw, X } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { resolveApiUrl } from "@/services/http";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUiStore } from "@/features/ui/store";
@@ -361,14 +362,16 @@ type PreviewState =
   | { phase: "error" };
 
 /**
- * Preview for a single artifact. Images load via <img> from a fresh presigned
- * URL (CSP `img-src`). HTML artifacts in the rendered view load the presigned
- * URL in a sandboxed iframe (`allow-scripts`, never `allow-same-origin`; CSP
- * `frame-src`) — an in-frame HTTP failure is NOT detectable cross-origin, so
- * recovery is the toolbar Refresh, while a presign failure renders an inline
- * error. Text-like artifacts (and the HTML source view) are fetched (subject
- * to OSS CORS) and truncated to TEXT_PREVIEW_CAP_BYTES. Other types are
- * download-only. Presign is re-minted per mount and never cached.
+ * Preview for a single artifact. All loads use the freshly minted same-origin
+ * signed download URL (API download proxy, add-artifact-download-proxy — the
+ * browser never contacts OSS). Images load via <img>. HTML artifacts in the
+ * rendered view load the URL in a sandboxed iframe (`allow-scripts`, never
+ * `allow-same-origin`) — the frame runs in an opaque origin, so an in-frame
+ * HTTP failure is still NOT detectable from the host page and recovery is the
+ * toolbar Refresh, while a presign failure renders an inline error. Text-like
+ * artifacts (and the HTML source view) are fetched same-origin (no CORS gate)
+ * and truncated to TEXT_PREVIEW_CAP_BYTES. Other types are download-only.
+ * Presign is re-minted per mount and never cached.
  */
 function ArtifactPreviewBody({
   artifact,
@@ -408,7 +411,7 @@ function ArtifactPreviewBody({
       try {
         if (htmlRender) {
           // Mount the iframe immediately on a fresh URL; what happens inside
-          // the sandboxed cross-origin frame is not observable from here.
+          // the sandboxed opaque-origin frame is not observable from here.
           setState({ phase: "html", url });
           return;
         }
@@ -416,8 +419,12 @@ function ArtifactPreviewBody({
           setState({ phase: "image", url });
           return;
         }
-        // Text-like: the second hop (fetch of the OSS URL) is subject to CORS.
-        const res = await fetch(url);
+        // Text-like: the second hop is a plain same-origin fetch of the
+        // download proxy URL (no CORS gate since add-artifact-download-proxy).
+        // The presign `url` is an opaque API-relative path — resolve it with
+        // the shared transport base (node's fetch under vitest also rejects
+        // relative URLs).
+        const res = await fetch(resolveApiUrl(url));
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const full = await res.text();
         if (cancelled) return;
@@ -472,7 +479,7 @@ function ArtifactPreviewBody({
   if (state.phase === "image") {
     return (
       <div data-testid="artifact-preview-image" className="overflow-auto p-4">
-        {/* Bytes load straight from OSS; never proxied through the app. */}
+        {/* Bytes come from the same-origin API download proxy via <img>. */}
         <img
           src={state.url}
           alt={`Preview of ${artifact.kind}`}

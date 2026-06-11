@@ -102,6 +102,18 @@ function uuidv4(): string {
 }
 
 /**
+ * Resolve an API-relative path (e.g. the artifact presign action's opaque
+ * download URL) into an absolute URL using the same base resolution as
+ * apiFetch: the configured VITE_API_BASE_URL when set, else the page origin.
+ * For raw `fetch` callers that bypass apiFetch (the artifact text preview).
+ */
+export function resolveApiUrl(path: string): string {
+  if (path.startsWith("http")) return path;
+  const base = getBaseUrl();
+  return base ? `${base}${path}` : new URL(path, window.location.origin).toString();
+}
+
+/**
  * Handle a 401 the way the spec requires: clear the auth token, navigate to
  * `/login`, and let the caller see `code:"unauthenticated"`.
  */
