@@ -619,7 +619,7 @@ GET /api/v1/tasks/{task_id}/cost
   ```json
   {
     "topic": "task:<id>",
-    "kind": "status" | "log" | "step" | "artifact" | "error",
+    "kind": "status" | "log" | "plan" | "step" | "artifact" | "error" | "title",
     "seq": 142,
     "ts": "2026-05-17T12:34:56Z",
     "payload": { ... }
@@ -644,9 +644,11 @@ Routing key: `execute.<task_type>.<lane>`
   "params": {...},
   "parent_version_id": "...|null",
   "parent_artifact_root": "oss://...|null",
-  "deadline_ts": 1715900000
+  "deadline_ts": 1715900000,
+  "gen_title": true
 }
 ```
+> `gen_title` 为 **create-only flag**（缺省 `false`，省略即不生成）：仅当创建任务时标题由服务端派生（占位）才置 `true`，Worker 据此异步生成语义化标题并以 `kind=title` 事件回写。iterate / rollback / resume、retry 等任何 API 重发的 execute 消息**不得**重置该标记；Worker 侧另有 fresh-run 守卫（存在 checkpoint 即跳过）防止重投/接管路径重复生成。
 
 #### 控制信号（API → 特定 Worker）
 Routing key: `task.<task_id>`（topic）。Worker 在 claim run 时按 task 动态 bind 到 `q.task.control.<worker_id>`，run 结束时 unbind；pre-claim 的控制消息无绑定时由 broker 丢弃（best-effort，见 `task-control-api`）。
