@@ -1,8 +1,7 @@
-# web-artifact-preview Specification
+# web-artifact-preview Delta — add-artifact-download-proxy
 
-## Purpose
-三栏布局右栏的 Artifact 预览面板：基于选中版本展示产物列表、空态、按需 presign 下载与轻量预览的 UI 行为契约（数据访问仍由既有 `web-artifacts-views` 提供）。
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: Artifact Preview Panel
 
 The web client SHALL render an Artifact Preview panel as the right column of the three-column shell. The panel MUST be data-anchored to the global UI store's selection pair — `selectedVersionId` plus a **selected-artifact id** — where `selectedVersionId` defaults to the task's `current_version` and both are updated when the user activates an artifact card in a Task Detail conversation turn (see `web-tasks-pages`). Artifact-level selection state MUST live in the global UI store (not panel-internal state) so the conversation turns and the panel share one selection: selecting an artifact row inside the panel writes the same store field. When the store carries a selected artifact, the panel MUST preview that exact artifact; when it carries only a version, the panel lists that version's artifacts with no artifact preview active. The panel MUST consume the existing `features/artifacts/` data access (`useVersionArtifactsQuery`, `useArtifactPresignMutation`) and MUST NOT introduce a new artifacts transport. When no version is selected (e.g. a task with no current version), the panel MUST render a neutral empty/placeholder state, not an error.
@@ -151,4 +150,3 @@ The application's HTML `Content-Security-Policy` (in `web/index.html`) SHALL tre
 
 - **WHEN** the CSP is updated for same-origin previews
 - **THEN** `script-src` MUST remain `'self'` (no inline/eval), `object-src`/`frame-ancestors` MUST remain `'none'`, and no preview iframe may combine `allow-scripts` with `allow-same-origin`
-

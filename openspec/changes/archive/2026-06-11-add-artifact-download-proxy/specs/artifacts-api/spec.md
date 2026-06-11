@@ -1,83 +1,6 @@
-# artifacts-api Specification
+# artifacts-api Delta — add-artifact-download-proxy
 
-## Purpose
-
-HTTP read surface for task artifacts: an owner-scoped per-version metadata list, a short-lived API-signed download URL, and a download proxy route that streams artifact bytes from OSS through the API. The browser never contacts OSS — the API lists metadata (never leaking `oss_key`), mints single-artifact download tokens (ownership enforced at mint time), and proxies object bytes from the bucket to the client. This deliberately reverses the original "the API never proxies object bytes" stance: client reachability of `OSS_ENDPOINT` must never be a deployment constraint (change `add-artifact-download-proxy`). Established by archiving change `add-artifacts-api`; reworked by archiving change `add-artifact-download-proxy`.
-
-## Requirements
-
-### Requirement: Version Artifact List Endpoint
-
-The API SHALL expose `GET /api/v1/versions/{version_id}/artifacts` returning the artifact metadata for one version. The response MUST be HTTP `200` with the unified envelope `{code, message, data, trace_id}` where `data = {version_id, artifacts}`:
-
-- `artifacts` is an array of `{id, kind, mime, bytes, sha256, created_at}` ordered by `created_at ASC, id ASC` (reuses the existing `ListArtifactsByVersion` query). A version with no artifacts yet MUST return `data.artifacts = []` (the empty array, NOT `null`).
-- The response MUST NOT include `oss_key`. The internal storage layout (bucket prefix, object key) is not part of the public contract; callers obtain bytes only through the presign endpoint.
-- `mime`, `bytes`, and `sha256` are nullable in the table and MUST be serialized as `null` when absent, never omitted.
-
-The endpoint MUST be scoped to the caller's `(tenant_id, user_id)`. A `version_id` that does not exist, OR exists but whose owning task belongs to a different owner, MUST return HTTP `404` with envelope `code = "version_not_found"` — never `403`, never reveal existence (mirrors `task-read-api` §"Owner-Scoped Reads Hide Unowned Resources"). The ownership probe is `task_versions.task_id → tasks` joined on `(tenant_id, user_id)`.
-
-Path-param validation runs before ownership resolution: a malformed `{version_id}` UUID MUST return `400 invalid_input` regardless of whether the resource exists or is owned (matches the `parseUUIDParam` short-circuit in `task-read-api`).
-
-`kind` is opaque free-text recorded by the worker (today every produced file is written with `kind = "file"`); the endpoint returns it verbatim and MUST NOT validate or enumerate it.
-
-#### Scenario: List artifacts of an owned version
-- **GIVEN** an owned version with two artifacts (both `kind = "file"`, the value the worker writes)
-- **WHEN** the caller `GET /api/v1/versions/{id}/artifacts`
-- **THEN** the response MUST be HTTP `200` with `data.artifacts` containing two entries ordered by `created_at ASC, id ASC`, and no entry MUST contain an `oss_key` field
-
-#### Scenario: Owned version with no artifacts
-- **GIVEN** an owned version that has produced no artifacts yet (e.g., its run is still queued)
-- **WHEN** the caller `GET /api/v1/versions/{id}/artifacts`
-- **THEN** the response MUST be HTTP `200` with `data.artifacts = []` (the empty array, NOT `null`)
-
-#### Scenario: Nullable metadata is serialized as null
-- **GIVEN** an owned version with an artifact whose `mime`, `bytes`, and `sha256` columns are NULL
-- **WHEN** the caller `GET /api/v1/versions/{id}/artifacts`
-- **THEN** that entry MUST contain `mime: null`, `bytes: null`, `sha256: null` (present-and-null, never omitted)
-
-#### Scenario: Unowned or unknown version returns 404
-- **GIVEN** a `version_id` that either does not exist OR is owned by a different user
-- **WHEN** the caller `GET /api/v1/versions/{id}/artifacts`
-- **THEN** the response MUST be HTTP `404` with `code = "version_not_found"` (never `403`, never differentiate the two cases)
-
-#### Scenario: Malformed version_id returns 400
-- **WHEN** the `{version_id}` path segment is not a valid UUID
-- **THEN** the response MUST be HTTP `400` with `code = "invalid_input"` naming the offending path field
-
-### Requirement: Artifact Presigned Download Endpoint
-
-The API SHALL expose `GET /api/v1/artifacts/{artifact_id}/presign` returning a short-lived, **API-relative signed download URL** so the browser fetches the object through the API's same-origin download proxy route — never directly from OSS. The response MUST be HTTP `200` with `data = {url, expires_at, bytes, mime, sha256}`:
-
-- `url` is the relative URL `/api/v1/artifacts/{artifact_id}/download?token=<jwt>`, where the token is an HS256 JWT signed with `AUTH_JWT_SECRET` carrying `iss = "agent-api"`, `aud = "artifact-download"`, `sub = <artifact_id>`, and `exp` = mint instant + the configured `OSS_PRESIGN_TTL`. Minting is a local signing operation: no OSS/network call occurs on this path. Clients MUST treat `url` as an opaque string.
-- `expires_at` is the RFC3339 UTC instant at which the URL stops working, equal to the time the URL was minted plus the configured TTL. Because JWT `exp` has second granularity, the mint instant MUST be truncated to whole seconds before adding the TTL so that `expires_at` and the token's `exp` denote the same instant (verification leeway may extend acceptance slightly but never shortens it).
-- `bytes`, `mime`, `sha256` echo the artifact row so the client can label the download without a second call; they follow the same nullable serialization as the list endpoint.
-
-The endpoint MUST resolve the artifact, its existence, and ownership in a single query (`GetArtifactWithOwner` joins `artifacts → task_versions → tasks`). An `artifact_id` that does not exist, OR whose owning task belongs to a different owner, MUST return HTTP `404` with envelope `code = "artifact_not_found"` — never `403`, never reveal existence. The signed token MUST grant read access ONLY to the single requested artifact; it MUST NOT be scoped to a prefix, a version, or bucket-wide. Path-param validation runs before ownership resolution: a malformed `{artifact_id}` UUID MUST return `400 invalid_input` regardless of whether the artifact exists.
-
-Minting MUST NOT verify object existence in OSS. A URL minted for an artifact row whose underlying OSS object is missing returns HTTP `200` here and a `502 oss_unavailable` from the download route at fetch time; surfacing that is the client's responsibility.
-
-#### Scenario: Presign an owned artifact
-
-- **GIVEN** an owned artifact with `bytes = 1024`, `mime = "text/markdown"`
-- **WHEN** the caller `GET /api/v1/artifacts/{id}/presign`
-- **THEN** the response MUST be HTTP `200` with `data.url` a relative `/api/v1/artifacts/{id}/download?token=...` URL whose token is scoped to exactly that artifact, `data.expires_at` equal to the mint instant + configured TTL, and `data.bytes = 1024`, `data.mime = "text/markdown"`
-
-#### Scenario: Signed URL is single-artifact scoped
-
-- **GIVEN** an owned artifact
-- **WHEN** the signed download URL is generated
-- **THEN** its token MUST authorize a GET of only that artifact (`sub` pins the artifact id), MUST carry `aud = "artifact-download"`, and MUST expire after the configured TTL
-
-#### Scenario: Unowned or unknown artifact returns 404
-
-- **GIVEN** an `artifact_id` that does not exist OR is owned by a different user
-- **WHEN** the caller `GET /api/v1/artifacts/{id}/presign`
-- **THEN** the response MUST be HTTP `404` with `code = "artifact_not_found"` (never `403`, never differentiate the two cases)
-
-#### Scenario: Malformed artifact_id returns 400
-
-- **WHEN** the `{artifact_id}` path segment is not a valid UUID
-- **THEN** the response MUST be HTTP `400` with `code = "invalid_input"` naming the offending path field
+## ADDED Requirements
 
 ### Requirement: Artifact Download Proxy Endpoint
 
@@ -140,6 +63,43 @@ A stream failure after headers are sent cannot produce an error envelope; the ha
 
 - **WHEN** any request hits the download route
 - **THEN** the access log entry MUST NOT contain the query string or token value (path and artifact id only)
+
+## MODIFIED Requirements
+
+### Requirement: Artifact Presigned Download Endpoint
+
+The API SHALL expose `GET /api/v1/artifacts/{artifact_id}/presign` returning a short-lived, **API-relative signed download URL** so the browser fetches the object through the API's same-origin download proxy route — never directly from OSS. The response MUST be HTTP `200` with `data = {url, expires_at, bytes, mime, sha256}`:
+
+- `url` is the relative URL `/api/v1/artifacts/{artifact_id}/download?token=<jwt>`, where the token is an HS256 JWT signed with `AUTH_JWT_SECRET` carrying `iss = "agent-api"`, `aud = "artifact-download"`, `sub = <artifact_id>`, and `exp` = mint instant + the configured `OSS_PRESIGN_TTL`. Minting is a local signing operation: no OSS/network call occurs on this path. Clients MUST treat `url` as an opaque string.
+- `expires_at` is the RFC3339 UTC instant at which the URL stops working, equal to the time the URL was minted plus the configured TTL. Because JWT `exp` has second granularity, the mint instant MUST be truncated to whole seconds before adding the TTL so that `expires_at` and the token's `exp` denote the same instant (verification leeway may extend acceptance slightly but never shortens it).
+- `bytes`, `mime`, `sha256` echo the artifact row so the client can label the download without a second call; they follow the same nullable serialization as the list endpoint.
+
+The endpoint MUST resolve the artifact, its existence, and ownership in a single query (`GetArtifactWithOwner` joins `artifacts → task_versions → tasks`). An `artifact_id` that does not exist, OR whose owning task belongs to a different owner, MUST return HTTP `404` with envelope `code = "artifact_not_found"` — never `403`, never reveal existence. The signed token MUST grant read access ONLY to the single requested artifact; it MUST NOT be scoped to a prefix, a version, or bucket-wide. Path-param validation runs before ownership resolution: a malformed `{artifact_id}` UUID MUST return `400 invalid_input` regardless of whether the artifact exists.
+
+Minting MUST NOT verify object existence in OSS. A URL minted for an artifact row whose underlying OSS object is missing returns HTTP `200` here and a `502 oss_unavailable` from the download route at fetch time; surfacing that is the client's responsibility.
+
+#### Scenario: Presign an owned artifact
+
+- **GIVEN** an owned artifact with `bytes = 1024`, `mime = "text/markdown"`
+- **WHEN** the caller `GET /api/v1/artifacts/{id}/presign`
+- **THEN** the response MUST be HTTP `200` with `data.url` a relative `/api/v1/artifacts/{id}/download?token=...` URL whose token is scoped to exactly that artifact, `data.expires_at` equal to the mint instant + configured TTL, and `data.bytes = 1024`, `data.mime = "text/markdown"`
+
+#### Scenario: Signed URL is single-artifact scoped
+
+- **GIVEN** an owned artifact
+- **WHEN** the signed download URL is generated
+- **THEN** its token MUST authorize a GET of only that artifact (`sub` pins the artifact id), MUST carry `aud = "artifact-download"`, and MUST expire after the configured TTL
+
+#### Scenario: Unowned or unknown artifact returns 404
+
+- **GIVEN** an `artifact_id` that does not exist OR is owned by a different user
+- **WHEN** the caller `GET /api/v1/artifacts/{id}/presign`
+- **THEN** the response MUST be HTTP `404` with `code = "artifact_not_found"` (never `403`, never differentiate the two cases)
+
+#### Scenario: Malformed artifact_id returns 400
+
+- **WHEN** the `{artifact_id}` path segment is not a valid UUID
+- **THEN** the response MUST be HTTP `400` with `code = "invalid_input"` naming the offending path field
 
 ### Requirement: API OSS Client Configuration
 

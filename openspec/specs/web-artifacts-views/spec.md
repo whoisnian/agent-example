@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The `features/artifacts/` slice of the web client provides typed, owner-scoped access to a version's produced artifacts. It exposes the per-version artifact list (`GET /api/v1/versions/{version_id}/artifacts`) through the shared `apiFetch` + React Query read pattern, and an on-demand single-object presign action (`GET /api/v1/artifacts/{artifact_id}/presign`) modeled as a non-cached mutation that re-mints a short-lived OSS URL on each invocation. The slice keeps error surfacing single (no double toasts) and preserves the backend's serialization contract (server ordering, present-and-nullable metadata, opaque `kind`). This capability was established by archiving the `add-web-artifacts-views` change.
+The `features/artifacts/` slice of the web client provides typed, owner-scoped access to a version's produced artifacts. It exposes the per-version artifact list (`GET /api/v1/versions/{version_id}/artifacts`) through the shared `apiFetch` + React Query read pattern, and an on-demand single-artifact presign action (`GET /api/v1/artifacts/{artifact_id}/presign`) modeled as a non-cached mutation that re-mints a short-lived API-signed relative download URL (opaque to the client; served by the API download proxy since `add-artifact-download-proxy`) on each invocation. The slice keeps error surfacing single (no double toasts) and preserves the backend's serialization contract (server ordering, present-and-nullable metadata, opaque `kind`). This capability was established by archiving the `add-web-artifacts-views` change.
 
 ## Requirements
 
