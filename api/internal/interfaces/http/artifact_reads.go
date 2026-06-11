@@ -2,30 +2,39 @@ package httpapi
 
 import (
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
 	apptask "github.com/whoisnian/agent-example/api/internal/application/task"
+	"github.com/whoisnian/agent-example/api/internal/auth"
 	taskdomain "github.com/whoisnian/agent-example/api/internal/domain/task"
 	"github.com/whoisnian/agent-example/api/internal/infrastructure/observability"
 )
 
-// ArtifactHandlers groups dependencies for the two artifact-read endpoints.
+// ArtifactHandlers groups dependencies for the artifact-read endpoints.
 // Mirrors TaskReadHandlers / TaskCostHandlers — owner-scoped 404, unified
-// envelope — and carries Metrics because presign is an external (OSS) call.
+// envelope — and carries Metrics because the download proxy is an external
+// (OSS) call. Tokens verifies the `?token=` download grants minted by the
+// presign endpoint (the download route is public to the Bearer middleware:
+// <img>/<iframe>/navigation cannot send an Authorization header).
 type ArtifactHandlers struct {
 	App     *apptask.ArtifactReadService
 	Logger  *slog.Logger
 	Metrics *observability.Metrics
+	Tokens  *auth.DownloadVerifier
 }
 
-// Register mounts the two owner-scoped GET routes. The `:version_id` /
-// `:artifact_id` wildcards stay consistent with the other read routes.
+// Register mounts the artifact GET routes. The `:version_id` / `:artifact_id`
+// wildcards stay consistent with the other read routes; the download route's
+// template string must match its publicRoutes entry exactly.
 func (h *ArtifactHandlers) Register(r *gin.RouterGroup) {
 	r.GET("/versions/:version_id/artifacts", h.listVersionArtifacts)
 	r.GET("/artifacts/:artifact_id/presign", h.presignArtifact)
+	r.GET("/artifacts/:artifact_id/download", h.downloadArtifact)
 }
 
 // listVersionArtifacts handles GET /api/v1/versions/:version_id/artifacts.
@@ -70,6 +79,78 @@ func (h *ArtifactHandlers) presignArtifact(c *gin.Context) {
 	}
 	h.Metrics.OSSPresignTotal.WithLabelValues("success").Inc()
 	OK(c, res)
+}
+
+// downloadArtifact handles GET /api/v1/artifacts/:artifact_id/download — the
+// reverse proxy that streams artifact bytes from OSS through the API
+// (add-artifact-download-proxy; the browser never reaches OSS_ENDPOINT). The
+// route bypasses the Bearer middleware; its sole authentication is the
+// `?token=` download grant, verified here. Every token failure collapses to a
+// single 403 invalid_download_token (non-enumerable, mirroring S3's 403 on an
+// expired presigned URL). Ownership is NOT re-checked: the token was minted
+// owner-scoped and possession is the grant. The query string (token) must
+// never be logged on this route — the access log records only the path.
+func (h *ArtifactHandlers) downloadArtifact(c *gin.Context) {
+	artifactID, ok := parseUUIDParam(c, "artifact_id")
+	if !ok {
+		return
+	}
+	if err := h.Tokens.Parse(c.Query("token"), artifactID); err != nil {
+		h.Metrics.OSSDownloadTotal.WithLabelValues("token_invalid").Inc()
+		Error(c, http.StatusForbidden, "invalid_download_token", "invalid or expired download token")
+		return
+	}
+
+	obj, err := h.App.OpenArtifactObject(c.Request.Context(), artifactID)
+	if err != nil {
+		if errors.Is(err, taskdomain.ErrArtifactNotFound) {
+			h.Metrics.OSSDownloadTotal.WithLabelValues("not_found").Inc()
+		} else {
+			h.Metrics.OSSDownloadTotal.WithLabelValues("oss_error").Inc()
+		}
+		h.handleError(c, err)
+		return
+	}
+	defer func() { _ = obj.Body.Close() }()
+
+	// DB metadata is authoritative for the content type; the OSS-reported one
+	// is never trusted. CSP `sandbox` forces an opaque origin even on top-level
+	// navigation so stored HTML cannot script against the API origin
+	// (allow-scripts keeps the sandboxed-iframe rendered preview working);
+	// Referrer-Policy forecloses token exfiltration via document-controlled
+	// referrer overrides.
+	mime := "application/octet-stream"
+	if obj.Mime != nil && *obj.Mime != "" {
+		mime = *obj.Mime
+	}
+	hdr := c.Writer.Header()
+	hdr.Set("Content-Type", mime)
+	if obj.ContentLength != nil { // nil = unknown; 0 is a legitimate empty object
+		hdr.Set("Content-Length", strconv.FormatInt(*obj.ContentLength, 10))
+	}
+	hdr.Set("Content-Security-Policy", "sandbox allow-scripts")
+	hdr.Set("Referrer-Policy", "no-referrer")
+	hdr.Set("X-Content-Type-Options", "nosniff")
+	hdr.Set("Cache-Control", "private, no-store")
+	c.Status(http.StatusOK)
+
+	n, err := io.Copy(c.Writer, obj.Body)
+	h.Metrics.OSSDownloadBytes.Add(float64(n))
+	if err != nil {
+		// Headers (and n bytes) are already out — no envelope is possible.
+		// Cut the connection via http.ErrAbortHandler (re-panicked by the
+		// recovery middleware) so the client never mistakes a truncated body
+		// for a clean EOF.
+		h.Metrics.OSSDownloadTotal.WithLabelValues("stream_aborted").Inc()
+		h.Logger.LogAttrs(c.Request.Context(), slog.LevelError, "artifact_download_stream_aborted",
+			slog.String("artifact_id", artifactID.String()),
+			slog.Int64("bytes_sent", n),
+			slog.String("err", err.Error()),
+			slog.String("trace_id", observability.TraceIDFromContext(c.Request.Context())),
+		)
+		panic(http.ErrAbortHandler)
+	}
+	h.Metrics.OSSDownloadTotal.WithLabelValues("success").Inc()
 }
 
 // handleError mirrors the other read handlers. Logs the offending id (never

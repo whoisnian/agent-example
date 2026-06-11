@@ -30,6 +30,12 @@ var ErrVersionNotFound = errors.New("version not found")
 // artifact_not_found (never 403, never reveal existence — add-artifacts-api).
 var ErrArtifactNotFound = errors.New("artifact not found")
 
+// ErrOSSUnavailable signals that the download proxy failed to read an
+// artifact's object from the OSS (connection error, NoSuchKey, …). Maps to
+// 502 oss_unavailable (add-artifact-download-proxy). The wrapped cause carries
+// the store detail for logs only — it must never reach the response body.
+var ErrOSSUnavailable = errors.New("oss unavailable")
+
 // ErrInvalidState signals that a control request (pause / resume / cancel)
 // was rejected because the task's current `tasks.status` doesn't admit the
 // requested transition (add-task-control-api). The wrapped error message

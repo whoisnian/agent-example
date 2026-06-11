@@ -59,7 +59,7 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 | `OSS_ACCESS_KEY_SECRET` | — | OSS access key secret，**必填**（注意是 `..._KEY_SECRET`，与 worker 一致，非 AWS 习惯的 `..._SECRET_ACCESS_KEY`） |
 | `OSS_REGION` | `us-east-1` | 签名用 region |
 | `OSS_USE_PATH_STYLE` | `true` | path-style 寻址（SeaweedFS/MinIO 必须为 true） |
-| `OSS_PRESIGN_TTL` | `5m` | 产物下载预签名 URL 有效期；泄露的链接在此之后过期 |
+| `OSS_PRESIGN_TTL` | `5m` | 产物下载 token（API 本地签发的 HS256 JWT）有效期；泄露的链接在此之后过期 |
 | `WS_ALLOWED_ORIGINS` | 空（同源） | 实时网关握手的 `Origin` 允许列表（逗号分隔），关闭 CSWSH；空表示仅允许同源。dev SPA 形如 `http://localhost:5173` |
 | `WS_SEND_BUFFER` | 128 | 每连接出站缓冲帧数；满则驱逐慢客户端（不阻塞 fan-out），客户端重连并按 `seq` 回补 |
 | `WS_READ_DEADLINE` | `60s` | 服务端读超时，**必须 > 客户端 25s 心跳间隔**；超时未收到任何帧的半开连接被回收 |
@@ -68,7 +68,7 @@ curl localhost:8080/metrics   # Prometheus 文本格式
 | `WS_MAX_SUBSCRIBE_TOPICS` | 32 | 单个 `subscribe` 帧 `topics` 数组上限（每个 topic = 一次归属探测，防止放大 DB 查询） |
 | `WS_FANOUT_PREFETCH` | 32 | 每实例 fan-out 消费者的 AMQP prefetch |
 
-> 上述四个 `OSS_*` 必填项与 worker 共用同一套配置（见 `worker/worker/core/config.py`）；API 仅用它们签发产物下载的预签名 URL（不经 API 传输字节）。缺失任一项会在启动时 fail-fast（与 `DATABASE_URL` 同路径），`api migrate` 子命令例外（只需 `DATABASE_URL`）。凭据不会写入日志或响应。
+> 上述四个 `OSS_*` 必填项与 worker 共用同一套配置（见 `worker/worker/core/config.py`）；API 用它们经下载反向代理（`GET /api/v1/artifacts/{id}/download?token=...`）从 OSS 流式转发产物字节——下载 URL 由 API 用 `AUTH_JWT_SECRET` 本地签发（相对路径，单产物作用域），浏览器从不直连 `OSS_ENDPOINT`（change `add-artifact-download-proxy`）。缺失任一项会在启动时 fail-fast（与 `DATABASE_URL` 同路径），`api migrate` 子命令例外（只需 `DATABASE_URL`）。凭据不会写入日志或响应；该路由的 access log 不记录 query（token）。
 >
 > 本地 `make run` 对接 `docker-compose.dev.yml` 的 seaweedfs：`OSS_ENDPOINT=http://localhost:9000 OSS_BUCKET=worker-bucket OSS_ACCESS_KEY_ID=dev-access-key OSS_ACCESS_KEY_SECRET=dev-secret-key`（仅 dev 凭据）。
 
@@ -276,7 +276,7 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 
 ## 集成测试
 
-`make test-integration` 用 testcontainers 启 PostgreSQL 18.4（artifacts 另起 MinIO、realtime-gateway 另起 RabbitMQ），跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量、产物 presign 字节往返、WS fan-out 投递 / 归属隔离 / 连接断开后重声明等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。
+`make test-integration` 用 testcontainers 启 PostgreSQL 18.4（artifacts 另起 MinIO、realtime-gateway 另起 RabbitMQ），跑 schema 结构断言、迁移 up→down→up 圈、互斥并发回归、`(run_id, seq)` 幂等性、pricing 不变量、产物 presign → 下载代理字节往返（含对象缺失 502）、WS fan-out 投递 / 归属隔离 / 连接断开后重声明等。需要本机 Docker。CI 仅在 `main` 分支推送时触发 `integration-tests` job，PR 默认 lane 不跑（也不按时间调度执行）。
 
 ## 目录结构
 

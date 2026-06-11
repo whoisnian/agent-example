@@ -26,7 +26,14 @@ func (s *ArtifactReadService) ListVersionArtifacts(ctx context.Context, tenantID
 	return s.Domain.ListVersionArtifacts(ctx, domain.Owner{TenantID: tenantID, UserID: userID}, versionID)
 }
 
-// PresignArtifact returns a presigned download URL for an owned artifact.
+// PresignArtifact returns an API-signed download URL for an owned artifact.
 func (s *ArtifactReadService) PresignArtifact(ctx context.Context, tenantID, userID, artifactID uuid.UUID) (domain.PresignResult, error) {
 	return s.Domain.PresignArtifact(ctx, domain.Owner{TenantID: tenantID, UserID: userID}, artifactID)
+}
+
+// OpenArtifactObject opens an artifact's object stream for the download proxy.
+// Deliberately no tenant/user identity: the verified download token is the
+// authorization (ownership was enforced when the URL was minted).
+func (s *ArtifactReadService) OpenArtifactObject(ctx context.Context, artifactID uuid.UUID) (domain.ArtifactObject, error) {
+	return s.Domain.OpenArtifactObject(ctx, artifactID)
 }

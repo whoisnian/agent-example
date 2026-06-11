@@ -60,6 +60,13 @@ func MapError(err error) (status int, code, message string) {
 		return http.StatusNotFound, "version_not_found", "version not found"
 	case errors.Is(err, taskdomain.ErrArtifactNotFound):
 		return http.StatusNotFound, "artifact_not_found", "artifact not found"
+	case errors.Is(err, taskdomain.ErrOSSUnavailable):
+		// add-artifact-download-proxy: a failed object read on the download
+		// proxy path. 502 (not 503): the upstream object store failed, not this
+		// API. kindToHTTP has no 502 kind on purpose — this sentinel mapping is
+		// the only way to produce it. The message stays generic; the wrapped
+		// cause is for logs only.
+		return http.StatusBadGateway, "oss_unavailable", "object storage unavailable"
 	case errors.Is(err, taskdomain.ErrInvalidState):
 		// add-task-control-api §"State-Machine Preconditions": the wrapped
 		// error message carries the current status verbatim so the front-end

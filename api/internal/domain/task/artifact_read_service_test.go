@@ -3,6 +3,8 @@ package task
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,19 +45,36 @@ func (f *fakeArtifactQuerier) GetArtifactWithOwner(context.Context, pgtype.UUID)
 	return f.artifact, f.artifErr
 }
 
-// fakePresigner records the key it was asked to sign and returns canned values.
+// fakePresigner records the artifact id it was asked to sign and returns
+// canned values.
 type fakePresigner struct {
 	called  bool
-	gotKey  string
+	gotID   uuid.UUID
 	url     string
 	expires time.Time
 	err     error
 }
 
-func (p *fakePresigner) PresignGet(_ context.Context, key string) (string, time.Time, error) {
+func (p *fakePresigner) SignDownload(artifactID uuid.UUID) (string, time.Time, error) {
 	p.called = true
-	p.gotKey = key
+	p.gotID = artifactID
 	return p.url, p.expires, p.err
+}
+
+// fakeObjectStore records the key it was asked to open and returns a canned
+// body / length / error.
+type fakeObjectStore struct {
+	called bool
+	gotKey string
+	body   io.ReadCloser
+	length *int64
+	err    error
+}
+
+func (s *fakeObjectStore) GetObject(_ context.Context, key string) (io.ReadCloser, *int64, error) {
+	s.called = true
+	s.gotKey = key
+	return s.body, s.length, s.err
 }
 
 func pgUUID(u uuid.UUID) pgtype.UUID { return pgtype.UUID{Bytes: u, Valid: true} }
@@ -87,7 +106,7 @@ func TestListVersionArtifacts_OwnedOrderingAndNullables(t *testing.T) {
 			{ID: pgUUID(a2), Kind: "file", Mime: nil, Bytes: nil, Sha256: nil},
 		},
 	}
-	svc := NewArtifactReadService(q, &fakePresigner{})
+	svc := NewArtifactReadService(q, &fakePresigner{}, &fakeObjectStore{})
 
 	out, err := svc.ListVersionArtifacts(context.Background(), testOwner, versionID)
 	if err != nil {
@@ -122,7 +141,7 @@ func TestListVersionArtifacts_EmptyIsNonNilSlice(t *testing.T) {
 		task:      ownedTaskRow(),
 		artifacts: nil, // no rows
 	}
-	svc := NewArtifactReadService(q, &fakePresigner{})
+	svc := NewArtifactReadService(q, &fakePresigner{}, &fakeObjectStore{})
 
 	out, err := svc.ListVersionArtifacts(context.Background(), testOwner, versionID)
 	if err != nil {
@@ -139,7 +158,7 @@ func TestListVersionArtifacts_EmptyIsNonNilSlice(t *testing.T) {
 func TestListVersionArtifacts_UnknownVersion404(t *testing.T) {
 	t.Parallel()
 	q := &fakeArtifactQuerier{versionErr: pgx.ErrNoRows}
-	svc := NewArtifactReadService(q, &fakePresigner{})
+	svc := NewArtifactReadService(q, &fakePresigner{}, &fakeObjectStore{})
 
 	_, err := svc.ListVersionArtifacts(context.Background(), testOwner, uuid.New())
 	if !errors.Is(err, ErrVersionNotFound) {
@@ -155,7 +174,7 @@ func TestListVersionArtifacts_UnownedVersion404(t *testing.T) {
 		// task owned by a DIFFERENT user
 		task: sqlc.Task{TenantID: pgUUID(testTenant), UserID: pgUUID(uuid.New())},
 	}
-	svc := NewArtifactReadService(q, &fakePresigner{})
+	svc := NewArtifactReadService(q, &fakePresigner{}, &fakeObjectStore{})
 
 	_, err := svc.ListVersionArtifacts(context.Background(), testOwner, versionID)
 	if !errors.Is(err, ErrVersionNotFound) {
@@ -163,10 +182,11 @@ func TestListVersionArtifacts_UnownedVersion404(t *testing.T) {
 	}
 }
 
-func TestPresignArtifact_OwnedCallsOSSWithRowKey(t *testing.T) {
+func TestPresignArtifact_OwnedSignsArtifactID(t *testing.T) {
 	t.Parallel()
+	artifactID := uuid.New()
 	exp := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
-	pre := &fakePresigner{url: "https://oss.example/t/v/file/index.md?X-Amz-Signature=abc", expires: exp}
+	pre := &fakePresigner{url: "/api/v1/artifacts/" + artifactID.String() + "/download?token=abc", expires: exp}
 	q := &fakeArtifactQuerier{
 		artifact: sqlc.GetArtifactWithOwnerRow{
 			OssKey:   "t/v/file/index.md",
@@ -177,14 +197,14 @@ func TestPresignArtifact_OwnedCallsOSSWithRowKey(t *testing.T) {
 			UserID:   pgUUID(testUser),
 		},
 	}
-	svc := NewArtifactReadService(q, pre)
+	svc := NewArtifactReadService(q, pre, &fakeObjectStore{})
 
-	out, err := svc.PresignArtifact(context.Background(), testOwner, uuid.New())
+	out, err := svc.PresignArtifact(context.Background(), testOwner, artifactID)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if !pre.called || pre.gotKey != "t/v/file/index.md" {
-		t.Errorf("presigner called with key=%q (called=%v), want the row's oss_key", pre.gotKey, pre.called)
+	if !pre.called || pre.gotID != artifactID {
+		t.Errorf("signer called with id=%v (called=%v), want the requested artifact id", pre.gotID, pre.called)
 	}
 	if out.URL != pre.url || !out.ExpiresAt.Equal(exp) {
 		t.Errorf("URL/ExpiresAt not passed through: %q / %v", out.URL, out.ExpiresAt)
@@ -198,7 +218,7 @@ func TestPresignArtifact_UnknownArtifact404(t *testing.T) {
 	t.Parallel()
 	pre := &fakePresigner{}
 	q := &fakeArtifactQuerier{artifErr: pgx.ErrNoRows}
-	svc := NewArtifactReadService(q, pre)
+	svc := NewArtifactReadService(q, pre, &fakeObjectStore{})
 
 	_, err := svc.PresignArtifact(context.Background(), testOwner, uuid.New())
 	if !errors.Is(err, ErrArtifactNotFound) {
@@ -219,7 +239,7 @@ func TestPresignArtifact_UnownedArtifact404(t *testing.T) {
 			UserID:   pgUUID(uuid.New()), // different user
 		},
 	}
-	svc := NewArtifactReadService(q, pre)
+	svc := NewArtifactReadService(q, pre, &fakeObjectStore{})
 
 	_, err := svc.PresignArtifact(context.Background(), testOwner, uuid.New())
 	if !errors.Is(err, ErrArtifactNotFound) {
@@ -240,10 +260,79 @@ func TestPresignArtifact_PresignerErrorPropagates(t *testing.T) {
 			UserID:   pgUUID(testUser),
 		},
 	}
-	svc := NewArtifactReadService(q, pre)
+	svc := NewArtifactReadService(q, pre, &fakeObjectStore{})
 
 	_, err := svc.PresignArtifact(context.Background(), testOwner, uuid.New())
 	if err == nil || errors.Is(err, ErrArtifactNotFound) {
 		t.Errorf("err=%v, want a non-404 error that maps to 500", err)
+	}
+}
+
+func TestOpenArtifactObject_StreamsRowKey(t *testing.T) {
+	t.Parallel()
+	store := &fakeObjectStore{
+		body:   io.NopCloser(strings.NewReader("hello")),
+		length: i64ptr(5),
+	}
+	q := &fakeArtifactQuerier{
+		artifact: sqlc.GetArtifactWithOwnerRow{
+			OssKey:   "t/v/file/index.html",
+			Mime:     strptr("text/html"),
+			TenantID: pgUUID(testTenant),
+			UserID:   pgUUID(testUser),
+		},
+	}
+	svc := NewArtifactReadService(q, &fakePresigner{}, store)
+
+	obj, err := svc.OpenArtifactObject(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	defer obj.Body.Close()
+	if !store.called || store.gotKey != "t/v/file/index.html" {
+		t.Errorf("store called with key=%q (called=%v), want the row's oss_key", store.gotKey, store.called)
+	}
+	if obj.ContentLength == nil || *obj.ContentLength != 5 {
+		t.Errorf("ContentLength=%v, want 5", obj.ContentLength)
+	}
+	if obj.Mime == nil || *obj.Mime != "text/html" {
+		t.Errorf("Mime=%v, want text/html (DB metadata, not the store's)", obj.Mime)
+	}
+	got, _ := io.ReadAll(obj.Body)
+	if string(got) != "hello" {
+		t.Errorf("body=%q, want hello", got)
+	}
+}
+
+func TestOpenArtifactObject_MissingRow404(t *testing.T) {
+	t.Parallel()
+	store := &fakeObjectStore{}
+	q := &fakeArtifactQuerier{artifErr: pgx.ErrNoRows}
+	svc := NewArtifactReadService(q, &fakePresigner{}, store)
+
+	_, err := svc.OpenArtifactObject(context.Background(), uuid.New())
+	if !errors.Is(err, ErrArtifactNotFound) {
+		t.Errorf("err=%v, want ErrArtifactNotFound", err)
+	}
+	if store.called {
+		t.Error("store must NOT be called for a missing artifact row")
+	}
+}
+
+func TestOpenArtifactObject_StoreFailureMapsToOSSUnavailable(t *testing.T) {
+	t.Parallel()
+	store := &fakeObjectStore{err: errors.New("connection refused: 10.0.0.9:9000/secret-bucket")}
+	q := &fakeArtifactQuerier{
+		artifact: sqlc.GetArtifactWithOwnerRow{
+			OssKey:   "t/v/file/index.md",
+			TenantID: pgUUID(testTenant),
+			UserID:   pgUUID(testUser),
+		},
+	}
+	svc := NewArtifactReadService(q, &fakePresigner{}, store)
+
+	_, err := svc.OpenArtifactObject(context.Background(), uuid.New())
+	if !errors.Is(err, ErrOSSUnavailable) {
+		t.Errorf("err=%v, want ErrOSSUnavailable", err)
 	}
 }

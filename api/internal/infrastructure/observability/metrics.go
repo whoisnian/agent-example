@@ -48,9 +48,13 @@ type Metrics struct {
 	// Task control metrics (add-task-control-api §"Observability")
 	TaskControlRequestsTotal *prometheus.CounterVec
 
-	// Artifacts-api metrics (add-artifacts-api §D8) — presign is an external
-	// (OSS) call, so it gets a counter for visibility into OSS-down / surges.
-	OSSPresignTotal *prometheus.CounterVec
+	// Artifacts-api metrics (add-artifacts-api §D8, reworked by
+	// add-artifact-download-proxy). Presign is now a local signing operation;
+	// the download proxy route is the external (OSS) call and gets its own
+	// outcome counter plus a bytes-streamed counter.
+	OSSPresignTotal  *prometheus.CounterVec
+	OSSDownloadTotal *prometheus.CounterVec
+	OSSDownloadBytes prometheus.Counter
 
 	// Realtime-gateway metrics (add-realtime-gateway §"Realtime Observability").
 	WSConnectionsActive       prometheus.Gauge
@@ -201,10 +205,21 @@ func NewMetrics() *Metrics {
 		OSSPresignTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "oss_presign_total",
-				Help: "Artifact presign attempts that reached the OSS presigner. outcome ∈ {success,error}; a 404 (missing/unowned artifact) never reaches the presigner and is not counted.",
+				Help: "Artifact download-URL signing attempts (local JWT signing since add-artifact-download-proxy; no OSS call). outcome ∈ {success,error}; a 404 (missing/unowned artifact) never reaches the signer and is not counted.",
 			},
 			[]string{"outcome"},
 		),
+		OSSDownloadTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "oss_download_total",
+				Help: "Artifact download proxy requests. status ∈ {success,token_invalid,not_found,oss_error,stream_aborted}; stream_aborted = failure after response headers were sent (connection cut).",
+			},
+			[]string{"status"},
+		),
+		OSSDownloadBytes: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "oss_download_bytes_total",
+			Help: "Artifact bytes streamed through the download proxy to clients.",
+		}),
 		WSConnectionsActive: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "ws_connections_active",
 			Help: "Live realtime-gateway WebSocket connections on this instance.",
@@ -262,6 +277,8 @@ func NewMetrics() *Metrics {
 		m.CostConsumerConnected,
 		m.TaskControlRequestsTotal,
 		m.OSSPresignTotal,
+		m.OSSDownloadTotal,
+		m.OSSDownloadBytes,
 		m.WSConnectionsActive,
 		m.WSSubscriptionsActive,
 		m.WSEventsFannedTotal,

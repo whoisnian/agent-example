@@ -1,11 +1,13 @@
 //go:build integration
 
-// HTTP-level integration test for add-artifacts-api. Stands up a real
-// PostgreSQL container (for the artifact/version/task rows) AND a real MinIO
-// container (the worker-proven S3 double; no SeaweedFS testcontainers module
-// exists — design D2a). It seeds an artifact + uploads its bytes, presigns via
-// the endpoint, then HTTP-GETs the returned URL to prove the bytes round-trip —
-// the S3-protocol-drift guard.
+// HTTP-level integration test for add-artifacts-api, reworked by
+// add-artifact-download-proxy. Stands up a real PostgreSQL container (for the
+// artifact/version/task rows) AND a real MinIO container (the worker-proven S3
+// double; no SeaweedFS testcontainers module exists — design D2a). It seeds an
+// artifact + uploads its bytes, presigns via the endpoint, then GETs the
+// returned API-relative download URL (unauthenticated — the token in the URL
+// is the grant) to prove the bytes round-trip THROUGH the download proxy —
+// the S3-protocol-drift guard for the GetObject streaming path.
 //
 // Run with: make test-integration
 package httpapi_test
@@ -18,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,15 +149,19 @@ func newArtifactEngine(t *testing.T, pool *pgxpool.Pool, ossClient *oss.Client, 
 	t.Helper()
 	queries := sqlc.New(pool)
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	downloadSigner := auth.DownloadURLSigner{
+		Issuer: auth.NewDownloadIssuer(intgJWTSecret, 5*time.Minute),
+	}
 	engine := httpapi.NewEngine(&httpapi.ServerDeps{
 		Logger:   logger,
 		Metrics:  observability.NewMetrics(),
 		Probes:   httpapi.NewProbeRegistry(time.Second),
 		Verifier: auth.NewVerifier(intgJWTSecret),
 		ArtifactHandlers: &httpapi.ArtifactHandlers{
-			App:     apptask.NewArtifactReadService(taskdomain.NewArtifactReadService(queries, ossClient)),
+			App:     apptask.NewArtifactReadService(taskdomain.NewArtifactReadService(queries, downloadSigner, ossClient)),
 			Logger:  logger,
 			Metrics: observability.NewMetrics(),
+			Tokens:  auth.NewDownloadVerifier(intgJWTSecret),
 		},
 	})
 	ts := httptest.NewServer(engine)
@@ -201,7 +208,6 @@ func TestArtifactPresignRoundTrip(t *testing.T) {
 	ossClient := oss.New(&oss.Config{
 		Endpoint: endpoint, Region: "us-east-1", Bucket: artBucket,
 		AccessKeyID: akid, AccessKeySecret: secret, UsePathStyle: true,
-		PresignTTL: 5 * time.Minute,
 	})
 	ts, hdr := newArtifactEngine(t, pool, ossClient, tenant, user)
 
@@ -216,7 +222,9 @@ func TestArtifactPresignRoundTrip(t *testing.T) {
 		t.Errorf("list leaked oss_key: %s", listBody)
 	}
 
-	// 2) presign endpoint — 200, then GET the URL and round-trip the bytes.
+	// 2) presign endpoint — 200 with an API-relative download URL, then GET it
+	// through the proxy (NO auth header: the token in the URL is the grant) and
+	// round-trip the bytes.
 	presignResp := authGet(t, ts.URL+"/api/v1/artifacts/"+artifactID.String()+"/presign", hdr)
 	var env struct {
 		Data struct {
@@ -235,10 +243,13 @@ func TestArtifactPresignRoundTrip(t *testing.T) {
 	if env.Data.URL == "" || env.Data.ExpiresAt == "" {
 		t.Fatalf("presign missing url/expires_at: %s", pBody)
 	}
+	if !strings.HasPrefix(env.Data.URL, "/api/v1/artifacts/"+artifactID.String()+"/download?token=") {
+		t.Fatalf("url is not the API-relative download route: %s", env.Data.URL)
+	}
 
-	dl, err := http.Get(env.Data.URL)
+	dl, err := http.Get(ts.URL + env.Data.URL)
 	if err != nil {
-		t.Fatalf("GET presigned url: %v", err)
+		t.Fatalf("GET download url: %v", err)
 	}
 	got, _ := io.ReadAll(dl.Body)
 	dl.Body.Close()
@@ -247,6 +258,70 @@ func TestArtifactPresignRoundTrip(t *testing.T) {
 	}
 	if !bytes.Equal(got, content) {
 		t.Errorf("round-trip mismatch: got %q want %q", got, content)
+	}
+	wantHeaders := map[string]string{
+		"Content-Type":            "text/markdown",
+		"Content-Security-Policy": "sandbox allow-scripts",
+		"Referrer-Policy":         "no-referrer",
+		"X-Content-Type-Options":  "nosniff",
+		"Cache-Control":           "private, no-store",
+	}
+	for k, want := range wantHeaders {
+		if gotH := dl.Header.Get(k); gotH != want {
+			t.Errorf("download header %s=%q, want %q", k, gotH, want)
+		}
+	}
+}
+
+// TestArtifactDownloadMissingObjectReturns502 exercises the real-OSS failure
+// path: the artifact row exists and the token is valid, but the object was
+// never uploaded (lifecycle-expired analogue) — the proxy must answer 502
+// oss_unavailable without leaking the key.
+func TestArtifactDownloadMissingObjectReturns502(t *testing.T) {
+	ctx := context.Background()
+	tenant := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	user := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+
+	pool := startPGForArtifacts(t)
+	endpoint, akid, secret := startMinIO(t)
+	s3c := s3ClientFor(endpoint, akid, secret)
+	if _, err := s3c.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: aws.String(artBucket)}); err != nil {
+		t.Fatalf("create bucket: %v", err)
+	}
+	_, artifactID, key := seedArtifact(t, pool, tenant, user) // row only — no PutObject
+
+	ossClient := oss.New(&oss.Config{
+		Endpoint: endpoint, Region: "us-east-1", Bucket: artBucket,
+		AccessKeyID: akid, AccessKeySecret: secret, UsePathStyle: true,
+	})
+	ts, hdr := newArtifactEngine(t, pool, ossClient, tenant, user)
+
+	presignResp := authGet(t, ts.URL+"/api/v1/artifacts/"+artifactID.String()+"/presign", hdr)
+	var env struct {
+		Data struct {
+			URL string `json:"url"`
+		} `json:"data"`
+	}
+	pBody, _ := io.ReadAll(presignResp.Body)
+	presignResp.Body.Close()
+	if presignResp.StatusCode != http.StatusOK {
+		t.Fatalf("presign status=%d body=%s (mint must not probe the object)", presignResp.StatusCode, pBody)
+	}
+	if err := json.Unmarshal(pBody, &env); err != nil {
+		t.Fatalf("decode presign: %v (%s)", err, pBody)
+	}
+
+	dl, err := http.Get(ts.URL + env.Data.URL)
+	if err != nil {
+		t.Fatalf("GET download url: %v", err)
+	}
+	body, _ := io.ReadAll(dl.Body)
+	dl.Body.Close()
+	if dl.StatusCode != http.StatusBadGateway || !bytes.Contains(body, []byte("oss_unavailable")) {
+		t.Errorf("status=%d body=%s, want 502 oss_unavailable", dl.StatusCode, body)
+	}
+	if bytes.Contains(body, []byte(key)) {
+		t.Errorf("response leaked oss_key: %s", body)
 	}
 }
 
@@ -261,7 +336,7 @@ func TestArtifactPresignUnownedReturns404(t *testing.T) {
 
 	ossClient := oss.New(&oss.Config{
 		Endpoint: endpoint, Region: "us-east-1", Bucket: artBucket,
-		AccessKeyID: akid, AccessKeySecret: secret, UsePathStyle: true, PresignTTL: time.Minute,
+		AccessKeyID: akid, AccessKeySecret: secret, UsePathStyle: true,
 	})
 	// Engine runs as a DIFFERENT user → the seeded artifact is unowned.
 	ts, hdr := newArtifactEngine(t, pool, ossClient, tenant, other)

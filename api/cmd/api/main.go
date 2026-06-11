@@ -309,9 +309,10 @@ func runServer(args []string) int {
 		Metrics: metrics,
 	}
 
-	// Artifacts-api wiring (queries-only read service + OSS presigner). The OSS
-	// client mints presigned download URLs only — no object bytes flow through
-	// the API. Its required config is validated at boot via config.Load.
+	// Artifacts-api wiring (add-artifact-download-proxy). Download URLs are
+	// API-signed local tokens (aud=artifact-download, shared JWT secret) and
+	// artifact bytes stream from OSS through the download proxy route — the
+	// browser never reaches OSS_ENDPOINT. Required config is validated at boot.
 	ossClient := oss.New(&oss.Config{
 		Endpoint:        cfg.OSSEndpoint,
 		Region:          cfg.OSSRegion,
@@ -319,15 +320,18 @@ func runServer(args []string) int {
 		AccessKeyID:     cfg.OSSAccessKeyID,
 		AccessKeySecret: cfg.OSSAccessKeySecret,
 		UsePathStyle:    cfg.OSSUsePathStyle,
-		PresignTTL:      cfg.OSSPresignTTL,
 	})
+	downloadSigner := auth.DownloadURLSigner{
+		Issuer: auth.NewDownloadIssuer(cfg.AuthJWTSecret, cfg.OSSPresignTTL),
+	}
 	appArtifactSvc := apptask.NewArtifactReadService(
-		taskdomain.NewArtifactReadService(queries, ossClient),
+		taskdomain.NewArtifactReadService(queries, downloadSigner, ossClient),
 	)
 	artifactHandlers := &httpapi.ArtifactHandlers{
 		App:     appArtifactSvc,
 		Logger:  logger,
 		Metrics: metrics,
+		Tokens:  auth.NewDownloadVerifier(cfg.AuthJWTSecret),
 	}
 
 	// Realtime-gateway wiring (add-realtime-gateway). The Hub fans worker events

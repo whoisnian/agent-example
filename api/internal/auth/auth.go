@@ -99,6 +99,13 @@ func (v *Verifier) Parse(token string) (Principal, error) {
 	if err != nil {
 		return Principal{}, ErrInvalidToken
 	}
+	// Access tokens never carry an audience. Reject any aud-bearing token
+	// explicitly (golang-jwt does not validate aud unless asked) so a download
+	// token can never be smuggled into the Bearer path, even if minted with
+	// otherwise access-shaped claims.
+	if len(c.Audience) > 0 {
+		return Principal{}, ErrInvalidToken
+	}
 	tenantID, terr := uuid.Parse(c.Tenant)
 	userID, uerr := uuid.Parse(c.Subject)
 	if terr != nil || uerr != nil {
