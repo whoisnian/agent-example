@@ -247,3 +247,72 @@ func TestRollbackSwitchToNonTerminal409(t *testing.T) {
 		t.Fatalf("status=%d code=%v, want 409 invalid_state", code, env.Code)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// task-conversation-history — branch history excludes the abandoned branch
+// ---------------------------------------------------------------------------
+
+func TestRollbackBranchHistoryExcludesAbandonedBranch(t *testing.T) {
+	s := newSuite(t)
+	// Chain v1 ← v2 ← v3 (all terminal), then branch from v2: history must be
+	// [v1, v2] and must not contain a v3 turn.
+	taskID, v1ID := createAndTerminate(t, s, "code-gen", "v1 prompt", "succeeded", "")
+	terminateVersion(t, s, taskID, v1ID, "succeeded", "v1 summary")
+
+	iterate := func(prompt string) uuid.UUID {
+		t.Helper()
+		status, env := postJSON(t, s.ts, "/api/v1/tasks/"+taskID.String()+"/iterate",
+			map[string]any{"prompt": prompt})
+		if status != http.StatusCreated {
+			t.Fatalf("iterate %q: status=%d env=%+v", prompt, status, env)
+		}
+		var data struct {
+			VersionID uuid.UUID `json:"version_id"`
+		}
+		if err := json.Unmarshal(env.Data, &data); err != nil {
+			t.Fatalf("iterate %q unmarshal: %v", prompt, err)
+		}
+		return data.VersionID
+	}
+	v2ID := iterate("v2 prompt")
+	terminateVersion(t, s, taskID, v2ID, "succeeded", "v2 summary")
+	v3ID := iterate("v3 prompt")
+	terminateVersion(t, s, taskID, v3ID, "succeeded", "v3 summary")
+
+	status, env := postJSON(t, s.ts, "/api/v1/tasks/"+taskID.String()+"/rollback", map[string]any{
+		"target_version_id": v2ID.String(),
+		"mode":              "branch",
+		"prompt":            "branch from v2",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("branch: status=%d env=%+v", status, env)
+	}
+	var data struct {
+		VersionID uuid.UUID `json:"version_id"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("branch unmarshal: %v", err)
+	}
+
+	var payloadRaw []byte
+	if err := s.pool.QueryRow(context.Background(),
+		`SELECT payload FROM outbox WHERE aggregate_id = $1`, data.VersionID).Scan(&payloadRaw); err != nil {
+		t.Fatalf("outbox payload: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+		t.Fatalf("payload unmarshal: %v", err)
+	}
+	history, ok := payload["history"].([]any)
+	if !ok || len(history) != 2 {
+		t.Fatalf("history = %v, want exactly [v1, v2]", payload["history"])
+	}
+	first := history[0].(map[string]any)
+	second := history[1].(map[string]any)
+	if first["version_no"].(float64) != 1 || second["version_no"].(float64) != 2 {
+		t.Fatalf("history order/content: %v", history)
+	}
+	if second["summary"] != "v2 summary" {
+		t.Fatalf("v2 turn summary = %v", second["summary"])
+	}
+}

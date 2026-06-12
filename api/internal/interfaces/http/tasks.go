@@ -200,6 +200,9 @@ func (h *TaskHandlers) iterateTask(c *gin.Context) {
 		slog.String("task_id", taskID.String()),
 		slog.String("version_id", res.VersionID.String()),
 		slog.Int("version_no", int(res.VersionNo)),
+		slog.Int("history_turns", res.HistoryTurns),
+		slog.Int("history_dropped_size", res.HistoryDroppedSize),
+		slog.Bool("history_depth_clipped", res.HistoryDepthClipped),
 	)
 	h.Metrics.TasksIteratedTotal.WithLabelValues("success").Inc()
 
@@ -285,6 +288,9 @@ func (h *TaskHandlers) rollbackTask(c *gin.Context) {
 		slog.String("mode", mode),
 		slog.String("version_id", res.VersionID.String()),
 		slog.Int("version_no", int(res.VersionNo)),
+		slog.Int("history_turns", res.HistoryTurns),
+		slog.Int("history_dropped_size", res.HistoryDroppedSize),
+		slog.Bool("history_depth_clipped", res.HistoryDepthClipped),
 	)
 
 	if res.Mode == string(taskdomain.RollbackBranch) {

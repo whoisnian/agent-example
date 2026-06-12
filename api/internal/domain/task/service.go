@@ -89,11 +89,15 @@ type IterateInput struct {
 	Lane          *string
 }
 
-// IterateOutput is the response payload mirror.
+// IterateOutput is the response payload mirror. The History* fields are
+// assembly observability for the handler's structured log, not response data.
 type IterateOutput struct {
-	VersionID uuid.UUID
-	VersionNo int32
-	Status    Status
+	VersionID           uuid.UUID
+	VersionNo           int32
+	Status              Status
+	HistoryTurns        int
+	HistoryDroppedSize  int
+	HistoryDepthClipped bool
 }
 
 // activeVersionParams carries everything `createActiveVersion` needs that
@@ -111,6 +115,10 @@ type activeVersionParams struct {
 	// generation. Only CreateTask's derived-title path sets it (whitelist
 	// semantics) — iterate / rollback rely on the zero value.
 	genTitle bool
+	// history is the assembled conversation history for the execute payload
+	// (task-conversation-history). Iterate / rollback-branch set it; create
+	// relies on the zero value (nil → field omitted from the payload).
+	history []HistoryTurn
 }
 
 // CreateTask implements the happy path in design D2 for "no prior task":
@@ -270,6 +278,13 @@ func (s *Service) IterateTask(ctx context.Context, in IterateInput) (IterateOutp
 		return IterateOutput{}, fmt.Errorf("re-read task: %w", err)
 	}
 
+	// Conversation history rides the execute payload (task-conversation-history):
+	// assembled from the base's parent chain inside this tx, frozen into outbox.
+	history, historyStats, err := assembleHistory(ctx, q, baseID)
+	if err != nil {
+		return IterateOutput{}, err
+	}
+
 	out, err := s.createActiveVersion(ctx, tx, q, activeVersionParams{
 		taskID:             in.TaskID,
 		taskType:           taskRowMeta.TaskType,
@@ -279,6 +294,7 @@ func (s *Service) IterateTask(ctx context.Context, in IterateInput) (IterateOutp
 		parentVersionID:    &baseID,
 		parentArtifactRoot: baseArtifactRoot,
 		versionNo:          newVersionNo,
+		history:            history,
 	}, nil)
 	if err != nil {
 		return IterateOutput{}, err
@@ -295,9 +311,12 @@ func (s *Service) IterateTask(ctx context.Context, in IterateInput) (IterateOutp
 		return IterateOutput{}, fmt.Errorf("commit: %w", err)
 	}
 	return IterateOutput{
-		VersionID: out.versionID,
-		VersionNo: out.versionNo,
-		Status:    StatusPending,
+		VersionID:           out.versionID,
+		VersionNo:           out.versionNo,
+		Status:              StatusPending,
+		HistoryTurns:        historyStats.Turns,
+		HistoryDroppedSize:  historyStats.DroppedSize,
+		HistoryDepthClipped: historyStats.DroppedDepth > 0,
 	}, nil
 }
 
@@ -441,6 +460,7 @@ func (s *Service) createActiveVersion(
 		p.parentVersionID, p.parentArtifactRoot,
 		s.Clock.Now(), s.DefaultDeadline,
 		p.genTitle,
+		p.history,
 	)
 	if err != nil {
 		return activeVersionResult{}, fmt.Errorf("build payload: %w", err)

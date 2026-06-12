@@ -48,11 +48,16 @@ type RollbackInput struct {
 
 // RollbackOutput is the response mirror. For branch, VersionID is the newly
 // created version; for switch it is the target now pointed at by current_version.
+// The History* fields are branch-mode assembly observability for the handler's
+// structured log, not response data (zero for switch).
 type RollbackOutput struct {
-	VersionID uuid.UUID
-	VersionNo int32
-	Status    Status
-	Mode      RollbackMode
+	VersionID           uuid.UUID
+	VersionNo           int32
+	Status              Status
+	Mode                RollbackMode
+	HistoryTurns        int
+	HistoryDroppedSize  int
+	HistoryDepthClipped bool
 }
 
 // RollbackTask owns the rollback transaction end-to-end: owner-scoped lock,
@@ -189,6 +194,13 @@ func (s *Service) rollbackBranch(
 	}
 
 	targetID := fromPgUUID(target.ID)
+	// Branch history = the target's parent chain (task-conversation-history):
+	// the abandoned branch past the target never enters the history.
+	history, historyStats, err := assembleHistory(ctx, q, targetID)
+	if err != nil {
+		return RollbackOutput{}, err
+	}
+
 	out, err := s.createActiveVersion(ctx, tx, q, activeVersionParams{
 		taskID:             in.TaskID,
 		taskType:           locked.TaskType, // from the owner-scoped lock, not an unscoped re-read
@@ -198,6 +210,7 @@ func (s *Service) rollbackBranch(
 		parentVersionID:    &targetID,
 		parentArtifactRoot: target.ArtifactRoot,
 		versionNo:          maxNo + 1,
+		history:            history,
 	}, nil)
 	if err != nil {
 		return RollbackOutput{}, err
@@ -213,9 +226,12 @@ func (s *Service) rollbackBranch(
 		return RollbackOutput{}, fmt.Errorf("commit: %w", err)
 	}
 	return RollbackOutput{
-		VersionID: out.versionID,
-		VersionNo: out.versionNo,
-		Status:    StatusPending,
-		Mode:      RollbackBranch,
+		VersionID:           out.versionID,
+		VersionNo:           out.versionNo,
+		Status:              StatusPending,
+		Mode:                RollbackBranch,
+		HistoryTurns:        historyStats.Turns,
+		HistoryDroppedSize:  historyStats.DroppedSize,
+		HistoryDepthClipped: historyStats.DroppedDepth > 0,
 	}, nil
 }

@@ -822,3 +822,107 @@ func TestIterateAndRollbackPayloadsOmitGenTitle(t *testing.T) {
 		t.Fatalf("rollback payload gen_title=%v, want absent", payload["gen_title"])
 	}
 }
+
+// ---------------------------------------------------------------------------
+// task-conversation-history — history in iterate execute payloads
+// ---------------------------------------------------------------------------
+
+// terminateVersion flips one version (and the owning task) to a terminal
+// status and optionally stamps the worker-written summary, so the next
+// iterate is allowed and history assembly has material to read.
+func terminateVersion(t *testing.T, s *suite, taskID, versionID uuid.UUID, status, summary string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE task_versions SET status = $2, summary = NULLIF($3, '') WHERE id = $1`,
+		versionID, status, summary); err != nil {
+		t.Fatalf("terminate version: %v", err)
+	}
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE tasks SET status = $2 WHERE id = $1`, taskID, status); err != nil {
+		t.Fatalf("terminate task: %v", err)
+	}
+}
+
+func TestIterateHistorySingleTurn(t *testing.T) {
+	s := newSuite(t)
+	taskID, v1ID := createAndTerminate(t, s, "research", "v1 prompt", "succeeded", "")
+	terminateVersion(t, s, taskID, v1ID, "succeeded", "v1 result summary")
+
+	status, env := postJSON(t, s.ts, "/api/v1/tasks/"+taskID.String()+"/iterate", map[string]any{
+		"prompt": "iterate v2",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("status=%d env=%+v", status, env)
+	}
+	var data struct {
+		VersionID uuid.UUID `json:"version_id"`
+	}
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		t.Fatalf("data unmarshal: %v", err)
+	}
+
+	payload := outboxPayload(t, s, data.VersionID)
+	history, ok := payload["history"].([]any)
+	if !ok || len(history) != 1 {
+		t.Fatalf("history = %v, want one turn", payload["history"])
+	}
+	turn := history[0].(map[string]any)
+	if turn["version_no"].(float64) != 1 || turn["prompt"] != "v1 prompt" ||
+		turn["summary"] != "v1 result summary" || turn["status"] != "succeeded" {
+		t.Fatalf("turn = %v", turn)
+	}
+}
+
+func TestIterateHistoryChainOrderAndFailedTurn(t *testing.T) {
+	s := newSuite(t)
+	taskID, v1ID := createAndTerminate(t, s, "research", "v1 prompt", "succeeded", "")
+	terminateVersion(t, s, taskID, v1ID, "succeeded", "v1 summary")
+
+	// v2: iterate, then fail it with no summary (failed runs emit none).
+	_, env := postJSON(t, s.ts, "/api/v1/tasks/"+taskID.String()+"/iterate", map[string]any{
+		"prompt": "v2 prompt",
+	})
+	var v2 struct {
+		VersionID uuid.UUID `json:"version_id"`
+	}
+	if err := json.Unmarshal(env.Data, &v2); err != nil {
+		t.Fatalf("v2 unmarshal: %v", err)
+	}
+	terminateVersion(t, s, taskID, v2.VersionID, "failed", "")
+
+	// v3: history must be [v1, v2] with v2 marked failed / null summary.
+	status, env := postJSON(t, s.ts, "/api/v1/tasks/"+taskID.String()+"/iterate", map[string]any{
+		"prompt": "v3 prompt",
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("status=%d env=%+v", status, env)
+	}
+	var v3 struct {
+		VersionID uuid.UUID `json:"version_id"`
+	}
+	if err := json.Unmarshal(env.Data, &v3); err != nil {
+		t.Fatalf("v3 unmarshal: %v", err)
+	}
+
+	history, ok := outboxPayload(t, s, v3.VersionID)["history"].([]any)
+	if !ok || len(history) != 2 {
+		t.Fatalf("history len = %d, want 2", len(history))
+	}
+	first := history[0].(map[string]any)
+	second := history[1].(map[string]any)
+	if first["version_no"].(float64) != 1 || first["summary"] != "v1 summary" {
+		t.Fatalf("oldest-first violated: first = %v", first)
+	}
+	if second["version_no"].(float64) != 2 || second["status"] != "failed" || second["summary"] != nil {
+		t.Fatalf("failed turn shape: second = %v", second)
+	}
+}
+
+func TestCreatePayloadOmitsHistory(t *testing.T) {
+	s := newSuite(t)
+	_, versionID := createTask(t, s, "research", "fresh task")
+	if _, present := outboxPayload(t, s, versionID)["history"]; present {
+		t.Fatal("create payload must omit the history field")
+	}
+}

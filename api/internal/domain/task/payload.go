@@ -29,6 +29,11 @@ type ExecutePayload struct {
 	// derived a placeholder title, asking the worker to generate a semantic one.
 	// Iterate / rollback / republish never set it; absent means false.
 	GenTitle bool `json:"gen_title,omitempty"`
+	// History is the bounded conversation history assembled from the base
+	// version's parent chain, oldest→newest (task-conversation-history).
+	// Populated by iterate / rollback-branch; absent on create. Frozen at
+	// outbox-write time: republish reuses the stored payload.
+	History []HistoryTurn `json:"history,omitempty"`
 }
 
 // buildExecutePayload assembles the payload bytes. The function is the single
@@ -46,6 +51,7 @@ func buildExecutePayload(
 	now time.Time,
 	deadline time.Duration,
 	genTitle bool,
+	history []HistoryTurn,
 ) ([]byte, error) {
 	pl := ExecutePayload{
 		MsgID:              msgID,
@@ -62,6 +68,7 @@ func buildExecutePayload(
 		ParentArtifactRoot: parentArtifactRoot,
 		DeadlineTS:         now.Add(deadline).Unix(),
 		GenTitle:           genTitle,
+		History:            history,
 	}
 	return json.Marshal(pl)
 }

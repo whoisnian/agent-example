@@ -42,11 +42,15 @@ type CreateTaskResult struct {
 	Status    string
 }
 
-// IterateTaskResult mirrors the iterate response.
+// IterateTaskResult mirrors the iterate response. The History* fields are
+// assembly observability passed through for the handler's structured log.
 type IterateTaskResult struct {
-	VersionID uuid.UUID
-	VersionNo int32
-	Status    string
+	VersionID           uuid.UUID
+	VersionNo           int32
+	Status              string
+	HistoryTurns        int
+	HistoryDroppedSize  int
+	HistoryDepthClipped bool
 }
 
 // RollbackTaskCommand mirrors POST /api/v1/tasks/{task_id}/rollback plus the
@@ -65,10 +69,13 @@ type RollbackTaskCommand struct {
 // RollbackTaskResult mirrors the rollback response. For branch, VersionID is
 // the new version; for switch it is the now-current target version.
 type RollbackTaskResult struct {
-	VersionID uuid.UUID
-	VersionNo int32
-	Status    string
-	Mode      string
+	VersionID           uuid.UUID
+	VersionNo           int32
+	Status              string
+	Mode                string
+	HistoryTurns        int
+	HistoryDroppedSize  int
+	HistoryDepthClipped bool
 }
 
 // Service is the application-layer wrapper around the domain Service. The
@@ -118,9 +125,12 @@ func (s *Service) IterateTask(ctx context.Context, cmd IterateTaskCommand) (Iter
 		return IterateTaskResult{}, err
 	}
 	return IterateTaskResult{
-		VersionID: out.VersionID,
-		VersionNo: out.VersionNo,
-		Status:    string(out.Status),
+		VersionID:           out.VersionID,
+		VersionNo:           out.VersionNo,
+		Status:              string(out.Status),
+		HistoryTurns:        out.HistoryTurns,
+		HistoryDroppedSize:  out.HistoryDroppedSize,
+		HistoryDepthClipped: out.HistoryDepthClipped,
 	}, nil
 }
 
@@ -141,9 +151,12 @@ func (s *Service) RollbackTask(ctx context.Context, cmd RollbackTaskCommand) (Ro
 		return RollbackTaskResult{}, err
 	}
 	return RollbackTaskResult{
-		VersionID: out.VersionID,
-		VersionNo: out.VersionNo,
-		Status:    string(out.Status),
-		Mode:      string(out.Mode),
+		VersionID:           out.VersionID,
+		VersionNo:           out.VersionNo,
+		Status:              string(out.Status),
+		Mode:                string(out.Mode),
+		HistoryTurns:        out.HistoryTurns,
+		HistoryDroppedSize:  out.HistoryDroppedSize,
+		HistoryDepthClipped: out.HistoryDepthClipped,
 	}, nil
 }
