@@ -329,6 +329,7 @@ CREATE TABLE task_versions (
   is_active        BOOLEAN GENERATED ALWAYS AS
                      (status IN ('pending','queued','running','paused','cancelling')) STORED,
   artifact_root    TEXT,                               -- OSS 前缀
+  summary          TEXT,                                -- 运行结果摘要（kind=summary 事件回写；失败/取消与存量为 NULL）
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (task_id, version_no)
 );
@@ -619,7 +620,7 @@ GET /api/v1/tasks/{task_id}/cost
   ```json
   {
     "topic": "task:<id>",
-    "kind": "status" | "log" | "plan" | "step" | "artifact" | "error" | "title",
+    "kind": "status" | "log" | "plan" | "step" | "artifact" | "error" | "title" | "summary",
     "seq": 142,
     "ts": "2026-05-17T12:34:56Z",
     "payload": { ... }
@@ -645,10 +646,15 @@ Routing key: `execute.<task_type>.<lane>`
   "parent_version_id": "...|null",
   "parent_artifact_root": "oss://...|null",
   "deadline_ts": 1715900000,
-  "gen_title": true
+  "gen_title": true,
+  "history": [
+    { "version_no": 1, "prompt": "...", "summary": "...|null", "status": "succeeded|failed|cancelled" }
+  ]
 }
 ```
 > `gen_title` 为 **create-only flag**（缺省 `false`，省略即不生成）：仅当创建任务时标题由服务端派生（占位）才置 `true`，Worker 据此异步生成语义化标题并以 `kind=title` 事件回写。iterate / rollback / resume、retry 等任何 API 重发的 execute 消息**不得**重置该标记；Worker 侧另有 fresh-run 守卫（存在 checkpoint 即跳过）防止重投/接管路径重复生成。
+>
+> `history` 为**可选字段**（缺省空列表）：iterate / rollback-branch 在写 outbox 时沿 base 版本的 `parent_id` 链组装（旧→新，每轮 `{version_no, prompt, summary, status}`），create 路径省略。边界：走链深度 ≤20、单字段 rune 截断 ≤1024 字节、序列化总量 >16 KiB 时自最旧端整轮丢弃（16 KiB 为权威上限）。`history` 随 outbox 行一次性定格——同 version 的任何重发（retry / redelivery / resume 重发）复用原 payload，不重组。Worker 把 history 与继承产物清单/节选组装为 conversation-context 块注入 planner/executor 输入（critic 不变），context 块随 checkpoint 持久化、resume 时恢复；run 成功收尾以 `kind=summary` 事件回写 `task_versions.summary`（结构非法的 history 在 Worker 侧降级为空 + `worker_invalid_history_total`，不进 DLX）。详见 `task-conversation-history` 规格。
 
 #### 控制信号（API → 特定 Worker）
 Routing key: `task.<task_id>`（topic）。Worker 在 claim run 时按 task 动态 bind 到 `q.task.control.<worker_id>`，run 结束时 unbind；pre-claim 的控制消息无绑定时由 broker 丢弃（best-effort，见 `task-control-api`）。
