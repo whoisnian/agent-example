@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -59,7 +61,7 @@ async def test_claim_running_by_other_recent(pg_pool):  # type: ignore[no-untype
     )
     await p.claim_or_skip_run(run)
     # Second worker tries to claim with the same key.
-    intruder = RunRow(**{**run.__dict__, "worker_run_id": uuid4()})
+    intruder = dataclasses.replace(run, worker_run_id=uuid4())
     result = await p.claim_or_skip_run(intruder)
     assert result.outcome == ClaimOutcome.RUNNING_BY_OTHER_RECENT
 
@@ -82,7 +84,7 @@ async def test_claim_stale_takeover(pg_pool):  # type: ignore[no-untyped-def]
             stale,
             run.run_id,
         )
-    intruder = RunRow(**{**run.__dict__, "worker_run_id": uuid4()})
+    intruder = dataclasses.replace(run, worker_run_id=uuid4())
     result = await p.claim_or_skip_run(intruder)
     assert result.outcome == ClaimOutcome.RUNNING_STALE_TAKEOVER
     assert result.worker_run_id == intruder.worker_run_id
