@@ -118,6 +118,17 @@ class RunContext:
         self.event_seq += 1
         return self.event_seq
 
+    def restore_event_seq(self, high_water: int) -> None:
+        """Continue the per-run event sequence from a checkpointed high-water mark.
+
+        Resume support (spec: worker-agent-orchestration → "Resume-Safe Event
+        Sequencing"): without this, a redelivered attempt restarts at 1 and
+        every post-resume event collides with the prior attempt's persisted
+        ``(run_id, seq)`` rows — silently dropped by ingest. ``max`` keeps any
+        seq already consumed in this attempt (e.g. an early control ack) safe.
+        """
+        self.event_seq = max(self.event_seq, high_water)
+
     def next_cost_seq(self, kind: str) -> int:
         cur = self.cost_seq_by_kind.get(kind, 0) + 1
         self.cost_seq_by_kind[kind] = cur

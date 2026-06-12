@@ -11,7 +11,26 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+
+
+class HistoryTurn(BaseModel):
+    """One conversation turn in the execute payload's ``history`` array.
+
+    Shape per ``task-conversation-history``: ``summary`` is null for versions
+    without a worker summary; ``status`` is the version's terminal status so
+    failed prior attempts can be rendered as such.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    version_no: int
+    prompt: str
+    summary: str | None = None
+    status: str = "succeeded"
+
+
+_HISTORY_ADAPTER = TypeAdapter(list[HistoryTurn])
 
 
 class TaskExecuteMessage(BaseModel):
@@ -35,12 +54,29 @@ class TaskExecuteMessage(BaseModel):
     # title was derived (placeholder) rather than user-supplied. Iterate /
     # rollback / any republish never set it; absent means False.
     gen_title: bool = False
+    # Conversation history (task-conversation-history): absent → empty list.
+    # A structurally invalid value degrades to [] with `history_invalid=True`
+    # instead of poisoning the message — history is an enhancement signal, and
+    # DLX-ing every iterate on a producer bug costs far more than running
+    # without context (design D6). The consumer logs/counts the degradation.
+    history: list[HistoryTurn] = Field(default_factory=list)
+    history_invalid: bool = False
     # Optional tenant context; carried for OSS prefix resolution. When absent
     # we fall back to a deterministic placeholder so the scaffold runs.
     tenant_id: str | None = None
     # Optional inbound trace context (W3C traceparent). Headers are also
     # checked at the AMQP layer; this field is for tests / replay use.
     traceparent: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _degrade_invalid_history(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "history" in data and data["history"] is not None:
+            try:
+                _HISTORY_ADAPTER.validate_python(data["history"])
+            except Exception:  # noqa: BLE001 - any structural failure degrades
+                data = {**data, "history": [], "history_invalid": True}
+        return data
 
 
 class TaskEvent(BaseModel):

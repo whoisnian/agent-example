@@ -44,3 +44,50 @@ def test_unknown_extra_field_is_not_poison() -> None:
     msg = TaskExecuteMessage.model_validate_json(raw)
     assert msg.task_type == "code-gen"
     assert msg.gen_title is False
+
+
+# --- history (task-conversation-history / worker-messaging) -----------------
+
+
+def test_absent_history_defaults_to_empty_list() -> None:
+    msg = TaskExecuteMessage.model_validate_json(json.dumps(_execute_payload()))
+    assert msg.history == []
+    assert msg.history_invalid is False
+
+
+def test_valid_history_parses_with_nullable_summary() -> None:
+    raw = json.dumps(
+        _execute_payload(
+            history=[
+                {
+                    "version_no": 1,
+                    "prompt": "build app",
+                    "summary": "did v1",
+                    "status": "succeeded",
+                },
+                {"version_no": 2, "prompt": "fix bug", "summary": None, "status": "failed"},
+            ]
+        )
+    )
+    msg = TaskExecuteMessage.model_validate_json(raw)
+    assert [t.version_no for t in msg.history] == [1, 2]
+    assert msg.history[0].summary == "did v1"
+    assert msg.history[1].summary is None
+    assert msg.history[1].status == "failed"
+    assert msg.history_invalid is False
+
+
+def test_invalid_history_degrades_to_empty_not_poison() -> None:
+    # 结构非法的 history 降级为空 + 标记，不得 poison → DLX（spec: Task Execute
+    # Consumer → "Structurally invalid history degrades instead of poisoning"）。
+    raw = json.dumps(_execute_payload(history=[{"version_no": 1}]))  # missing prompt
+    msg = TaskExecuteMessage.model_validate_json(raw)
+    assert msg.history == []
+    assert msg.history_invalid is True
+
+
+def test_non_list_history_degrades_to_empty_not_poison() -> None:
+    raw = json.dumps(_execute_payload(history="garbage"))
+    msg = TaskExecuteMessage.model_validate_json(raw)
+    assert msg.history == []
+    assert msg.history_invalid is True

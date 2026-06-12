@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from worker.agents.inherit import inherit_parent_artifacts
-from worker.agents.loop import DEFAULT_ROLE_INSTRUCTIONS, run_agent_loop
+from worker.agents.loop import DEFAULT_ROLE_INSTRUCTIONS, assemble_run_summary, run_agent_loop
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -141,9 +141,9 @@ class LoopAgent:
 
     async def run(self, ctx: RunContext, message: TaskExecuteMessage) -> None:
         model = self._model_factory.get(self._spec.model_key)
-        await self._maybe_inherit_parent_artifacts(ctx, message)
+        inherited = await self._maybe_inherit_parent_artifacts(ctx, message)
         try:
-            produced = await run_agent_loop(
+            result = await run_agent_loop(
                 ctx,
                 message,
                 model=model,
@@ -153,8 +153,9 @@ class LoopAgent:
                 deadline_ts=message.deadline_ts,
                 metrics=self._metrics,
                 roles=self._roles,
+                inherited=inherited,
             )
-            for art in produced:
+            for art in result.artifacts:
                 await self._persistence.insert_artifact(
                     version_id=ctx.version_id,
                     kind="file",
@@ -163,6 +164,10 @@ class LoopAgent:
                     bytes_size=art.bytes,
                     sha256=art.sha256,
                 )
+            # Run summary: after artifact rows, before returning — failed /
+            # cancelled runs raise above and never reach this (spec: "Run
+            # Summary Event"). The ingest side persists the version summary.
+            await self._emit_summary(ctx, result.step_summaries)
         except asyncio.CancelledError:
             self._record_run("cancelled")
             raise
@@ -171,9 +176,25 @@ class LoopAgent:
             raise
         self._record_run("success")
 
+    async def _emit_summary(self, ctx: RunContext, step_summaries: list[str | None]) -> None:
+        summary = assemble_run_summary(step_summaries)
+        await ctx.event_publisher.publish_event(
+            task_id=str(ctx.task_id),
+            version_id=str(ctx.version_id),
+            run_id=str(ctx.run_id),
+            task_type=ctx.task_type,
+            kind="summary",
+            payload={"summary": summary},
+            seq=ctx.next_event_seq(),
+            traceparent=ctx.traceparent,
+        )
+        if self._metrics is not None:
+            self._metrics.summary_events_total.inc()
+        ctx.logger.info("summary_emitted", summary_bytes=len(summary.encode("utf-8")))
+
     async def _maybe_inherit_parent_artifacts(
         self, ctx: RunContext, message: TaskExecuteMessage
-    ) -> None:
+    ) -> list[tuple[str, int]]:
         """Seed the new version from the parent's artifacts on a fresh run.
 
         Gated on ``parent_version_id`` present AND no prior checkpoint (the run
@@ -182,6 +203,11 @@ class LoopAgent:
         for the crash-before-first-checkpoint window. The worker keys on
         ``parent_version_id``; a non-null ``parent_artifact_root`` is unexpected
         (the API leaves it null) and is logged as a contract warning.
+
+        Returns the copied ``(relative key, size)`` inventory for the
+        conversation-context block; empty on skip (no parent) and on resume —
+        the resumed loop restores its context block from the plan checkpoint
+        instead of re-deriving it.
         """
         if message.parent_artifact_root is not None:
             ctx.logger.warning(
@@ -189,15 +215,16 @@ class LoopAgent:
                 parent_artifact_root=message.parent_artifact_root,
             )
         if message.parent_version_id is None:
-            return
+            return []
         if await ctx.checkpoint_store.latest() is not None:
-            return  # resume — a prior attempt already inherited
-        count = await inherit_parent_artifacts(ctx, self._persistence, message.parent_version_id)
+            return []  # resume — a prior attempt already inherited
+        copied = await inherit_parent_artifacts(ctx, self._persistence, message.parent_version_id)
         ctx.logger.info(
             "artifacts_inherited",
-            count=count,
+            count=len(copied),
             parent_version_id=str(message.parent_version_id),
         )
+        return copied
 
     def _record_run(self, outcome: str) -> None:
         if self._metrics is not None:

@@ -28,17 +28,20 @@ _RESERVED_PREFIXES: tuple[str, ...] = ("checkpoints/",)
 
 async def inherit_parent_artifacts(
     ctx: RunContext, persistence: Persistence, parent_version_id: UUID
-) -> int:
-    """Copy the parent version's artifacts into this run's prefix; return the count.
+) -> list[tuple[str, int]]:
+    """Copy the parent version's artifacts into this run's prefix.
 
     Lists the parent prefix, skips reserved run-internal objects, server-side-
     copies each artifact into ``ctx.oss_prefix``, and records an ``artifacts``
-    row keyed on the absolute key the copy returns. A missing/empty parent
-    prefix yields ``0`` (no error); real OSS errors propagate so the run fails
-    and is retried.
+    row keyed on the absolute key the copy returns. Returns the copied
+    ``(relative key, size)`` pairs — the authoritative inventory for the
+    conversation-context block (a fresh listing of the run prefix would
+    misattribute this run's own outputs as inherited). A missing/empty parent
+    prefix yields ``[]`` (no error); real OSS errors propagate so the run
+    fails and is retried.
     """
     parent_prefix = compute_oss_prefix(ctx.tenant_id, ctx.task_id, parent_version_id)
-    count = 0
+    copied: list[tuple[str, int]] = []
     for key, size in await ctx.oss_client.list_keys(parent_prefix):
         if key.startswith(_RESERVED_PREFIXES):
             continue
@@ -51,5 +54,5 @@ async def inherit_parent_artifacts(
             bytes_size=size,
             sha256=None,
         )
-        count += 1
-    return count
+        copied.append((key, size))
+    return copied

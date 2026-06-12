@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from worker.agents.context_block import assemble_context_block
 from worker.agents.subagent import RoleInstructions
 from worker.core.persistence import CheckpointConflictError
 
@@ -51,6 +52,20 @@ class ProducedArtifact:
 
 
 WriteFile = Callable[["RunContext", str, str], Awaitable[ProducedArtifact]]
+
+
+@dataclass(frozen=True, slots=True)
+class LoopResult:
+    """What a completed loop hands back to the agent.
+
+    ``step_summaries`` is indexed by plan position and includes summaries
+    restored from checkpoints (steps executed by earlier attempts), so the
+    run-summary event covers the whole run, not just this attempt
+    (spec: worker-agent-orchestration → "Run Summary Event").
+    """
+
+    artifacts: list[ProducedArtifact]
+    step_summaries: list[str | None]
 
 
 class StepRetryBudgetExceeded(RuntimeError):
@@ -90,6 +105,28 @@ DEFAULT_ROLE_INSTRUCTIONS = RoleInstructions(
 
 _SUMMARY_CAP = 500
 
+#: Byte cap (incl. the appended ellipsis) for the run-summary event payload —
+#: mirrors the API-side ApplyVersionSummary sanitizer so a worker-clean
+#: summary is never re-truncated on ingest.
+_RUN_SUMMARY_MAX_BYTES = 2048
+
+
+def assemble_run_summary(step_summaries: list[str | None]) -> str:
+    """Deterministic run summary: one ``<step_seq>. <summary>`` line per
+    completed step (prior attempts included via checkpoint restore), truncated
+    on a rune boundary to ≤ 2048 bytes. No LLM call (spec: "Run Summary Event").
+    """
+    lines = [f"{i + 1}. {s}" for i, s in enumerate(step_summaries) if s]
+    text = "\n".join(lines)
+    if len(text.encode("utf-8")) <= _RUN_SUMMARY_MAX_BYTES:
+        return text
+    ellipsis = "…"
+    budget = _RUN_SUMMARY_MAX_BYTES - len(ellipsis.encode("utf-8"))
+    encoded = text.encode("utf-8")[:budget]
+    # A byte-slice may split a rune; decoding with errors="ignore" drops the
+    # partial trailing rune, landing exactly on a rune boundary.
+    return encoded.decode("utf-8", errors="ignore").rstrip() + ellipsis
+
 
 async def run_agent_loop(
     ctx: RunContext,
@@ -102,8 +139,9 @@ async def run_agent_loop(
     deadline_ts: int | None = None,
     metrics: Any | None = None,
     roles: RoleInstructions = DEFAULT_ROLE_INSTRUCTIONS,
-) -> list[ProducedArtifact]:
-    """Run the plan→execute→critic loop, returning the artifacts produced.
+    inherited: list[tuple[str, int]] | None = None,
+) -> LoopResult:
+    """Run the plan→execute→critic loop, returning artifacts + step summaries.
 
     Resumes from the latest checkpoint when present (plan restored without
     re-planning). Raises on cancel (``asyncio.CancelledError``), deadline, or
@@ -112,12 +150,16 @@ async def run_agent_loop(
     ``roles`` supplies the planner / executor / critic instructions; production
     passes those resolved from the subagent plugins, and direct callers default
     to :data:`DEFAULT_ROLE_INSTRUCTIONS`.
+
+    ``inherited`` is the (relative key, size) inventory the inheritance copy
+    produced on a fresh run; together with ``message.history`` it feeds the
+    conversation-context block prepended to planner / executor inputs.
     """
     cp = ctx.checkpoint_store
     log = ctx.logger.bind(component="agent_loop")
 
-    plan, resume_from = await _load_or_create_plan(
-        ctx, message, model, system_prompt, cp, log, roles
+    plan, resume_from, summaries, context_block = await _load_or_create_plan(
+        ctx, message, model, system_prompt, cp, log, roles, inherited or []
     )
 
     produced: list[ProducedArtifact] = []
@@ -126,27 +168,44 @@ async def run_agent_loop(
         title = plan[idx]
         step_start = time.monotonic()
         verdict, summary, step_artifacts = await _run_step(
-            ctx, model, system_prompt, message, title, write_file, max_step_retries, log, roles
+            ctx,
+            model,
+            system_prompt,
+            message,
+            title,
+            write_file,
+            max_step_retries,
+            log,
+            roles,
+            context_block,
         )
         produced.extend(step_artifacts)
+        summaries[idx] = summary[:_SUMMARY_CAP]
 
         ctx.step = idx + 1
-        await _safe_checkpoint(
-            cp,
-            step_seq=ctx.step,
-            step_name=title,
-            state={
-                "plan": _plan_state(plan, completed_through=idx),
-                "step_count": len(plan),
-                "current": {
-                    "idx": idx,
-                    "title": title,
-                    "verdict": verdict,
-                    "result_summary": summary[:_SUMMARY_CAP],
-                },
+        # Reserve the step event's seq BEFORE the checkpoint so the persisted
+        # high-water mark covers it: a crash between checkpoint and emit then
+        # leaves a harmless gap on resume instead of a (run_id, seq) collision
+        # (spec: "Resume-Safe Event Sequencing"). Concurrent control acks may
+        # still slip a seq in after the snapshot — max() on restore plus
+        # at-most-one lost ack bounds that rare race.
+        step_event_seq = ctx.next_event_seq()
+        step_state: dict[str, Any] = {
+            "plan": _plan_state(plan, completed_through=idx, summaries=summaries),
+            "step_count": len(plan),
+            "event_seq": ctx.event_seq,
+            "current": {
+                "idx": idx,
+                "title": title,
+                "verdict": verdict,
+                "result_summary": summary[:_SUMMARY_CAP],
             },
-            log=log,
-        )
+        }
+        # Carried forward on every checkpoint: resume reads only latest(), so
+        # the block must ride along or a resume from step >= 1 would lose it.
+        if context_block:
+            step_state["context_block"] = context_block
+        await _safe_checkpoint(cp, step_seq=ctx.step, step_name=title, state=step_state, log=log)
         await _emit(
             ctx,
             kind="step",
@@ -156,6 +215,7 @@ async def run_agent_loop(
                 "verdict": verdict,
                 "summary": summary[:_SUMMARY_CAP],
             },
+            seq=step_event_seq,
         )
         if metrics is not None:
             metrics.agent_steps_total.labels(ctx.task_type).inc()
@@ -171,7 +231,7 @@ async def run_agent_loop(
         if verdict == "finish":
             break
 
-    return produced
+    return LoopResult(artifacts=produced, step_summaries=summaries)
 
 
 async def _load_or_create_plan(
@@ -182,26 +242,50 @@ async def _load_or_create_plan(
     cp: CheckpointStore,
     log: Any,
     roles: RoleInstructions,
-) -> tuple[list[str], int]:
-    """Restore the plan from the latest checkpoint, or plan afresh."""
+    inherited: list[tuple[str, int]],
+) -> tuple[list[str], int, list[str | None], str]:
+    """Restore plan / summaries / context block from the latest checkpoint, or start afresh."""
     latest = await cp.latest()
     if latest is not None and "plan" in latest.state:
         plan = [entry["title"] for entry in latest.state["plan"]]
+        summaries: list[str | None] = [
+            entry.get("result_summary") for entry in latest.state["plan"]
+        ]
         ctx.step = latest.step_seq
+        # Defense in depth for direct-loop callers: the consumer already
+        # restored the high-water mark before any emit; re-applying is a no-op.
+        ctx.restore_event_seq(int(latest.state.get("event_seq", 0)))
+        # Resume reuses the checkpointed context block verbatim — never
+        # re-listing OSS or re-reading contents (spec: "Resume restores the
+        # context block from the checkpoint").
+        context_block = str(latest.state.get("context_block", ""))
         log.info("agent_resumed", resume_from=latest.step_seq, step_count=len(plan))
-        return plan, latest.step_seq
+        return plan, latest.step_seq, summaries, context_block
 
-    plan = await _plan(ctx, model, system_prompt, message.prompt, roles.planner)
+    # Fresh run: assemble the conversation-context block exactly once, from
+    # the message history + the inheritance copy inventory (no LLM call).
+    context_block = await assemble_context_block(ctx, list(message.history), inherited)
+    if context_block:
+        log.info(
+            "context_block_assembled",
+            context_bytes=len(context_block.encode("utf-8")),
+            history_turns=len(message.history),
+            inherited_files=len(inherited),
+        )
+
+    planner_input = f"{context_block}\n\n{message.prompt}" if context_block else message.prompt
+    plan = await _plan(ctx, model, system_prompt, planner_input, roles.planner)
     await _emit(ctx, kind="plan", payload={"steps": plan, "step_count": len(plan)})
-    await _safe_checkpoint(
-        cp,
-        step_seq=0,
-        step_name="plan",
-        state={"plan": _plan_state(plan, completed_through=-1), "step_count": len(plan)},
-        log=log,
-    )
+    state: dict[str, Any] = {
+        "plan": _plan_state(plan, completed_through=-1),
+        "step_count": len(plan),
+        "event_seq": ctx.event_seq,
+    }
+    if context_block:
+        state["context_block"] = context_block
+    await _safe_checkpoint(cp, step_seq=0, step_name="plan", state=state, log=log)
     ctx.step = 0
-    return plan, 0
+    return plan, 0, [None] * len(plan), context_block
 
 
 async def _run_step(
@@ -214,11 +298,14 @@ async def _run_step(
     max_step_retries: int,
     log: Any,
     roles: RoleInstructions,
+    context_block: str = "",
 ) -> tuple[str, str, list[ProducedArtifact]]:
     """Execute + critique one step with bounded retries."""
     attempt = 0
     while True:
-        result = await _execute(ctx, model, system_prompt, title, message.prompt, roles.executor)
+        result = await _execute(
+            ctx, model, system_prompt, title, message.prompt, roles.executor, context_block
+        )
         summary = str(result.get("summary", ""))
         attempt_artifacts: list[ProducedArtifact] = []
         for f in result.get("files", []) or []:
@@ -255,8 +342,13 @@ async def _execute(
     title: str,
     prompt: str,
     instruction: str,
+    context_block: str = "",
 ) -> dict[str, Any]:
+    # Context block precedes the task framing; with no block the input stays
+    # byte-identical to the pre-change composition (compatibility invariant).
     content = f"Overall task: {prompt}\nCurrent step: {title}"
+    if context_block:
+        content = f"{context_block}\n\n{content}"
     return await _invoke_json(ctx, model, system_prompt, instruction, content)
 
 
@@ -326,8 +418,25 @@ def _extract_json(text: str) -> dict[str, Any]:
     raise ValueError(f"could not parse JSON from model output: {text[:120]!r}")
 
 
-def _plan_state(plan: list[str], *, completed_through: int) -> list[dict[str, Any]]:
-    return [{"idx": i, "title": t, "done": i <= completed_through} for i, t in enumerate(plan)]
+def _plan_state(
+    plan: list[str],
+    *,
+    completed_through: int,
+    summaries: list[str | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Plan entries for checkpoint state.
+
+    Completed entries carry their executor ``result_summary`` (≤ _SUMMARY_CAP)
+    so a resumed attempt can reassemble the full run summary — including steps
+    a prior attempt executed (spec: "Run Summary Event").
+    """
+    out: list[dict[str, Any]] = []
+    for i, t in enumerate(plan):
+        entry: dict[str, Any] = {"idx": i, "title": t, "done": i <= completed_through}
+        if summaries is not None and i <= completed_through and summaries[i] is not None:
+            entry["result_summary"] = summaries[i]
+        out.append(entry)
+    return out
 
 
 async def _check_boundary(ctx: RunContext, deadline_ts: int | None) -> None:
@@ -358,7 +467,11 @@ async def _safe_checkpoint(
         log.info("checkpoint_replay_skip", step_seq=step_seq)
 
 
-async def _emit(ctx: RunContext, *, kind: str, payload: dict[str, Any]) -> None:
+async def _emit(
+    ctx: RunContext, *, kind: str, payload: dict[str, Any], seq: int | None = None
+) -> None:
+    """Publish a task event. ``seq`` lets the step path pre-reserve its seq
+    before the checkpoint write (see "Resume-Safe Event Sequencing")."""
     await ctx.event_publisher.publish_event(
         task_id=str(ctx.task_id),
         version_id=str(ctx.version_id),
@@ -366,6 +479,6 @@ async def _emit(ctx: RunContext, *, kind: str, payload: dict[str, Any]) -> None:
         task_type=ctx.task_type,
         kind=kind,
         payload=payload,
-        seq=ctx.next_event_seq(),
+        seq=seq if seq is not None else ctx.next_event_seq(),
         traceparent=ctx.traceparent,
     )

@@ -54,14 +54,19 @@ class FakeEventPublisher:
         self.events.append(kwargs)
 
 
+class _FakeCtx(SimpleNamespace):
+    """SimpleNamespace plus the RunContext seq protocol the loop relies on."""
+
+    def next_event_seq(self) -> int:
+        self.event_seq += 1
+        return self.event_seq
+
+    def restore_event_seq(self, high_water: int) -> None:
+        self.event_seq = max(self.event_seq, high_water)
+
+
 def _make_ctx(cp: FakeCheckpointStore, events: FakeEventPublisher) -> Any:
-    seq = {"n": 0}
-
-    def next_event_seq() -> int:
-        seq["n"] += 1
-        return seq["n"]
-
-    return SimpleNamespace(
+    return _FakeCtx(
         task_id=uuid4(),
         version_id=uuid4(),
         run_id=uuid4(),
@@ -74,12 +79,14 @@ def _make_ctx(cp: FakeCheckpointStore, events: FakeEventPublisher) -> Any:
         cancel_token=CancelToken(),
         pause_token=PauseToken(),
         logger=structlog.get_logger(),
-        next_event_seq=next_event_seq,
+        event_seq=0,
     )
 
 
 def _msg(prompt: str = "build a thing", attempt_no: int = 1, deadline_ts: int | None = None) -> Any:
-    return SimpleNamespace(prompt=prompt, attempt_no=attempt_no, deadline_ts=deadline_ts)
+    return SimpleNamespace(
+        prompt=prompt, attempt_no=attempt_no, deadline_ts=deadline_ts, history=[]
+    )
 
 
 async def test_happy_path_plan_steps_finish() -> None:
@@ -113,7 +120,9 @@ async def test_happy_path_plan_steps_finish() -> None:
     # Checkpoints: step_seq 0, 1, 2.
     assert [w[0] for w in cp.writes] == [0, 1, 2]
     # One artifact produced (a.py), ctx.step advanced to 2.
-    assert [a.path for a in produced] == ["a.py"]
+    assert [a.path for a in produced.artifacts] == ["a.py"]
+    # Step summaries captured per plan position for the run-summary event.
+    assert produced.step_summaries == ["did one", "did two"]
     assert ctx.step == 2
 
 
@@ -179,7 +188,7 @@ async def test_retry_then_advance() -> None:
     produced = await run_agent_loop(
         ctx, _msg(), model=model, system_prompt="sys", write_file=write_file, max_step_retries=1
     )
-    assert produced == []
+    assert produced.artifacts == []
     # Exactly one step checkpoint (step_seq=1) plus the plan (0).
     assert [w[0] for w in cp.writes] == [0, 1]
     assert ctx.step == 1
@@ -318,3 +327,220 @@ async def test_pause_blocks_at_boundary_then_resumes() -> None:
     await task
     assert ctx.step == 1
     assert [w[0] for w in cp.writes] == [0, 1]
+
+
+async def test_resume_continues_event_seq_and_restores_summaries() -> None:
+    """Spec: Resume-Safe Event Sequencing + Run Summary Event (resume path).
+
+    Attempt 1 checkpointed at step 2 with event_seq high-water 4. The resumed
+    attempt must emit its next event ABOVE 4 (no (run_id, seq) collision) and
+    surface the prior attempt's step summaries from the restored plan state.
+    """
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    cp.seeded_latest = SimpleNamespace(
+        step_seq=2,
+        step_name="step two",
+        state={
+            "plan": [
+                {"idx": 0, "title": "step one", "done": True, "result_summary": "did one"},
+                {"idx": 1, "title": "step two", "done": True, "result_summary": "did two"},
+                {"idx": 2, "title": "step three", "done": False},
+            ],
+            "step_count": 3,
+            "event_seq": 4,
+        },
+    )
+    model = scripted_model(['{"summary": "did three", "files": []}', '{"verdict": "finish"}'])
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(path=path, oss_key=path, bytes=0, sha256="h")
+
+    result = await run_agent_loop(
+        ctx, _msg(), model=model, system_prompt="sys", write_file=write_file, max_step_retries=0
+    )
+    # One step event for step three only, sequenced past the high-water mark.
+    assert [e["kind"] for e in events.events] == ["step"]
+    assert events.events[0]["seq"] == 5
+    # Full-run summaries: prior attempt's steps restored from the checkpoint.
+    assert result.step_summaries == ["did one", "did two", "did three"]
+    # The new step checkpoint carries the advanced high-water mark and the
+    # accumulated summaries for any further redelivery.
+    last_state = cp.writes[-1][2]
+    assert last_state["event_seq"] == 5
+    assert [e.get("result_summary") for e in last_state["plan"]] == [
+        "did one",
+        "did two",
+        "did three",
+    ]
+
+
+async def test_fresh_run_checkpoints_event_seq_high_water() -> None:
+    """Fresh runs persist the seq high-water from the first checkpoint on."""
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    model = scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "done", "files": []}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(path=path, oss_key=path, bytes=0, sha256="h")
+
+    await run_agent_loop(
+        ctx, _msg(), model=model, system_prompt="sys", write_file=write_file, max_step_retries=0
+    )
+    # plan event seq=1 → plan checkpoint records 1; step event seq=2 reserved
+    # before its checkpoint → step checkpoint records 2.
+    assert [w[2]["event_seq"] for w in cp.writes] == [1, 2]
+    assert [e["seq"] for e in events.events] == [1, 2]
+
+
+# --- conversation-context injection (refactor-task-conversation-continuity) --
+
+
+def _history_msg() -> Any:
+    from worker.core.messages import HistoryTurn
+
+    return SimpleNamespace(
+        prompt="add a settings page",
+        attempt_no=1,
+        deadline_ts=None,
+        history=[
+            HistoryTurn(
+                version_no=1, prompt="build app", summary="built the shell", status="succeeded"
+            ),
+            HistoryTurn(version_no=2, prompt="add login", summary=None, status="failed"),
+        ],
+    )
+
+
+class _ExcerptOss:
+    def __init__(self, contents: dict[str, bytes]) -> None:
+        self._contents = contents
+        self.reads: list[str] = []
+
+    async def get(self, prefix: str, key: str) -> bytes:
+        self.reads.append(key)
+        return self._contents[key]
+
+
+async def test_context_block_injected_into_planner_and_executor() -> None:
+    from tests.support.fake_model import capturing_scripted_model
+
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    ctx.oss_client = _ExcerptOss({"index.html": b"<h1>app</h1>"})
+    ctx.oss_prefix = "t/task/v/"
+    model = capturing_scripted_model(
+        [
+            '{"steps": ["one step"]}',
+            '{"summary": "done", "files": []}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(path=path, oss_key=path, bytes=0, sha256="h")
+
+    await run_agent_loop(
+        ctx,
+        _history_msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=write_file,
+        max_step_retries=0,
+        inherited=[("index.html", 12)],
+    )
+
+    planner_in = model.calls[0][1].content
+    executor_in = model.calls[1][1].content
+    critic_in = model.calls[2][1].content
+    # Planner sees history (oldest first), the failure marker, the inherited
+    # file content, then the current request.
+    assert "[v1] user: build app" in planner_in
+    assert "[v2] result: (this attempt ended FAILED)" in planner_in
+    assert "--- index.html ---" in planner_in
+    assert planner_in.endswith("add a settings page")
+    assert planner_in.index("[v1]") < planner_in.index("[v2]")
+    # Executor gets the same block ahead of the task framing.
+    assert executor_in.startswith("Conversation so far")
+    assert "Overall task: add a settings page" in executor_in
+    # Critic input unchanged — no context block.
+    assert critic_in.startswith("Step: ")
+    # The plan checkpoint persisted the block for resume.
+    assert "context_block" in cp.writes[0][2]
+
+
+async def test_no_history_no_inherit_inputs_byte_identical() -> None:
+    from tests.support.fake_model import capturing_scripted_model
+
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    model = capturing_scripted_model(
+        [
+            '{"steps": ["one step"]}',
+            '{"summary": "done", "files": []}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(path=path, oss_key=path, bytes=0, sha256="h")
+
+    await run_agent_loop(
+        ctx, _msg(), model=model, system_prompt="sys", write_file=write_file, max_step_retries=0
+    )
+    # Pre-change byte-identical composition (compatibility invariant).
+    assert model.calls[0][1].content == "build a thing"
+    assert model.calls[1][1].content == "Overall task: build a thing\nCurrent step: one step"
+    assert "context_block" not in cp.writes[0][2]
+
+
+async def test_resume_restores_context_block_without_oss_reads() -> None:
+    from tests.support.fake_model import capturing_scripted_model
+
+    class _ExplodingOss:
+        async def get(self, prefix: str, key: str) -> bytes:
+            raise AssertionError("resume must not re-read OSS for the context block")
+
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    ctx.oss_client = _ExplodingOss()
+    cp.seeded_latest = SimpleNamespace(
+        step_seq=1,
+        step_name="step one",
+        state={
+            "plan": [
+                {"idx": 0, "title": "step one", "done": True, "result_summary": "did one"},
+                {"idx": 1, "title": "step two", "done": False},
+            ],
+            "step_count": 2,
+            "event_seq": 2,
+            "context_block": "Conversation so far (oldest first):\n[v1] user: build app",
+        },
+    )
+    model = capturing_scripted_model(
+        ['{"summary": "did two", "files": []}', '{"verdict": "finish"}']
+    )
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(path=path, oss_key=path, bytes=0, sha256="h")
+
+    await run_agent_loop(
+        ctx,
+        _history_msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=write_file,
+        max_step_retries=0,
+        inherited=[],  # resume: inheritance was skipped upstream
+    )
+    # Executor input uses the checkpointed block verbatim (no planner call on resume).
+    executor_in = model.calls[0][1].content
+    assert executor_in.startswith("Conversation so far (oldest first):\n[v1] user: build app")
+    # The new step checkpoint carries the block forward for further redeliveries.
+    assert cp.writes[-1][2]["context_block"].startswith("Conversation so far")

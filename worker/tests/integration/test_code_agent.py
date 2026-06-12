@@ -153,8 +153,13 @@ async def test_code_agent_success_writes_artifact_and_checkpoints(
     agent = build_code_agent(FakeModelFactory(model=_script()), persistence, settings_for_agent)
     await agent.run(ctx, _msg(ctx))
 
-    # Plan + two step events.
-    assert [e["kind"] for e in events.events] == ["plan", "step", "step"]
+    # Plan + two step events, then the run-summary event after artifact rows.
+    assert [e["kind"] for e in events.events] == ["plan", "step", "step", "summary"]
+    assert events.events[-1]["payload"]["summary"] == "1. wrote main\n2. done"
+    # Seqs are strictly increasing (step seqs are pre-reserved before their
+    # checkpoints; the summary event continues the sequence).
+    seqs = [e["seq"] for e in events.events]
+    assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs)
     # File written under the run's OSS prefix.
     assert f"{ctx.oss_prefix}main.py" in oss.objects
     # Artifact row persisted.
@@ -238,8 +243,13 @@ async def test_resume_from_db_checkpoint_skips_planner(
         step_seq=2,
         step_name="step 1",
         state={
-            "plan": [{"idx": i, "title": t, "done": i < 2} for i, t in enumerate(plan)],
+            "plan": [
+                {"idx": i, "title": t, "done": i < 2}
+                | ({"result_summary": f"s{i + 1}"} if i < 2 else {})
+                for i, t in enumerate(plan)
+            ],
             "step_count": 4,
+            "event_seq": 3,
         },
         oss_key=None,
     )
@@ -255,8 +265,14 @@ async def test_resume_from_db_checkpoint_skips_planner(
     agent = build_code_agent(FakeModelFactory(model=model), persistence, settings_for_agent)
     await agent.run(ctx, _msg(ctx))
 
-    # No plan event on resume; two step events.
-    assert [e["kind"] for e in events.events] == ["step", "step"]
+    # No plan event on resume; two step events plus the run summary.
+    assert [e["kind"] for e in events.events] == ["step", "step", "summary"]
+    # Seq continues past the checkpointed high-water mark (3) — no collision
+    # with attempt 1's persisted (run_id, seq) rows.
+    assert [e["seq"] for e in events.events] == [4, 5, 6]
+    # The summary spans BOTH attempts' steps (spec: "Resumed run summarizes
+    # all steps, not just its own").
+    assert events.events[-1]["payload"]["summary"] == "1. s1\n2. s2\n3. s3\n4. s4"
     assert ctx.step == 4
     async with pg_pool.acquire() as conn:
         cps = await conn.fetch(

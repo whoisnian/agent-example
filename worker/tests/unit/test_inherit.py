@@ -67,9 +67,9 @@ async def test_inherit_copies_and_records_each_object() -> None:
     persistence = FakePersistence()
     ctx = _ctx(oss)
 
-    count = await inherit_parent_artifacts(ctx, persistence, uuid4())
+    copied = await inherit_parent_artifacts(ctx, persistence, uuid4())
 
-    assert count == 2
+    assert copied == [("code/main.py", 12), ("README.md", 5)]
     # Each object copied into the new run's prefix.
     assert [c[1] for c in oss.copied] == [ctx.oss_prefix, ctx.oss_prefix]
     assert [c[2] for c in oss.copied] == ["code/main.py", "README.md"]
@@ -87,9 +87,9 @@ async def test_inherit_skips_checkpoint_blobs() -> None:
     persistence = FakePersistence()
     ctx = _ctx(oss)
 
-    count = await inherit_parent_artifacts(ctx, persistence, uuid4())
+    copied = await inherit_parent_artifacts(ctx, persistence, uuid4())
 
-    assert count == 1
+    assert copied == [("out.txt", 3)]
     assert [c[2] for c in oss.copied] == ["out.txt"]  # checkpoint blob not copied
     assert [r["oss_key"] for r in persistence.rows] == [ctx.oss_prefix + "out.txt"]
 
@@ -99,9 +99,9 @@ async def test_inherit_empty_parent_is_noop() -> None:
     persistence = FakePersistence()
     ctx = _ctx(oss)
 
-    count = await inherit_parent_artifacts(ctx, persistence, uuid4())
+    copied = await inherit_parent_artifacts(ctx, persistence, uuid4())
 
-    assert count == 0
+    assert copied == []
     assert oss.copied == []
     assert persistence.rows == []
 

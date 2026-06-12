@@ -51,6 +51,10 @@ class Metrics:
     # Semantic title generation
     title_generation_failures_total: Counter
 
+    # Conversation continuity (refactor-task-conversation-continuity)
+    invalid_history_total: Counter
+    summary_events_total: Counter
+
 
 def build_metrics(registry: CollectorRegistry | None = None) -> Metrics:
     """Create and register the worker metric set on the given registry.
@@ -146,6 +150,16 @@ def build_metrics(registry: CollectorRegistry | None = None) -> Metrics:
         title_generation_failures_total=Counter(
             "worker_title_generation_failures_total",
             "Semantic title generations that failed (LLM error/timeout/publish/empty output).",
+            registry=reg,
+        ),
+        invalid_history_total=Counter(
+            "worker_invalid_history_total",
+            "Execute messages whose history field failed to parse and was degraded to empty.",
+            registry=reg,
+        ),
+        summary_events_total=Counter(
+            "worker_summary_events_total",
+            "kind=summary task events emitted at successful run end.",
             registry=reg,
         ),
     )

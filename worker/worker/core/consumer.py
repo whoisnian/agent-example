@@ -133,6 +133,15 @@ class TaskConsumer:
                 await message.nack(requeue=False)
                 self._metrics.messages_consumed_total.labels(outcome="invalid").inc()
                 return
+            if parsed.history_invalid:
+                # History degraded to empty (worker-messaging): the run executes
+                # without conversation context rather than dead-lettering.
+                self._log.warning(
+                    "invalid_history_degraded",
+                    task_id=str(parsed.task_id),
+                    run_id=str(parsed.run_id),
+                )
+                self._metrics.invalid_history_total.inc()
 
             await self._process(parsed, message)
         finally:
@@ -248,6 +257,14 @@ class TaskConsumer:
                 oss_client=self._oss,
                 inline_byte_limit=self._checkpoint_inline_bytes,
             )
+
+            # Resume-safe event sequencing: a redelivered run continues its
+            # event seq from the checkpointed high-water mark BEFORE emitting
+            # anything (even status=running), or every event of this attempt
+            # collides with the prior attempt's (run_id, seq) and is dropped.
+            latest_cp = await ctx.checkpoint_store.latest()
+            if latest_cp is not None:
+                ctx.restore_event_seq(int(latest_cp.state.get("event_seq", 0)))
 
             self._control.current_run = ctx
             terminal_status = "failed"
