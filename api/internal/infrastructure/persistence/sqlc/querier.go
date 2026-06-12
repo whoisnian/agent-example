@@ -79,6 +79,12 @@ type Querier interface {
 	// iterate request's optional `base_version_id` belongs to the path task_id
 	// atomically, without round-tripping a separate ownership check.
 	GetVersionByTaskAndID(ctx context.Context, arg GetVersionByTaskAndIDParams) (TaskVersion, error)
+	// Narrow per-hop lookup for walking the parent chain from a base version up
+	// to the root (history assembly, task-conversation-history). The walk loop
+	// and its depth bound live in the Domain Service: chain depth is capped at a
+	// small constant, so bounded PK point-reads inside the iterate transaction
+	// beat a recursive CTE that sqlc's analyzer cannot type.
+	GetVersionChainEntry(ctx context.Context, id pgtype.UUID) (GetVersionChainEntryRow, error)
 	// One row per version. Returns no rows if the Cost Service hasn't yet
 	// upserted anything for the version (treat as "0 across the board").
 	GetVersionCost(ctx context.Context, versionID pgtype.UUID) (TaskCost, error)
@@ -253,6 +259,12 @@ type Querier interface {
 	// Setting a terminal status flips the generated is_active column to false
 	// automatically, freeing the one_active_version_per_task index slot.
 	UpdateVersionStatus(ctx context.Context, arg UpdateVersionStatusParams) (int64, error)
+	// Run-result summary write driven by a worker `kind=summary` event
+	// (refactor-task-conversation-continuity). Last-write-wins by design, no
+	// terminal guard — the summary event races the trailing status event at run
+	// end. Sanitation and truncation happen in the Domain Service
+	// (ApplyVersionSummary); this is not a state-machine transition.
+	UpdateVersionSummary(ctx context.Context, arg UpdateVersionSummaryParams) (int64, error)
 	// Idempotent dev-seed of the tenant. Keyed on id so repeated boots converge;
 	// the name is left untouched on conflict (the seed only guarantees existence).
 	UpsertTenant(ctx context.Context, arg UpsertTenantParams) error

@@ -17,7 +17,7 @@ INSERT INTO task_versions (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
+RETURNING id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at, summary
 `
 
 type CreateTaskVersionParams struct {
@@ -59,12 +59,13 @@ func (q *Queries) CreateTaskVersion(ctx context.Context, arg CreateTaskVersionPa
 		&i.IsActive,
 		&i.ArtifactRoot,
 		&i.CreatedAt,
+		&i.Summary,
 	)
 	return i, err
 }
 
 const getActiveVersionByTask = `-- name: GetActiveVersionByTask :one
-SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
+SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at, summary
 FROM task_versions
 WHERE task_id = $1 AND is_active
 ORDER BY version_no DESC
@@ -89,12 +90,13 @@ func (q *Queries) GetActiveVersionByTask(ctx context.Context, taskID pgtype.UUID
 		&i.IsActive,
 		&i.ArtifactRoot,
 		&i.CreatedAt,
+		&i.Summary,
 	)
 	return i, err
 }
 
 const getTaskVersionByID = `-- name: GetTaskVersionByID :one
-SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
+SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at, summary
 FROM task_versions
 WHERE id = $1
 `
@@ -113,12 +115,13 @@ func (q *Queries) GetTaskVersionByID(ctx context.Context, id pgtype.UUID) (TaskV
 		&i.IsActive,
 		&i.ArtifactRoot,
 		&i.CreatedAt,
+		&i.Summary,
 	)
 	return i, err
 }
 
 const getVersionByTaskAndID = `-- name: GetVersionByTaskAndID :one
-SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
+SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at, summary
 FROM task_versions
 WHERE id = $1 AND task_id = $2
 `
@@ -145,6 +148,41 @@ func (q *Queries) GetVersionByTaskAndID(ctx context.Context, arg GetVersionByTas
 		&i.IsActive,
 		&i.ArtifactRoot,
 		&i.CreatedAt,
+		&i.Summary,
+	)
+	return i, err
+}
+
+const getVersionChainEntry = `-- name: GetVersionChainEntry :one
+SELECT id, parent_id, version_no, prompt, summary, status
+FROM task_versions
+WHERE id = $1
+`
+
+type GetVersionChainEntryRow struct {
+	ID        pgtype.UUID `json:"id"`
+	ParentID  pgtype.UUID `json:"parent_id"`
+	VersionNo int32       `json:"version_no"`
+	Prompt    string      `json:"prompt"`
+	Summary   *string     `json:"summary"`
+	Status    string      `json:"status"`
+}
+
+// Narrow per-hop lookup for walking the parent chain from a base version up
+// to the root (history assembly, task-conversation-history). The walk loop
+// and its depth bound live in the Domain Service: chain depth is capped at a
+// small constant, so bounded PK point-reads inside the iterate transaction
+// beat a recursive CTE that sqlc's analyzer cannot type.
+func (q *Queries) GetVersionChainEntry(ctx context.Context, id pgtype.UUID) (GetVersionChainEntryRow, error) {
+	row := q.db.QueryRow(ctx, getVersionChainEntry, id)
+	var i GetVersionChainEntryRow
+	err := row.Scan(
+		&i.ID,
+		&i.ParentID,
+		&i.VersionNo,
+		&i.Prompt,
+		&i.Summary,
+		&i.Status,
 	)
 	return i, err
 }
@@ -168,7 +206,7 @@ func (q *Queries) GetVersionOwnerTaskID(ctx context.Context, id pgtype.UUID) (pg
 }
 
 const listVersionsByTask = `-- name: ListVersionsByTask :many
-SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at
+SELECT id, task_id, parent_id, version_no, prompt, params, status, is_active, artifact_root, created_at, summary
 FROM task_versions
 WHERE task_id = $1
 ORDER BY version_no ASC
@@ -196,6 +234,7 @@ func (q *Queries) ListVersionsByTask(ctx context.Context, taskID pgtype.UUID) ([
 			&i.IsActive,
 			&i.ArtifactRoot,
 			&i.CreatedAt,
+			&i.Summary,
 		); err != nil {
 			return nil, err
 		}
@@ -246,6 +285,30 @@ type UpdateVersionStatusParams struct {
 // automatically, freeing the one_active_version_per_task index slot.
 func (q *Queries) UpdateVersionStatus(ctx context.Context, arg UpdateVersionStatusParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateVersionStatus, arg.ID, arg.Status)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const updateVersionSummary = `-- name: UpdateVersionSummary :execrows
+UPDATE task_versions
+SET summary = $2
+WHERE id = $1
+`
+
+type UpdateVersionSummaryParams struct {
+	ID      pgtype.UUID `json:"id"`
+	Summary *string     `json:"summary"`
+}
+
+// Run-result summary write driven by a worker `kind=summary` event
+// (refactor-task-conversation-continuity). Last-write-wins by design, no
+// terminal guard — the summary event races the trailing status event at run
+// end. Sanitation and truncation happen in the Domain Service
+// (ApplyVersionSummary); this is not a state-machine transition.
+func (q *Queries) UpdateVersionSummary(ctx context.Context, arg UpdateVersionSummaryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateVersionSummary, arg.ID, arg.Summary)
 	if err != nil {
 		return 0, err
 	}

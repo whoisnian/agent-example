@@ -74,3 +74,23 @@ SET status = $2
 WHERE id = $1
   AND status NOT IN ('succeeded', 'failed', 'cancelled')
   AND status IS DISTINCT FROM $2;
+
+-- name: UpdateVersionSummary :execrows
+-- Run-result summary write driven by a worker `kind=summary` event
+-- (refactor-task-conversation-continuity). Last-write-wins by design, no
+-- terminal guard — the summary event races the trailing status event at run
+-- end. Sanitation and truncation happen in the Domain Service
+-- (ApplyVersionSummary); this is not a state-machine transition.
+UPDATE task_versions
+SET summary = $2
+WHERE id = $1;
+
+-- name: GetVersionChainEntry :one
+-- Narrow per-hop lookup for walking the parent chain from a base version up
+-- to the root (history assembly, task-conversation-history). The walk loop
+-- and its depth bound live in the Domain Service: chain depth is capped at a
+-- small constant, so bounded PK point-reads inside the iterate transaction
+-- beat a recursive CTE that sqlc's analyzer cannot type.
+SELECT id, parent_id, version_no, prompt, summary, status
+FROM task_versions
+WHERE id = $1;

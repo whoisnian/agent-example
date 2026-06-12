@@ -131,6 +131,7 @@ type TaskVersion struct {
 	IsActive     *bool              `json:"is_active"`
 	ArtifactRoot *string            `json:"artifact_root"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	Summary      *string            `json:"summary"`
 }
 
 type Tenant struct {
