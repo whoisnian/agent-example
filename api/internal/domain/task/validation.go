@@ -105,6 +105,38 @@ func sanitizeGeneratedTitle(raw string) string {
 	return prefix + ellipsis
 }
 
+// maxSummaryBytes caps a worker-generated run summary as persisted on
+// task_versions.summary (refactor-task-conversation-continuity). Byte-only
+// limit — summaries are free text, no rune-count rule like titles.
+const maxSummaryBytes = 2048
+
+// sanitizeVersionSummary normalizes a worker-generated run summary before it
+// is persisted by ApplyVersionSummary: trim, then rune-boundary truncation so
+// the FINAL string — including the appended ellipsis — stays within
+// maxSummaryBytes. Returns "" when the input is unusable; the caller skips
+// the update (spec: task-event-ingest → "Summary events update the version
+// summary").
+func sanitizeVersionSummary(raw string) string {
+	t := strings.TrimSpace(raw)
+	if t == "" || len(t) <= maxSummaryBytes {
+		return t
+	}
+	const ellipsis = "…" // 3 bytes, counted inside the limit
+	maxBytes := maxSummaryBytes - len(ellipsis)
+	cut := len(t)
+	for i, r := range t {
+		if i+utf8.RuneLen(r) > maxBytes {
+			cut = i
+			break
+		}
+	}
+	prefix := strings.TrimRightFunc(t[:cut], unicode.IsSpace)
+	if prefix == "" {
+		return ""
+	}
+	return prefix + ellipsis
+}
+
 // validateTaskType enforces the kebab-case slug. Trim is rejected because
 // task_type is an identifier, not free text.
 func validateTaskType(raw string) (string, error) {

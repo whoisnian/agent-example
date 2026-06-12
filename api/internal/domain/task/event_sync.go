@@ -35,6 +35,12 @@ type titlePayload struct {
 	Title string `json:"title"`
 }
 
+// summaryPayload is the shape of a `kind=summary` event body
+// (refactor-task-conversation-continuity).
+type summaryPayload struct {
+	Summary string `json:"summary"`
+}
+
 // IngestEvent persists one worker event and, for `status`/`error` events,
 // drives the version + task state machine in the same transaction
 // (add-event-ingest-status-sync). It is the authoritative writer of
@@ -78,6 +84,29 @@ func (s *Service) IngestEvent(ctx context.Context, in IngestEventInput) (transit
 			// the event row above is still committed.
 			_ = json.Unmarshal(in.Payload, &p)
 			applied, err = s.ApplyGeneratedTitle(ctx, q, in.TaskID, p.Title)
+			if err != nil {
+				return false, err
+			}
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return false, fmt.Errorf("commit: %w", err)
+		}
+		return applied, nil
+	}
+
+	// `kind=summary` updates task_versions.summary in the same tx
+	// (refactor-task-conversation-continuity). Same discipline as title: a
+	// duplicate delivery (inserted == 0) must not re-apply; a fresh event is
+	// last-write-wins with no terminal guard (the summary event races the
+	// trailing status event at run end). Not a state-machine transition.
+	if in.Kind == "summary" {
+		applied := false
+		if inserted > 0 {
+			var p summaryPayload
+			// Malformed/absent payload.summary → sanitizer yields "" →
+			// skipped; the event row above is still committed.
+			_ = json.Unmarshal(in.Payload, &p)
+			applied, err = s.ApplyVersionSummary(ctx, q, in.VersionID, p.Summary)
 			if err != nil {
 				return false, err
 			}
@@ -153,6 +182,32 @@ func (s *Service) ApplyGeneratedTitle(
 	})
 	if err != nil {
 		return false, fmt.Errorf("update task title: %w", err)
+	}
+	return rows > 0, nil
+}
+
+// ApplyVersionSummary sanitizes a worker-generated run summary and persists it
+// on the task_versions row through the dedicated query — never an ad-hoc
+// UPDATE (spec: task-event-ingest → "Summary events update the version
+// summary"). An empty or all-whitespace summary is silently skipped. The
+// caller passes the tx-bound queries so the write shares the event-insert
+// transaction.
+func (s *Service) ApplyVersionSummary(
+	ctx context.Context,
+	q *sqlc.Queries,
+	versionID uuid.UUID,
+	raw string,
+) (bool, error) {
+	summary := sanitizeVersionSummary(raw)
+	if summary == "" {
+		return false, nil
+	}
+	rows, err := q.UpdateVersionSummary(ctx, sqlc.UpdateVersionSummaryParams{
+		ID:      toPgUUID(versionID),
+		Summary: &summary,
+	})
+	if err != nil {
+		return false, fmt.Errorf("update version summary: %w", err)
 	}
 	return rows > 0, nil
 }

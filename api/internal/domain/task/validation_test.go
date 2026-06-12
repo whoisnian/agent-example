@@ -231,3 +231,39 @@ func TestSanitizeGeneratedTitleByteBound(t *testing.T) {
 		t.Fatalf("bytes = %d, want <= 200", n)
 	}
 }
+
+func TestSanitizeVersionSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"plain", "did the thing", "did the thing"},
+		{"trimmed", "  did the thing\n", "did the thing"},
+		{"empty", "", ""},
+		{"whitespace only", "  \n\t ", ""},
+		{"exactly at limit", strings.Repeat("a", 2048), strings.Repeat("a", 2048)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeVersionSummary(tt.in); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeVersionSummaryTruncation(t *testing.T) {
+	// 800 × 3-byte runes = 2400 bytes > 2048: must cut on a rune boundary,
+	// append the ellipsis, and stay within the byte cap.
+	got := sanitizeVersionSummary(strings.Repeat("汉", 800))
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("want ellipsis suffix, got %q…", got[len(got)-12:])
+	}
+	if n := len(got); n > 2048 {
+		t.Fatalf("bytes = %d, want <= 2048", n)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("result must be valid UTF-8")
+	}
+}

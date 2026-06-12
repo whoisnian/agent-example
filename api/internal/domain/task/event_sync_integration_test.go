@@ -517,3 +517,168 @@ func TestIngestTitleOversizedTruncated(t *testing.T) {
 		t.Errorf("title bytes = %d, want <= 200", n)
 	}
 }
+
+// --- kind=summary → task_versions.summary (refactor-task-conversation-continuity)
+
+func summaryEvent(taskID, versionID, runID uuid.UUID, seq int64, summary string) IngestEventInput {
+	payload, _ := json.Marshal(map[string]string{"summary": summary})
+	return IngestEventInput{
+		TaskID: taskID, VersionID: versionID, RunID: runID,
+		Seq: seq, Kind: "summary", Payload: payload,
+	}
+}
+
+func (s *ingestSuite) versionSummary(t *testing.T, id uuid.UUID) *string {
+	t.Helper()
+	row, err := s.queries.GetTaskVersionByID(context.Background(), toPgUUID(id))
+	if err != nil {
+		t.Fatalf("GetTaskVersionByID: %v", err)
+	}
+	return row.Summary
+}
+
+func TestIngestSummaryUpdatesVersionSummary(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	applied, err := s.svc.IngestEvent(context.Background(),
+		summaryEvent(taskID, versionID, runID, 1, "完成登录页与表单校验"))
+	if err != nil {
+		t.Fatalf("IngestEvent: %v", err)
+	}
+	if !applied {
+		t.Error("expected applied=true")
+	}
+	got := s.versionSummary(t, versionID)
+	if got == nil || *got != "完成登录页与表单校验" {
+		t.Errorf("summary = %v, want 完成登录页与表单校验", got)
+	}
+	// Summary events never touch the state machine.
+	if got := s.versionStatus(t, versionID); got != "pending" {
+		t.Errorf("version status = %q, want pending (unchanged)", got)
+	}
+	if got := s.eventCount(t, taskID); got != 1 {
+		t.Errorf("event rows = %d, want 1", got)
+	}
+}
+
+func TestIngestSummaryAppliesAfterTerminal(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	_, _ = s.svc.IngestEvent(context.Background(), statusEvent(taskID, versionID, runID, 1, "running"))
+	_, _ = s.svc.IngestEvent(context.Background(), statusEvent(taskID, versionID, runID, 2, "succeeded"))
+
+	// The summary event races the trailing status event — late still applies.
+	applied, err := s.svc.IngestEvent(context.Background(),
+		summaryEvent(taskID, versionID, runID, 3, "shipped the thing"))
+	if err != nil {
+		t.Fatalf("IngestEvent summary: %v", err)
+	}
+	if !applied {
+		t.Error("expected applied=true after terminal status")
+	}
+	if got := s.versionSummary(t, versionID); got == nil || *got != "shipped the thing" {
+		t.Errorf("summary = %v", got)
+	}
+	if got := s.versionStatus(t, versionID); got != "succeeded" {
+		t.Errorf("version status = %q, want succeeded (unchanged)", got)
+	}
+}
+
+func TestIngestSummaryRedeliveryNoop(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	if _, err := s.svc.IngestEvent(context.Background(),
+		summaryEvent(taskID, versionID, runID, 1, "first summary")); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// Overwrite out-of-band, then redeliver the same (run_id, seq): the
+	// duplicate must not re-apply (insert no-op covers the summary write).
+	if _, err := s.pool.Exec(context.Background(),
+		`UPDATE task_versions SET summary = 'manual' WHERE id = $1`, versionID); err != nil {
+		t.Fatalf("manual update: %v", err)
+	}
+	applied, err := s.svc.IngestEvent(context.Background(),
+		summaryEvent(taskID, versionID, runID, 1, "first summary"))
+	if err != nil {
+		t.Fatalf("redeliver: %v", err)
+	}
+	if applied {
+		t.Error("expected applied=false on redelivery")
+	}
+	if got := s.versionSummary(t, versionID); got == nil || *got != "manual" {
+		t.Errorf("summary = %v, want manual (redelivery must not re-apply)", got)
+	}
+	if got := s.eventCount(t, taskID); got != 1 {
+		t.Errorf("event rows = %d, want 1 (dedupe)", got)
+	}
+}
+
+func TestIngestSummaryEmptyOrMissingPersistOnly(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	// Whitespace-only payload.summary → event row only, no column change.
+	applied, err := s.svc.IngestEvent(context.Background(),
+		summaryEvent(taskID, versionID, runID, 1, "   \n\t "))
+	if err != nil {
+		t.Fatalf("whitespace summary: %v", err)
+	}
+	if applied {
+		t.Error("expected applied=false for whitespace summary")
+	}
+
+	// Missing payload.summary entirely.
+	applied, err = s.svc.IngestEvent(context.Background(), IngestEventInput{
+		TaskID: taskID, VersionID: versionID, RunID: runID,
+		Seq: 2, Kind: "summary", Payload: json.RawMessage(`{"unexpected":"shape"}`),
+	})
+	if err != nil {
+		t.Fatalf("missing summary: %v", err)
+	}
+	if applied {
+		t.Error("expected applied=false for missing summary")
+	}
+
+	if got := s.versionSummary(t, versionID); got != nil {
+		t.Errorf("summary = %v, want NULL unchanged", got)
+	}
+	if got := s.eventCount(t, taskID); got != 2 {
+		t.Errorf("event rows = %d, want 2 (both persisted)", got)
+	}
+}
+
+func TestIngestSummaryOversizedTruncated(t *testing.T) {
+	s := newIngestSuite(t)
+	taskID, versionID := s.seedTask(t)
+	runID := uuid.New()
+
+	long := strings.Repeat("汉", 800) // 2400 bytes > 2048
+	applied, err := s.svc.IngestEvent(context.Background(),
+		summaryEvent(taskID, versionID, runID, 1, long))
+	if err != nil {
+		t.Fatalf("IngestEvent: %v", err)
+	}
+	if !applied {
+		t.Error("expected applied=true")
+	}
+	got := s.versionSummary(t, versionID)
+	if got == nil {
+		t.Fatal("summary is NULL, want truncated value")
+	}
+	if !strings.HasSuffix(*got, "…") {
+		t.Errorf("summary should end with ellipsis")
+	}
+	if n := len(*got); n > 2048 {
+		t.Errorf("summary bytes = %d, want <= 2048", n)
+	}
+	if !utf8.ValidString(*got) {
+		t.Error("summary must remain valid UTF-8 (rune-boundary cut)")
+	}
+}
