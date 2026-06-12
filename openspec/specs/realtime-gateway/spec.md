@@ -46,7 +46,7 @@ The gateway SHALL accept client→server text frames `{op:"subscribe", topics:[.
 
 In response to `{op:"ping"}` the gateway MUST send an **application-level** `{op:"pong"}` text frame (not merely a protocol-level pong). The browser `WebSocket` API does not surface protocol pongs to `onmessage`, so the client's inbound-liveness timer would not reset on an idle connection and the client would needlessly reconnect; an app-level text frame keeps idle connections alive.
 
-The server→client event frame shape MUST be exactly `{topic, kind, seq, ts, payload}` where `kind` is the worker event's `kind` forwarded verbatim — the currently emitted kinds are `status`, `log`, `plan`, `step`, `artifact`, `error`, and `title`, and the gateway MUST NOT reject or rewrite a kind it does not recognise — `seq` is the event's monotonic sequence, `ts` is an RFC3339 UTC timestamp, and `payload` is the event body verbatim.
+The server→client event frame shape MUST be exactly `{topic, kind, seq, ts, payload}` where `kind` is the worker event's `kind` forwarded verbatim — the currently emitted kinds are `status`, `log`, `plan`, `step`, `artifact`, `error`, `title`, and `summary`, and the gateway MUST NOT reject or rewrite a kind it does not recognise — `seq` is the event's monotonic sequence, `ts` is an RFC3339 UTC timestamp, and `payload` is the event body verbatim.
 
 An unrecognized `op`, or a topic that is not a well-formed `task:<uuid>` / `version:<uuid>`, elicits an `error`-kind frame and MUST NOT change the subscription set or drop the connection. Error frames are diagnostic and primarily surface in server logs/metrics: the current web client ignores any frame that is not a well-formed event (it requires `topic`+`kind`+`seq`+`ts`), so a malformed-topic error is not rendered in the UI — it MUST still be logged/counted server-side.
 
@@ -59,6 +59,11 @@ An unrecognized `op`, or a topic that is not a well-formed `task:<uuid>` / `vers
 - **GIVEN** a connection subscribed to `task:T1`
 - **WHEN** a worker event with `kind="title"` for `T1` arrives on the fan-out consumer
 - **THEN** the connection MUST receive a frame with `kind="title"` and the event's `payload` unchanged
+
+#### Scenario: Summary events are forwarded verbatim
+- **GIVEN** a connection subscribed to `version:V1`
+- **WHEN** a worker event with `kind="summary"` for `V1` arrives on the fan-out consumer
+- **THEN** the connection MUST receive a frame with `kind="summary"` and the event's `payload` unchanged
 
 #### Scenario: Duplicate subscribe is idempotent
 - **GIVEN** a connection already subscribed to `task:T1`

@@ -151,3 +151,14 @@ web 前端界面依旧需要优化：
 /opsx:apply
 /opsx:archive
 ```
+
+### 2026-06-13-refactor-task-conversation-continuity
+```md
+在已有任务 v1 版本后继续输入，点击 Iterate 后，执行结果似乎与前置已生成的内容无关，分析可能的原因
+期望重构“继续对话”逻辑，同一 task 维持一份对话历史、上下文、产物目录，实现真正意义上的单个 task
+新起一个 subagent 来 review 当前提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
+整理 commit 并提交到远端仓库
+
+/opsx:apply
+/opsx:archive
+```
