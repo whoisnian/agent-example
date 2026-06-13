@@ -45,10 +45,12 @@ export function useTaskLive(
         const versionId = event.topic.slice("version:".length);
         if (versionId) {
           void queryClient.invalidateQueries({ queryKey: taskKeys.events(versionId) });
-          // An artifact frame (file produced) or a status frame (run flipped,
-          // e.g. terminal) means the version's artifact set changed — refresh
-          // it so the turn's card appears/updates live, no manual refresh.
-          if (event.kind === "artifact" || event.kind === "status") {
+          // Refresh the version's artifact list on a STATUS frame only — the
+          // aggregate card is withheld until the version is terminal, so its
+          // data only needs to be current at completion (no per-file churn
+          // mid-run). The terminal status frame both flips the card's gate
+          // (via the versions refetch) and refreshes its data here.
+          if (event.kind === "status") {
             void queryClient.invalidateQueries({ queryKey: artifactKeys.byVersion(versionId) });
           }
         }

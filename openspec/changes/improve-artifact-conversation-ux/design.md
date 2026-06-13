@@ -34,9 +34,9 @@ Task Detail 已是"一回合 = 一版本"的对话布局（`ConversationTurn`）
 
 **关键时序：产物落库 + 事件 seq 预留必须在该 step 的 checkpoint 写入之前**（沿用现有 step 事件的 cadence，`loop.py:186` 注释已解释同一原理）。否则有两条真实事故路径：① persist 在 checkpoint 之后、crash 落在二者之间 → resume 跳过该 step（checkpoint 已推进），OSS 对象永远没有 DB 行，而末尾批量 insert 已被本变更移除、无补偿；② artifact 事件 seq 若不被 checkpoint 的 `event_seq` 快照覆盖 → resume 后 `restore_event_seq` 重新发放这些 seq，被 ingest 的 `(run_id, seq)` 幂等静默丢弃（含 summary）。因此回调内顺序固定为：upsert 行 → 预留 step+artifact 全部 seq → 写 checkpoint → 发 step 事件 + artifact 事件。crash-before-checkpoint 时整 step 重跑、upsert 收敛，发放的 seq 全在恢复高水位之上，不冲突。继承产物（`inherit.py`）保持 run 开始时一次性落库，同样写 `path` 并发 `artifact` 事件，前端在 v2 回合开头即可见继承自 v1 的文件。
 
-web 侧 `useTaskLive` 的 `version:` 分支增加：`kind === "artifact"` 或 `kind === "status"` 时失效该版本的产物查询缓存。选择"失效 + refetch"而非用 payload 直接写缓存：列表的排序/空态契约由服务端权威，避免客户端拼装偏差；artifact 事件频率低（文件级），多一次 GET 可接受。
+web 侧 `useTaskLive` 的 `version:` 分支：**仅 `kind === "status"`** 时失效该版本的产物查询缓存（不再随每个 `artifact` 帧失效）。配合 D5 的"终态才显示产物卡"：产物卡在版本活跃期不渲染，故无需 mid-run 刷新；版本收尾的 status 帧同时翻转卡片门控（versions refetch 更新 status）并刷新产物列表，完成即出卡、无需手刷。worker 仍逐 step 发 `kind=artifact` 事件（实时数据通道保留），前端选择不在执行中消费它驱动产物展示。
 
-> 备选：仅靠终态 status 失效（不改 worker）——无法满足"执行过程中实时展示"，弃。
+> 设计调整（实测反馈）：初版让产物在执行过程中即随 `artifact` 帧出现。但 run 未完时产物集仍在变（可能再产文件、可能失败），mid-run 展示易产生"这就是最终产物吗"的歧义。改为**仅在版本终态（succeeded/failed/cancelled）显示聚合产物卡**——仍自动出现（status 帧驱动），只是时机推迟到完成。执行日志里也不再渲染 `artifact` 行（见 D7）。
 
 ### D2 `path` 列：迁移 0010 + 精确回填，DTO 透出
 
@@ -68,7 +68,9 @@ web 侧：HTML 渲染视图改为 mint 一次 preview base，iframe `src = base_
 
 ### D5 回合重排 + 聚合产物卡片
 
-`ConversationTurn` 内顺序调整为：prompt（右对齐）→ `children`（执行过程）→ 产物 → 回滚 footer。产物从平铺多卡改为**单张聚合卡**：图标 + "N file(s) · 总大小" + 文件名摘要（前几个 `path`）+ "Download zip" 按钮（archive presign → `window.location.assign`）。即使版本只有单个文件也统一走 zip，保持行为可预期（逐文件下载仍可在右栏预览面板进行）。点击卡片主体 = 现有 `selectArtifact(versionId, firstArtifactId)`，右栏预览面板展开该版本文件列表（面板已具备列表+逐文件预览/下载，仅加 `path` 显示）。
+`ConversationTurn` 内顺序调整为：prompt（右对齐）→ result line → `children`（执行过程）→ 产物 → 回滚 footer。产物从平铺多卡改为**单张聚合卡**：图标 + "N file(s) · 总大小" + 文件名摘要（前几个 `path`）+ "Download zip" 按钮（archive presign → `window.location.assign`）。即使版本只有单个文件也统一走 zip，保持行为可预期（逐文件下载仍可在右栏预览面板进行）。点击卡片主体 = 现有 `selectArtifact(versionId, firstArtifactId)`，右栏预览面板展开该版本文件列表（面板已具备列表+逐文件预览/下载，仅加 `path` 显示）。
+
+> **产物卡仅在版本终态渲染**（succeeded/failed/cancelled）：活跃期 `TurnArtifacts` 直接返回 null（在 hook 调用之后按 `isActiveStatus(version.status)` 门控）。原因见 D1——mid-run 产物集仍在变，展示有歧义。完成时由 status 帧驱动出现，无需手刷。失败/取消版本也显示（其部分产物本就可下载，回合状态徽标已标明）。
 
 ### D6 对话连续性：每回合自带执行过程，历史折叠 + 懒加载
 
@@ -78,21 +80,17 @@ web 侧：HTML 渲染视图改为 mint 一次 preview base，iframe `src = base_
 
 事件分页边界：events 读是 `after_id`+`limit`（默认 200）。当前回合靠 live 追加 + gap-fill 补满；历史回合发首页查询，>200 事件的 run 仅显示首页并**显式提示截断**（MVP 不做 "load more"，留后续提案），不静默丢尾。
 
-### D7 按 kind 的对话式事件渲染
+### D7 对话式事件渲染：拆分为 plan / process / summary 三块
 
-`EventLog` 拆出 per-kind 渲染器，原则：**对话内容用正文，过程信息用弱化行，绝不裸 JSON**：
+`EventLog` 不再把所有事件塞进一个气泡，而是按语义拆成**至多三张独立卡片**（各自有内容才渲染，顺序固定）：
 
-- `summary` → 助手消息正文（普通段落文本，是回合的"回答"主体）。
-- `plan` → 有序步骤清单（`payload.steps`）。
-- `step` → 进度行：verdict 图标（pass/finish ✓ / retry ↻）+ `title` + `summary` 弱化文本。
-- `artifact` → 文件徽标行（文件图标 + `path`），点击联动预览选中。
-- `status` → 居中弱化的状态变更行（"running → succeeded" 风格的小字）。
-- `log` → 弱化等宽小字。
-- `error` → 现状的 destructive 行保留。
-- `title` 及其它非对话 kind → 不渲染（任务标题已在页头；cost 走独立 `cost.events` exchange，从不进 `task.events`/WS）。
-- 未知 kind → 现状的紧凑 JSON 截断作为兜底。
+- **Plan 卡**：唯一一条 `payload.steps` 非空的 `plan` 事件 → 有序步骤清单（弱化 muted 卡）。
+- **Process 卡**：其余 recognized/unknown 事件（step / status / log / error / 畸形 plan / 未知 kind），按 seq 顺序为弱化行——`step` 进度行（verdict 图标 ✓/↻ + `title` + 弱化 `summary`）、`status` 状态变更小字、`log` 等宽小字、`error` destructive、其它紧凑 JSON 兜底（裸 JSON 仅此处）。
+- **Summary 卡**：最后一条非空 `summary` 文本 → 段落正文，带 border 的 `bg-card` 卡，视觉上区别于 muted 的 plan/process（它是回合的"回答"）。空 summary 不渲染。
 
-payload 字段缺失时各渲染器降级到兜底样式，不抛错。`artifact` 行按 `artifact_id` 去重（resume 可能以新 seq 重发同一文件），同一文件只显示一行。
+`artifact` 事件**不在日志渲染**——产物只经聚合卡呈现（且仅终态，见 D1/D5），避免执行中产物行造成歧义、也给日志去噪。`title` 及其它非对话 kind 同样不渲染（标题在页头；cost 走独立 exchange）。**recognized kind 绝不裸 JSON**；payload 缺字段降级到兜底行、不抛错。
+
+> 设计调整（实测反馈）：初版把 plan/step/summary/artifact 全渲染进一个 muted 气泡，内容混杂难辨"过程 vs 回答"。拆为三块后：plan 与 step（过程）和 summary（回答）各自成卡；artifact 行移除（产物归聚合卡）。同时不再需要 `artifact_id` 去重逻辑（日志已不显示 artifact）。
 
 ## Risks / Trade-offs
 
@@ -100,7 +98,7 @@ payload 字段缺失时各渲染器降级到兜底样式，不抛错。`artifact
 - [artifact 事件与 DB 写入竞态：前端收到事件去 refetch 时行已落库？] → 发射顺序固定为"先 insert（拿到 artifact_id）后 publish"，refetch 必然可见。
 - [zip 流式打包长连接占用 + 中途失败无法报错] → 沿用下载代理的 abort+metric 口径；TTL 短、owner-mint 限制滥用面；MVP 不做大小上限，记 metric 观察。
 - [preview token 版本级授权面扩大] → 见 D4 权衡；token 不可用于写、不可跨版本（sub 钉死）、不进日志。
-- [历史回合懒加载造成展开瞬间的 loading 闪烁] → 折叠行保留 summary 文本兜底，展开 loading 用 skeleton。
+- [历史回合内联展开 → N 版本 N 次 events 首页查询] → React Query 缓存、终态版本事件静态不轮询，MVP 版本数有限可接受；版本极多时的窗口化留后续提案。
 - [`path` 含特殊字符（空格、中文）] → 预览 URL 按段 encode，zip entry 原样 UTF-8（zip flag bit 11）。
 
 ## Migration Plan

@@ -93,23 +93,23 @@ The composer SHALL use **chat-style keyboard shortcuts** that invert the textare
 
 ### Requirement: Live Observation With Polling Fallback
 
-The Task Detail page SHALL subscribe to the realtime topic `task:<id>` (and, when the task has a non-null current version, `version:<current_version_id>`) via the existing `realtimeClient`, and on each received frame invalidate the corresponding React Query caches: a `task:` frame invalidates the task + versions queries; a `version:` frame invalidates that version's events query, AND — when the frame's `kind` is `"artifact"` or `"status"` — additionally invalidates that version's artifact-list query, so produced files surface in the conversation while the run executes and the final set lands at completion without a manual refresh. Because the Realtime Gateway server may be unavailable, the page MUST additionally poll via React Query `refetchInterval` (function form, re-evaluated each tick) while the task is in an active status **and** no WS connection is open, and MUST stop polling once the task reaches a terminal status or the WS connection opens. Gap-fill of missed events MUST go through the client's `onGap` callback hitting `GET /versions/{id}/events?after_id=<global event id cursor>` — using the highest event `id` already seen, NOT the per-run `seq`.
+The Task Detail page SHALL subscribe to the realtime topic `task:<id>` (and, when the task has a non-null current version, `version:<current_version_id>`) via the existing `realtimeClient`, and on each received frame invalidate the corresponding React Query caches: a `task:` frame invalidates the task + versions queries; a `version:` frame invalidates that version's events query, AND — when the frame's `kind` is `"status"` — additionally invalidates that version's artifact-list query. The artifact list is refreshed on `status` frames only (NOT on `artifact` frames): the aggregate products card is withheld until the version is terminal (see "Version Artifact Cards With Direct Download"), so its data only needs to be current at completion — the terminal `status` frame both flips the card's gate (via the versions refetch) and refreshes its data, with no per-file churn mid-run and no manual refresh. Because the Realtime Gateway server may be unavailable, the page MUST additionally poll via React Query `refetchInterval` (function form, re-evaluated each tick) while the task is in an active status **and** no WS connection is open, and MUST stop polling once the task reaches a terminal status or the WS connection opens. Gap-fill of missed events MUST go through the client's `onGap` callback hitting `GET /versions/{id}/events?after_id=<global event id cursor>` — using the highest event `id` already seen, NOT the per-run `seq`.
 
 #### Scenario: Frame invalidates caches
 
 - **WHEN** a realtime frame arrives on `task:<id>`
 - **THEN** the task (and its versions/events) React Query entries are invalidated and refetched
 
-#### Scenario: Artifact frame surfaces new files without a refresh
+#### Scenario: Artifact frame does NOT refresh the artifact list
 
 - **GIVEN** the detail page is open while the current version's run executes
-- **WHEN** a `version:` frame with `kind = "artifact"` arrives
-- **THEN** that version's artifact-list query MUST be invalidated and refetched, so the turn's artifact card appears/updates live (no manual page refresh)
+- **WHEN** a `version:` frame with `kind = "artifact"` arrives mid-run
+- **THEN** that version's events query MAY refresh but its artifact-list query MUST NOT be invalidated (the products card is withheld until completion — no mid-run product display)
 
-#### Scenario: Terminal status frame refreshes the artifact list
+#### Scenario: Status frame refreshes the artifact list at completion
 
-- **WHEN** a `version:` frame with `kind = "status"` carrying a terminal status arrives
-- **THEN** the version's artifact-list query MUST be invalidated so the completed artifact set is current at the moment the turn flips to its terminal badge
+- **WHEN** a `version:` frame with `kind = "status"` arrives
+- **THEN** the version's artifact-list query MUST be invalidated so the completed artifact set is current at the moment the turn flips to its terminal badge and the products card becomes visible
 
 #### Scenario: Polling runs only while active and WS not open
 
@@ -124,7 +124,7 @@ The Task Detail page SHALL subscribe to the realtime topic `task:<id>` (and, whe
 
 ### Requirement: Version Artifact Cards With Direct Download
 
-The TaskDetail page SHALL surface each version's produced artifacts as **one aggregate artifact card per conversation turn**, positioned below the turn's execution section. Each turn MUST lazily fetch its version's artifacts (consuming the existing `features/artifacts/` slice keyed by that `version_id`; React Query caching deduplicates re-renders). A turn whose artifact read returns `artifacts: []` MUST omit the artifact section entirely (no empty-state noise inside the conversation); a pending read shows a quiet loading affordance and a failed read shows a quiet inline error without any toast and without blocking the turn.
+The TaskDetail page SHALL surface each version's produced artifacts as **one aggregate artifact card per conversation turn**, positioned below the turn's execution section. The card MUST be shown **only once the version is in a terminal status** (`succeeded` / `failed` / `cancelled`): while the version is active (`pending` / `running` / `paused` / `cancelling`) the turn MUST NOT render the products card at all, because a mid-run product set is still changing and showing it is ambiguous. (Liveness is preserved without mid-run display: the terminal `status` frame flips this gate and refreshes the list — see "Live Observation" — so the card appears at completion with no manual refresh.) Once terminal, each turn MUST lazily fetch its version's artifacts (consuming the existing `features/artifacts/` slice keyed by that `version_id`; React Query caching deduplicates re-renders). A turn whose artifact read returns `artifacts: []` MUST omit the artifact section entirely (no empty-state noise inside the conversation); a pending read shows a quiet loading affordance and a failed read shows a quiet inline error without any toast and without blocking the turn.
 
 The aggregate card MUST render: a file-type icon, a title naming the file count ("N file(s)"), a secondary line with the total human-readable size (summing non-null `bytes`) and a truncated preview of the first few artifact `path` values (falling back to `kind` for null paths), and a single **Download zip** action. **Activating the card (anywhere except the Download control) MUST drive the right-column Artifact Preview panel**: it sets the global UI store's `selectedVersionId` to the turn's version and the selected-artifact id to the version's first artifact, expanding the preview column when collapsed, so the panel lists that version's files and previews the first (see `web-artifact-preview` — per-file browsing/preview/download lives in the panel, not the card).
 
@@ -134,9 +134,15 @@ The default preview anchor on first render MUST remain the task's `current_versi
 
 #### Scenario: A turn aggregates its artifacts into one card below the execution section
 
-- **GIVEN** a task with two versions where only the second produced three artifacts
+- **GIVEN** a task with two terminal versions where only the second produced three artifacts
 - **WHEN** the conversation renders
 - **THEN** the second turn MUST render exactly one aggregate card (icon, "3 files" title, total size + path preview secondary line, Download zip action) positioned below that turn's execution section, and the first turn MUST omit the artifact section entirely
+
+#### Scenario: An active version withholds the products card
+
+- **GIVEN** a turn whose version is in an active status (e.g. `running`), even if its artifact read would return files
+- **WHEN** the turn renders
+- **THEN** it MUST NOT render the aggregate products card; the card appears only after the version reaches a terminal status
 
 #### Scenario: Activating the card opens the version's file list in the preview panel
 
@@ -169,46 +175,40 @@ The default preview anchor on first render MUST remain the task's `current_versi
 
 ### Requirement: Conversation-Style Event Rendering
 
-The event log SHALL render each event by its `kind` as conversational content — dialogue substance as body text, process information as de-emphasized lines, and **never raw JSON for a recognized kind**:
+The event log SHALL render the turn's events as **distinct blocks rather than one mixed bubble**, so plan / step / summary content is not crammed together. It MUST render at most three blocks, in this order, each its own card and each omitted when it has no content:
 
-- `summary` → the turn's assistant reply body: the payload's `summary` text rendered as normal paragraph prose (this is the primary "answer" content of a turn).
-- `plan` → an ordered step list rendered from `payload.steps`.
-- `step` → a progress line: a verdict glyph (distinct visual for pass/finish vs retry), the step `title`, and the step `summary` as de-emphasized text.
-- `artifact` → a compact file line (file icon + the payload's `path`); activating it selects that artifact in the preview panel (same store write as the aggregate card). Because a resumed run MAY re-emit an `artifact` event for the same file under a fresh `seq`, the log MUST de-duplicate artifact lines by `payload.artifact_id` (render one line per distinct artifact, last occurrence wins), so a re-execution does not show the same file twice.
-- `status` → a de-emphasized status-transition line (human-readable, e.g. naming the new status).
-- `log` → de-emphasized small monospace text.
-- `error` → destructive styling naming the error code/message (existing behavior preserved).
-- `title` and any other non-conversational kind → not rendered in the log (the task title already lives in the header; cost flows on a separate exchange and never reaches this event stream).
-- An unrecognized `kind` → the bounded compact payload preview as fallback (the only place a JSON-ish rendering may appear).
+- **Plan card** — the single `plan` event whose `payload.steps` is a non-empty array, rendered as an ordered step list.
+- **Process card** — every remaining recognized/unknown event (step / status / log / error / a malformed plan / unknown kinds), in sequence order, as de-emphasized rows: `step` as a progress row (verdict glyph for pass/finish vs retry + `title` + de-emphasized `summary`); `status` as a human-readable transition line; `log` as small monospace; `error` with destructive styling naming the code/message; anything else as a bounded compact payload preview (the only place a JSON-ish rendering may appear).
+- **Summary card** — the last non-empty `summary` event's text, rendered as paragraph prose and visually distinct from the muted plan/process cards (it is the turn's "answer"). An empty summary renders nothing.
 
-A recognized kind whose payload is missing expected fields MUST degrade to the fallback rendering for that event, never throw.
+`artifact` events MUST NOT be rendered in the log at all — produced files surface only via the per-turn aggregate products card (and only once the version is terminal). `title` and any other non-conversational kind MUST also render nothing (the task title lives in the header; cost flows on a separate exchange and never reaches this event stream). **Never raw JSON for a recognized kind.** A recognized kind whose payload is missing expected fields MUST degrade to the compact fallback row, never throw.
 
-#### Scenario: Summary renders as the assistant reply body
+#### Scenario: Plan, process, and summary render as separate blocks
 
-- **WHEN** the current turn's events include a `summary` event
-- **THEN** its `summary` text MUST render as paragraph prose inside the assistant block (no kind label, no JSON), as the turn's primary reply content
+- **WHEN** a turn's events include a `plan` (with steps), `step` events, and a `summary`
+- **THEN** the plan MUST render in its own ordered-list card, the steps in a separate process card, and the summary in its own answer card — the summary MUST NOT be inside the process card
 
-#### Scenario: Plan and steps render structured, not as JSON
+#### Scenario: Summary renders as the assistant answer card
 
-- **WHEN** the events include a `plan` event with three steps and `step` events with verdicts
-- **THEN** the plan MUST render as an ordered list of the three step titles and each step event as a verdict-glyph progress line with its title and summary — no raw JSON for either kind
+- **WHEN** the events include a `summary` event with text
+- **THEN** its text MUST render as paragraph prose in a dedicated, visually distinct card (no kind label, no JSON)
 
-#### Scenario: Artifact events render as selectable file lines
+#### Scenario: Steps render structured inside the process card
+
+- **WHEN** the events include `step` events with verdicts
+- **THEN** each MUST render as a verdict-glyph progress row (title + de-emphasized summary) inside the process card — no raw JSON
+
+#### Scenario: Artifact events are not rendered in the log
 
 - **WHEN** the events include an `artifact` event with `path = "index.html"`
-- **THEN** the log MUST render a file line showing `index.html`, and activating it MUST select that artifact in the preview panel
+- **THEN** the log MUST NOT render any row or file line for it (products appear only in the aggregate card)
 
 #### Scenario: Non-conversational kinds are hidden
 
 - **WHEN** the events include a `title` event
 - **THEN** the log MUST NOT render a row for it
 
-#### Scenario: Repeated artifact events for one file render once
-
-- **WHEN** the event stream contains two `artifact` events sharing the same `payload.artifact_id` (e.g. a resumed run re-emitted it)
-- **THEN** the log MUST render exactly one file line for that artifact, not two
-
 #### Scenario: Unknown or malformed payloads degrade safely
 
 - **WHEN** an event has an unrecognized `kind`, or a `plan` event lacks `payload.steps`
-- **THEN** the log MUST render the bounded compact payload preview for that event without throwing
+- **THEN** the offending event MUST render as the bounded compact payload preview (a process-card fallback row, no dedicated plan card) without throwing

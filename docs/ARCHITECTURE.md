@@ -149,7 +149,7 @@ src/
 - **状态分层**：本地 UI 状态用 Zustand；服务端状态用 React Query（自带缓存、失效、轮询兜底）。
 - **实时通道**：MVP 默认 WebSocket，失败降级为 5s 轮询；SSE 与更复杂的多级降级为 Post-MVP。
 - **大文件上传**：前端拿临时 STS 凭证后直传 OSS，不走后端 API，避免后端带宽瓶颈。
-- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。每个回合内按对话顺序排列：prompt → 结果行 → 执行过程（当前回合实时展开、历史回合内联展开直接渲染该版本事件日志——迭代后旧回合历史保持可见，不折叠）→ 产物聚合卡（同版本产物合并为单卡，显示文件数/总大小，支持 zip 整包下载，点击在右栏展开文件列表）→ 回滚控件。执行流按 WS 事件 kind 分型为对话样式（summary 作助手正文、plan 清单、step 进度行、artifact 文件行等），非裸 JSON。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`；响应自带 `Content-Security-Policy: sandbox allow-scripts` 双保险）整页渲染：有 `path` 的产物经**目录化预览**路由加载（`<base>/<path>`，使相对 css/js 解析到同版本兄弟产物），null-path 退回单文件下载 URL；frame 跑在 opaque origin，内部加载失败不可探测，恢复手段为工具栏 Refresh（重新 mint 重载）。产物实时性：前端订阅 `version:` 主题，`kind=artifact`/`status` 帧失效该版本产物缓存，执行中即出卡片。
+- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。每个回合内按对话顺序排列：prompt → 结果行 → 执行过程（当前回合实时展开、历史回合内联展开直接渲染该版本事件日志——迭代后旧回合历史保持可见，不折叠）→ 产物聚合卡（同版本产物合并为单卡，显示文件数/总大小，支持 zip 整包下载，点击在右栏展开文件列表）→ 回滚控件。执行流按 WS 事件 kind 拆为**三块独立卡**：plan（有序清单）、process（step 进度 + status/log/error）、summary（助手回答，带 border 区别于 muted 过程卡），非裸 JSON、不混在一个气泡。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`；响应自带 `Content-Security-Policy: sandbox allow-scripts` 双保险）整页渲染：有 `path` 的产物经**目录化预览**路由加载（`<base>/<path>`，使相对 css/js 解析到同版本兄弟产物），null-path 退回单文件下载 URL；frame 跑在 opaque origin，内部加载失败不可探测，恢复手段为工具栏 Refresh（重新 mint 重载）。产物显示时机：**仅版本终态显示**聚合产物卡（执行中产物集仍在变，展示有歧义）；前端订阅 `version:` 主题，收到 `kind=status` 帧时失效该版本产物缓存——版本收尾即出卡、无需手刷，但不在执行中逐文件展示（`kind=artifact` 事件仍上报、只是前端不据此即时显示产物）。
 - **互斥提交保护**：前端在 task.status 处于活跃态时禁用"迭代/回滚"按钮并提示原因；提交时仍以后端 409 为准（后端是真相之源）。
 - **成本展示**：
   - TaskDetail 顶栏显示该 task 累计 cost（USD）+ token 数（input/output/cached 分项），以及当前 running 版本的实时累计；
@@ -683,7 +683,7 @@ Routing key: `event.<task_type>.<kind>`
 Realtime Gateway 持久化到 `task_events`（幂等键 = run_id+seq）并推送 WS。
 
 > 当前 kind 集合：`status` / `log` / `plan` / `step` / `artifact` / `error` / `title` / `summary`。
-> **`kind=artifact`**（improve-artifact-conversation-ux）：每个 step 产出文件落 `artifacts` 行后**逐个**发出，payload `{artifact_id, path, mime, bytes, sha256}`，使前端执行中即可见产物（无需刷新）。落库与该 step 事件 seq 的预留**必须先于该 step 的 checkpoint**（崩溃窗口下 resume 重跑 step、`(version_id, oss_key)` upsert 收敛，且 checkpoint 的 `event_seq` 高水位覆盖 artifact seq，避免 resume 复用被 ingest 幂等丢弃）；继承产物在 agent 循环前一次性落库并同样发 `kind=artifact`。前端按 `artifact_id` 去重渲染。
+> **`kind=artifact`**（improve-artifact-conversation-ux）：每个 step 产出文件落 `artifacts` 行后**逐个**发出，payload `{artifact_id, path, mime, bytes, sha256}`。落库与该 step 事件 seq 的预留**必须先于该 step 的 checkpoint**（崩溃窗口下 resume 重跑 step、`(version_id, oss_key)` upsert 收敛，且 checkpoint 的 `event_seq` 高水位覆盖 artifact seq，避免 resume 复用被 ingest 幂等丢弃）；继承产物在 agent 循环前一次性落库并同样发 `kind=artifact`。该事件持久化进 `task_events` 作可观测/审计；**前端不据此即时渲染产物**——聚合产物卡仅在版本终态显示（收尾的 `kind=status` 帧驱动刷新），避免 mid-run 产物集变动造成歧义。
 
 #### 成本事件（Worker → Cost Service）
 独立 Exchange `cost.exchange` (topic) → 队列 `q.cost.events`，由 Cost Service 消费。

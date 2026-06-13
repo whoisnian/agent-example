@@ -100,7 +100,37 @@ describe("useTaskLive", () => {
     expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.lists });
   });
 
-  it("invalidates the version's artifacts on an artifact frame", async () => {
+  it("invalidates the version's artifacts on a status frame (card appears at completion)", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    __resetRealtimeForTests?.();
+
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <Harness taskId="t1" versionId="v1" qc={qc} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    const sock = FakeWebSocket.instances[0]!;
+    sock.openConn();
+    sock.deliver({
+      topic: "version:v1",
+      kind: "status",
+      seq: 9,
+      ts: "2026-05-26T00:00:00Z",
+      payload: { status: "succeeded" },
+    });
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: artifactKeys.byVersion("v1") }),
+    );
+    expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.events("v1") });
+  });
+
+  it("does NOT invalidate artifacts on an artifact frame (no mid-run product display)", async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
     __resetRealtimeForTests?.();
 
@@ -119,36 +149,13 @@ describe("useTaskLive", () => {
     sock.deliver({
       topic: "version:v1",
       kind: "artifact",
-      seq: 3,
+      seq: 4,
       ts: "2026-05-26T00:00:00Z",
       payload: { artifact_id: "a1", path: "index.html" },
     });
 
-    await waitFor(() =>
-      expect(spy).toHaveBeenCalledWith({ queryKey: artifactKeys.byVersion("v1") }),
-    );
-    // The version's events cache is also refreshed.
-    expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.events("v1") });
-  });
-
-  it("does NOT invalidate artifacts on a non-artifact/status version frame", async () => {
-    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
-    __resetRealtimeForTests?.();
-
-    const qc = new QueryClient();
-    const spy = vi.spyOn(qc, "invalidateQueries");
-
-    render(
-      <QueryClientProvider client={qc}>
-        <Harness taskId="t1" versionId="v1" qc={qc} />
-      </QueryClientProvider>,
-    );
-
-    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
-    const sock = FakeWebSocket.instances[0]!;
-    sock.openConn();
-    sock.deliver({ topic: "version:v1", kind: "log", seq: 4, ts: "2026-05-26T00:00:00Z", payload: {} });
-
+    // The events cache still refreshes, but the artifact list does NOT (the
+    // card is withheld until the version is terminal).
     await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.events("v1") }));
     expect(spy).not.toHaveBeenCalledWith({ queryKey: artifactKeys.byVersion("v1") });
   });

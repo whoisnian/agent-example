@@ -26,18 +26,18 @@
 ## 4. Web：数据访问与实时失效
 
 - [x] 4.1 `ArtifactMeta` 增加 `path: string | null`；`features/artifacts/` 新增 archive presign 与 preview mint 两个 mutation（双层静默、不缓存）；MSW handler + 单测
-- [x] 4.2 `use-task-live.ts`：`version:` 帧 `kind === "artifact" | "status"` 时失效该版本 artifacts 查询；单测覆盖两种 kind 与既有失效不回归
+- [x] 4.2 `use-task-live.ts`：`version:` 帧**仅 `kind === "status"`** 时失效该版本 artifacts 查询（产物卡仅终态显示，无需 mid-run 刷新）；单测覆盖 status 失效 / artifact 帧不失效
 
 ## 5. Web：回合布局 + 聚合卡片 + 对话连续性
 
-- [x] 5.1 `ConversationTurn` 重排为 prompt → result line → 执行区 → 产物 → 回滚 footer；产物改单张聚合卡（icon + "N file(s)" + 总大小 + path 摘要 + Download zip），激活写 `selectArtifact(versionId, firstId)`，Download zip 走 archive presign + navigate；0 产物省略、读失败静默、null path 回退 kind
+- [x] 5.1 `ConversationTurn` 重排为 prompt → result line → 执行区 → 产物 → 回滚 footer；产物改单张聚合卡（icon + "N file(s)" + 总大小 + path 摘要 + Download zip），激活写 `selectArtifact(versionId, firstId)`，Download zip 走 archive presign + navigate；**仅版本终态显示产物卡**（活跃期返回 null，避免 mid-run 歧义）；0 产物省略、读失败静默、null path 回退 kind
 - [x] 5.2 历史回合执行区：**内联展开**直接渲染该版本事件日志（无折叠/无截断摘要行——避免横向溢出且不隐藏刚迭代的 v1）、>1 页时显示首页 + 截断提示（不做 load-more）、当前回合保持展开+实时；`TaskDetail` 移除"仅 current 渲染 EventLog"特判
-- [x] 5.3 组件测试：迭代后 v1 执行区内联可见（无折叠 toggle）、聚合卡行为（激活/下载/错误单 toast）
+- [x] 5.3 组件测试：迭代后 v1 执行区内联可见（无折叠 toggle）、活跃版本不出产物卡、聚合卡行为（激活/下载/错误单 toast）
 
-## 6. Web：按 kind 的对话式事件渲染
+## 6. Web：对话式事件渲染（拆分卡片）
 
-- [x] 6.1 `EventLog` 拆 per-kind 渲染器：`summary` 正文段落、`plan` 有序清单、`step` verdict 进度行、`artifact` 文件行（点击联动预览选中，按 `artifact_id` 去重）、`status` 弱化行、`log` 弱化等宽、`error` 保留、`title`/其它非对话 kind 不渲染、未知 kind 紧凑 JSON 兜底；payload 缺字段降级不抛错
-- [x] 6.2 组件测试：各 kind 渲染断言、隐藏 kind 不出行、同 `artifact_id` 重发只一行、malformed payload 走兜底
+- [x] 6.1 `EventLog` 拆为 **plan / process / summary 三块独立卡**：plan 卡（有序清单）、process 卡（step verdict 进度行 + status/log/error/未知兜底，按 seq）、summary 卡（带 border 的 bg-card 答案）；`artifact` 与 `title` 等非对话 kind 不渲染；recognized kind 绝不裸 JSON、缺字段降级不抛错
+- [x] 6.2 组件测试：plan/process/summary 分块渲染、summary 不在 process 内、artifact/title 隐藏、step 进度、error destructive、malformed plan/未知走兜底、截断/空态
 
 ## 7. Web：目录化 HTML 预览 + path 显示
 

@@ -131,6 +131,16 @@ describe("ConversationTurn", () => {
     expect(screen.getAllByTestId("turn-artifact-card")).toHaveLength(1);
   });
 
+  it("withholds the artifact card while the version is still active", async () => {
+    // An active (running) version must NOT show the products card, even though
+    // the artifact read would return files — mid-run products are ambiguous.
+    const running = { ...node("ver-1", 1), status: "running", is_active: true };
+    render(wrap({ version: running }));
+    // Give the (gated) artifact read a chance; the card must never appear.
+    await waitFor(() => expect(screen.queryByTestId("turn-artifacts-loading")).toBeNull());
+    expect(screen.queryByTestId("turn-artifact-card")).toBeNull();
+  });
+
   it("shows a quiet inline error when the artifact read fails", async () => {
     // 404 exercises the same quiet error surface without the retry/backoff
     // (the artifacts query skips retry on 404 by design).

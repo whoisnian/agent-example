@@ -1,6 +1,5 @@
 import type { JSX } from "react";
-import { Bot, Check, FileText, RotateCw } from "lucide-react";
-import { useUiStore } from "@/features/ui/store";
+import { Bot, Check, RotateCw } from "lucide-react";
 import type { EventItem } from "@/features/tasks/types";
 
 function isRecord(x: unknown): x is Record<string, unknown> {
@@ -23,47 +22,47 @@ function preview(payload: unknown): string {
   }
 }
 
-/** Kinds that are not conversational content and render no row (the task title
- *  lives in the page header; cost flows on a separate exchange, never here). */
-const HIDDEN_KINDS = new Set(["title"]);
-
 /**
- * One event rendered by kind — dialogue substance as body text, process info as
- * de-emphasized lines, never raw JSON for a recognized kind. A recognized kind
- * with a malformed payload degrades to the compact fallback rather than throws.
+ * Kinds that render nothing in the log. `artifact` is intentionally hidden:
+ * produced files surface ONLY via the per-turn aggregate artifact card (and
+ * only once the version completes — see ConversationTurn), so a mid-run file
+ * line never creates ambiguity about what the final products are. `title`
+ * already lives in the page header.
  */
-function EventLine({ event }: { event: EventItem }): JSX.Element | null {
-  const selectArtifact = useUiStore((s) => s.selectArtifact);
-  const p = event.payload;
+const HIDDEN_KINDS = new Set(["title", "artifact"]);
 
+function planSteps(event: EventItem): unknown[] | null {
+  const p = event.payload;
+  if (event.kind !== "plan" || !isRecord(p) || !Array.isArray(p["steps"])) return null;
+  const steps = p["steps"] as unknown[];
+  return steps.length > 0 ? steps : null;
+}
+
+/** The plan as its own card — an ordered step list, separate from the step
+ *  progress and the final summary (no longer crammed into one bubble). */
+function PlanCard({ steps }: { steps: unknown[] }): JSX.Element {
+  return (
+    <div
+      data-testid="event-plan"
+      className="rounded-lg bg-muted px-3 py-2 text-sm text-foreground"
+    >
+      <span className="text-xs font-medium text-muted-foreground">Plan</span>
+      <ol className="ml-4 mt-1 list-decimal space-y-0.5">
+        {steps.map((s, i) => (
+          <li key={i} className="break-words">
+            {typeof s === "string" ? s : String(isRecord(s) ? (s["title"] ?? "") : s)}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** One row inside the process card: step progress, status/log activity,
+ *  errors, or a compact fallback for an unknown / malformed-payload kind. */
+function ProcessRow({ event }: { event: EventItem }): JSX.Element {
+  const p = event.payload;
   switch (event.kind) {
-    case "summary": {
-      const summary = str(p, "summary");
-      if (!summary) return null;
-      return (
-        <li data-testid="event-row" data-kind="summary" className="text-sm text-foreground">
-          <p className="whitespace-pre-wrap break-words">{summary}</p>
-        </li>
-      );
-    }
-    case "plan": {
-      const steps = isRecord(p) && Array.isArray(p["steps"]) ? (p["steps"] as unknown[]) : null;
-      if (!steps || steps.length === 0) {
-        return <FallbackLine event={event} />;
-      }
-      return (
-        <li data-testid="event-row" data-kind="plan" className="text-sm text-foreground">
-          <span className="text-xs text-muted-foreground">Plan</span>
-          <ol className="ml-4 list-decimal space-y-0.5">
-            {steps.map((s, i) => (
-              <li key={i} className="break-words">
-                {typeof s === "string" ? s : String(isRecord(s) ? (s["title"] ?? "") : s)}
-              </li>
-            ))}
-          </ol>
-        </li>
-      );
-    }
     case "step": {
       const verdict = str(p, "verdict");
       const title = str(p, "title");
@@ -87,24 +86,6 @@ function EventLine({ event }: { event: EventItem }): JSX.Element | null {
         </li>
       );
     }
-    case "artifact": {
-      const path = str(p, "path");
-      const artifactId = str(p, "artifact_id");
-      const label = path || "artifact";
-      return (
-        <li data-testid="event-row" data-kind="artifact">
-          <button
-            type="button"
-            data-testid="event-artifact"
-            onClick={() => artifactId && selectArtifact(event.version_id, artifactId)}
-            className="flex items-center gap-1.5 text-left text-sm text-foreground hover:underline"
-          >
-            <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-            <span className="truncate font-mono text-xs">{label}</span>
-          </button>
-        </li>
-      );
-    }
     case "status": {
       const status = str(p, "status");
       return (
@@ -116,7 +97,11 @@ function EventLine({ event }: { event: EventItem }): JSX.Element | null {
     case "log": {
       const message = str(p, "message") || preview(p);
       return (
-        <li data-testid="event-row" data-kind="log" className="font-mono text-xs text-muted-foreground">
+        <li
+          data-testid="event-row"
+          data-kind="log"
+          className="font-mono text-xs text-muted-foreground"
+        >
           {message}
         </li>
       );
@@ -125,25 +110,38 @@ function EventLine({ event }: { event: EventItem }): JSX.Element | null {
       const code = str(p, "code") || "error";
       const message = str(p, "message");
       return (
-        <li data-testid="event-row" data-kind="error" className="flex gap-2 text-sm text-destructive">
+        <li
+          data-testid="event-row"
+          data-kind="error"
+          className="flex gap-2 text-sm text-destructive"
+        >
           <span className="shrink-0 font-medium">{code}</span>
           <span className="break-words">{message || preview(p)}</span>
         </li>
       );
     }
     default:
-      if (HIDDEN_KINDS.has(event.kind)) return null;
-      return <FallbackLine event={event} />;
+      // Unknown kind, or a recognized kind with a malformed payload (e.g. a
+      // plan with no steps) that didn't qualify for its own card.
+      return (
+        <li data-testid="event-row" data-kind="fallback" className="flex gap-2 text-sm">
+          <span className="shrink-0 text-primary">{event.kind}</span>
+          <span className="truncate text-muted-foreground">{preview(p)}</span>
+        </li>
+      );
   }
 }
 
-/** Compact fallback row for unknown kinds / malformed recognized payloads. */
-function FallbackLine({ event }: { event: EventItem }): JSX.Element {
+/** The run summary as the assistant's answer — its own bordered card, visually
+ *  distinct from the muted plan/process cards. */
+function SummaryCard({ text }: { text: string }): JSX.Element {
   return (
-    <li data-testid="event-row" data-kind="fallback" className="flex gap-2 text-sm">
-      <span className="shrink-0 text-primary">{event.kind}</span>
-      <span className="truncate text-muted-foreground">{preview(event.payload)}</span>
-    </li>
+    <div
+      data-testid="event-summary"
+      className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+    >
+      <p className="whitespace-pre-wrap break-words">{text}</p>
+    </div>
   );
 }
 
@@ -155,10 +153,12 @@ export interface EventLogProps {
 }
 
 /**
- * The turn's execution stream as an assistant message: a left-aligned bubble
- * (mirroring the right-aligned user prompt) with one readable line per event,
- * rendered by kind. `artifact` events are de-duplicated by `artifact_id` so a
- * resumed run that re-emits a file shows it once.
+ * The turn's execution stream as the assistant message, split into distinct
+ * blocks rather than one mixed bubble: a Plan card, a Process card (step
+ * progress + status/log/error activity), and a Summary card (the final
+ * answer). Artifact events are not rendered here — products live in the
+ * per-turn aggregate card. The whole group sits at the assistant position
+ * (left-aligned), mirroring the right-aligned user prompt.
  */
 export function EventLog({ events, truncated = false }: EventLogProps): JSX.Element {
   if (events.length === 0) {
@@ -169,42 +169,40 @@ export function EventLog({ events, truncated = false }: EventLogProps): JSX.Elem
     );
   }
 
-  // De-dupe artifact rows by artifact_id (last occurrence wins), preserving the
-  // position of that last occurrence; all other events pass through in order.
-  const seenArtifact = new Map<string, number>();
-  events.forEach((e, i) => {
-    if (e.kind === "artifact") {
-      const id = str(e.payload, "artifact_id");
-      if (id) seenArtifact.set(id, i);
-    }
-  });
-  const visible = events.filter((e, i) => {
-    if (e.kind !== "artifact") return true;
-    const id = str(e.payload, "artifact_id");
-    return !id || seenArtifact.get(id) === i;
-  });
+  const planEvent = events.find((e) => planSteps(e) !== null);
+  // The run emits at most one summary; render the last non-empty one as the
+  // answer card. Empty summaries (no text) render nothing.
+  const summaryEvent = [...events].reverse().find((e) => e.kind === "summary" && str(e.payload, "summary"));
+  // Everything else recognized/unknown (steps, status, log, error, a malformed
+  // plan, unknown kinds) becomes a process row — never the dedicated cards.
+  const processEvents = events.filter(
+    (e) => !HIDDEN_KINDS.has(e.kind) && e !== planEvent && e.kind !== "summary",
+  );
 
   return (
-    <div className="flex max-w-[85%] items-start gap-2 self-start">
+    <div data-testid="event-log" className="flex max-w-[85%] items-start gap-2 self-start">
       <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
         <Bot className="size-4" aria-hidden />
       </div>
-      <ul
-        data-testid="event-log"
-        className="flex min-w-0 flex-1 flex-col gap-1.5 rounded-lg bg-muted px-3 py-2"
-      >
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
         {truncated ? (
-          <li
-            data-testid="event-log-truncated"
-            className="text-xs italic text-muted-foreground"
-          >
+          <p data-testid="event-log-truncated" className="text-xs italic text-muted-foreground">
             Showing the latest events; earlier ones are not shown.
-          </li>
+          </p>
         ) : null}
-        {visible.map((e) => (
-          <EventLine key={e.id} event={e} />
-        ))}
-      </ul>
+        {planEvent ? <PlanCard steps={planSteps(planEvent) as unknown[]} /> : null}
+        {processEvents.length > 0 ? (
+          <ul
+            data-testid="event-process"
+            className="flex flex-col gap-1.5 rounded-lg bg-muted px-3 py-2"
+          >
+            {processEvents.map((e) => (
+              <ProcessRow key={e.id} event={e} />
+            ))}
+          </ul>
+        ) : null}
+        {summaryEvent ? <SummaryCard text={str(summaryEvent.payload, "summary")} /> : null}
+      </div>
     </div>
   );
 }

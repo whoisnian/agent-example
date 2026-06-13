@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/features/ui/store";
 import { useVersionQuery, useVersionEventsQuery, EVENTS_PAGE_LIMIT } from "@/features/tasks/queries";
-import type { RollbackMode, VersionNode } from "@/features/tasks/types";
+import { isActiveStatus, type RollbackMode, type VersionNode } from "@/features/tasks/types";
 import { formatBytes } from "@/features/artifacts/format";
 import {
   useArchivePresignMutation,
@@ -77,10 +77,10 @@ export function ConversationTurn({
       </div>
 
       {/* Execution section: the current turn's live log (passed by TaskDetail),
-          or a collapsed, lazily-loaded log for a historical turn. */}
+          or an inline log for a historical turn. */}
       {isCurrent ? children : <HistoricalExecution versionId={version.id} />}
 
-      <TurnArtifacts versionId={version.id} />
+      <TurnArtifacts version={version} />
 
       {onRollback && !isCurrent ? (
         <RollbackControl
@@ -172,12 +172,16 @@ function pathSummary(artifacts: ArtifactMeta[]): string {
 
 /**
  * The turn's produced artifacts as a SINGLE aggregate card below the execution
- * section. Empty list → omitted (no conversation noise). Activating the card
- * drives the right preview panel to this version (selecting the first
- * artifact); Download zip re-mints a version-archive URL per click and
- * navigates straight to the streaming download.
+ * section — rendered ONLY once the version reaches a terminal status. While the
+ * version is still active the card is withheld, because a mid-run product set
+ * is still changing and showing it is ambiguous (the live updates still arrive
+ * via the realtime status frame, so the card appears at completion with no
+ * manual refresh). Empty list → omitted (no conversation noise). Activating the
+ * card drives the right preview panel to this version (selecting the first
+ * artifact); Download zip re-mints a version-archive URL per click.
  */
-function TurnArtifacts({ versionId }: { versionId: string }): JSX.Element | null {
+function TurnArtifacts({ version }: { version: VersionNode }): JSX.Element | null {
+  const versionId = version.id;
   const query = useVersionArtifactsQuery(versionId);
   const archive = useArchivePresignMutation();
   const selectArtifact = useUiStore((s) => s.selectArtifact);
@@ -190,6 +194,10 @@ function TurnArtifacts({ versionId }: { versionId: string }): JSX.Element | null
         pushToast({ level: "error", message: `Download failed: ${err.message}` }),
     });
   };
+
+  // Products are shown only after the version finishes (succeeded / failed /
+  // cancelled) — never while it is still producing them.
+  if (isActiveStatus(version.status)) return null;
 
   if (query.isPending) {
     return <Skeleton data-testid="turn-artifacts-loading" className="h-6 w-1/2 self-start" />;
