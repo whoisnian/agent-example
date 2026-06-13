@@ -42,12 +42,11 @@ function planSteps(event: EventItem): unknown[] | null {
  *  progress and the final summary (no longer crammed into one bubble). */
 function PlanCard({ steps }: { steps: unknown[] }): JSX.Element {
   return (
-    <div
-      data-testid="event-plan"
-      className="rounded-lg bg-muted px-3 py-2 text-sm text-foreground"
-    >
+    <div data-testid="event-plan" className="rounded-lg bg-muted px-3 py-2 text-sm text-foreground">
       <span className="text-xs font-medium text-muted-foreground">Plan</span>
-      <ol className="ml-4 mt-1 list-decimal space-y-0.5">
+      {/* pl-5 (padding, not margin) so the `outside` decimal markers render
+          inside the card instead of being clipped at the left edge. */}
+      <ol className="mt-1 list-decimal space-y-0.5 pl-5">
         {steps.map((s, i) => (
           <li key={i} className="break-words">
             {typeof s === "string" ? s : String(isRecord(s) ? (s["title"] ?? "") : s)}
@@ -172,7 +171,9 @@ export function EventLog({ events, truncated = false }: EventLogProps): JSX.Elem
   const planEvent = events.find((e) => planSteps(e) !== null);
   // The run emits at most one summary; render the last non-empty one as the
   // answer card. Empty summaries (no text) render nothing.
-  const summaryEvent = [...events].reverse().find((e) => e.kind === "summary" && str(e.payload, "summary"));
+  const summaryEvent = [...events]
+    .reverse()
+    .find((e) => e.kind === "summary" && str(e.payload, "summary"));
   // Everything else recognized/unknown (steps, status, log, error, a malformed
   // plan, unknown kinds) becomes a process row — never the dedicated cards.
   const processEvents = events.filter(

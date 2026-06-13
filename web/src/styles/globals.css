@@ -86,3 +86,37 @@
     text-decoration: none;
   }
 }
+
+@layer utilities {
+  /*
+   * Themed scrollbar for native-overflow regions (conversation body, text
+   * preview, …). Firefox honours the standard `scrollbar-*` props; Chrome /
+   * WebKit needs the `::-webkit-scrollbar*` pseudo-elements to drop the chunky
+   * native bar for a thin, theme-coloured one. Colours stay token-based
+   * (hsl(var(--*)) with alpha) — no raw hex.
+   */
+  .scrollbar-themed {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  .scrollbar-themed::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .scrollbar-themed::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+    border-radius: 9999px;
+    /* Transparent border + content-box clip = a slimmer thumb with breathing room. */
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .scrollbar-themed::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.6);
+  }
+  .scrollbar-themed::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}

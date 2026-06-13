@@ -252,7 +252,7 @@ export function TaskDetail(): JSX.Element {
       <div
         ref={bodyRef}
         data-testid="conversation-body"
-        className="min-h-0 flex-1 overflow-y-auto py-4"
+        className="scrollbar-themed min-h-0 flex-1 overflow-y-auto py-4"
       >
         {versions ? (
           versions.length === 0 ? (

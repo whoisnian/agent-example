@@ -528,7 +528,7 @@ function ArtifactPreviewBody({
   if (state.phase === "text") {
     return (
       <div data-testid="artifact-preview-text" className="flex h-full flex-col">
-        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs text-foreground">
+        <pre className="scrollbar-themed min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-xs text-foreground">
           {state.text}
         </pre>
         {state.truncated && (
