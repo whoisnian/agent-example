@@ -1,11 +1,14 @@
 package httpapi
 
 import (
+	"archive/zip"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,6 +38,15 @@ func (h *ArtifactHandlers) Register(r *gin.RouterGroup) {
 	r.GET("/versions/:version_id/artifacts", h.listVersionArtifacts)
 	r.GET("/artifacts/:artifact_id/presign", h.presignArtifact)
 	r.GET("/artifacts/:artifact_id/download", h.downloadArtifact)
+	// Version-scoped zip archive (improve-artifact-conversation-ux): a Bearer
+	// presign mint + a public token-authenticated streaming download.
+	r.GET("/versions/:version_id/artifacts/archive/presign", h.presignArchive)
+	r.GET("/versions/:version_id/artifacts/archive", h.downloadArchive)
+	// Directory-aware HTML preview: a Bearer mint returning a tokenized base
+	// URL + a public token-in-path serve route whose `*filepath` resolves to a
+	// sibling artifact of the version (so relative css/js load correctly).
+	r.GET("/versions/:version_id/preview", h.presignPreview)
+	r.GET("/versions/:version_id/preview/:token/*filepath", h.previewFile)
 }
 
 // listVersionArtifacts handles GET /api/v1/versions/:version_id/artifacts.
@@ -175,4 +187,224 @@ func (h *ArtifactHandlers) handleError(c *gin.Context, err error) {
 	}
 	h.Logger.LogAttrs(c.Request.Context(), level, "artifact_read_error", attrs...)
 	Error(c, status, code, message)
+}
+
+// presignArchive handles GET /versions/:version_id/artifacts/archive/presign:
+// owner-scoped mint of a version-archive download URL. Bearer-authenticated.
+func (h *ArtifactHandlers) presignArchive(c *gin.Context) {
+	versionID, ok := parseUUIDParam(c, "version_id")
+	if !ok {
+		return
+	}
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.PresignArchive(c.Request.Context(), p.TenantID, p.UserID, versionID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+	OK(c, res)
+}
+
+// presignPreview handles GET /versions/:version_id/preview: owner-scoped mint
+// of a tokenized preview base URL. Bearer-authenticated.
+func (h *ArtifactHandlers) presignPreview(c *gin.Context) {
+	versionID, ok := parseUUIDParam(c, "version_id")
+	if !ok {
+		return
+	}
+	p, ok := principalOrAbort(c)
+	if !ok {
+		return
+	}
+	res, err := h.App.PresignPreview(c.Request.Context(), p.TenantID, p.UserID, versionID)
+	if err != nil {
+		h.handleError(c, err)
+		return
+	}
+	OK(c, res)
+}
+
+// downloadArchive handles GET /versions/:version_id/artifacts/archive?token=:
+// the public route that streams a zip of the version's artifacts. Its sole
+// authentication is the `?token=` version-archive grant. An OSS failure BEFORE
+// the first zip byte returns 502; a failure mid-stream aborts the connection
+// (a zip cannot carry an error envelope once bytes are out). The token rides in
+// the query string, so the standard middleware (which logs only the path)
+// keeps it out of the access log.
+func (h *ArtifactHandlers) downloadArchive(c *gin.Context) {
+	versionID, ok := parseUUIDParam(c, "version_id")
+	if !ok {
+		return
+	}
+	if err := h.Tokens.ParseArchive(c.Query("token"), versionID); err != nil {
+		h.Metrics.OSSArchiveTotal.WithLabelValues("token_invalid").Inc()
+		Error(c, http.StatusForbidden, "invalid_download_token", "invalid or expired download token")
+		return
+	}
+
+	ctx := c.Request.Context()
+	entries, err := h.App.ListVersionArchiveEntries(ctx, versionID)
+	if err != nil {
+		h.Metrics.OSSArchiveTotal.WithLabelValues("oss_error").Inc()
+		h.handleError(c, err)
+		return
+	}
+
+	headerWritten := false
+	writeHeaders := func() {
+		hdr := c.Writer.Header()
+		hdr.Set("Content-Type", "application/zip")
+		hdr.Set("Content-Disposition", `attachment; filename="artifacts-`+versionID.String()+`.zip"`)
+		hdr.Set("X-Content-Type-Options", "nosniff")
+		hdr.Set("Cache-Control", "private, no-store")
+		c.Status(http.StatusOK)
+		headerWritten = true
+	}
+
+	counter := &countingWriter{w: c.Writer}
+	zw := zip.NewWriter(counter)
+	for i := range entries {
+		e := entries[i]
+		body, oerr := e.Open(ctx)
+		if oerr != nil {
+			if !headerWritten {
+				// Nothing on the wire yet → a clean 502 envelope is still possible.
+				h.Metrics.OSSArchiveTotal.WithLabelValues("oss_error").Inc()
+				h.handleError(c, oerr)
+				return
+			}
+			h.archiveAbort(c, versionID, oerr)
+			return
+		}
+		if !headerWritten {
+			writeHeaders()
+		}
+		w, werr := zw.Create(e.Name)
+		if werr == nil {
+			_, werr = io.Copy(w, body)
+		}
+		_ = body.Close()
+		if werr != nil {
+			h.archiveAbort(c, versionID, werr)
+			return
+		}
+	}
+	if !headerWritten { // zero-artifact version → a valid empty zip
+		writeHeaders()
+	}
+	if err := zw.Close(); err != nil {
+		h.archiveAbort(c, versionID, err)
+		return
+	}
+	h.Metrics.OSSArchiveBytes.Add(float64(counter.n))
+	h.Metrics.OSSArchiveTotal.WithLabelValues("success").Inc()
+}
+
+// archiveAbort records a mid-stream archive failure and cuts the connection —
+// no error envelope is possible once zip bytes are out.
+func (h *ArtifactHandlers) archiveAbort(c *gin.Context, versionID interface{ String() string }, err error) {
+	h.Metrics.OSSArchiveTotal.WithLabelValues("stream_aborted").Inc()
+	h.Logger.LogAttrs(c.Request.Context(), slog.LevelError, "artifact_archive_stream_aborted",
+		slog.String("version_id", versionID.String()),
+		slog.String("err", err.Error()),
+		slog.String("trace_id", observability.TraceIDFromContext(c.Request.Context())),
+	)
+	panic(http.ErrAbortHandler)
+}
+
+// previewFile handles GET /versions/:version_id/preview/:token/*filepath: the
+// public directory-aware preview route. The token rides in the `:token` PATH
+// segment; `*filepath` resolves to a sibling artifact by exact (version_id,
+// path) match so a rendered document's relative css/js load under the same
+// token prefix.
+func (h *ArtifactHandlers) previewFile(c *gin.Context) {
+	versionID, ok := parseUUIDParam(c, "version_id")
+	if !ok {
+		return
+	}
+	if err := h.Tokens.ParsePreview(c.Param("token"), versionID); err != nil {
+		h.Metrics.OSSPreviewTotal.WithLabelValues("token_invalid").Inc()
+		Error(c, http.StatusForbidden, "invalid_download_token", "invalid or expired preview token")
+		return
+	}
+	rel, valid := sanitizePreviewPath(c.Param("filepath"))
+	if !valid {
+		h.Metrics.OSSPreviewTotal.WithLabelValues("not_found").Inc()
+		Error(c, http.StatusNotFound, "artifact_not_found", "artifact not found")
+		return
+	}
+
+	obj, err := h.App.OpenVersionFile(c.Request.Context(), versionID, rel)
+	if err != nil {
+		if errors.Is(err, taskdomain.ErrArtifactNotFound) {
+			h.Metrics.OSSPreviewTotal.WithLabelValues("not_found").Inc()
+		} else {
+			h.Metrics.OSSPreviewTotal.WithLabelValues("oss_error").Inc()
+		}
+		h.handleError(c, err)
+		return
+	}
+	defer func() { _ = obj.Body.Close() }()
+
+	mime := "application/octet-stream"
+	if obj.Mime != nil && *obj.Mime != "" {
+		mime = *obj.Mime
+	}
+	hdr := c.Writer.Header()
+	hdr.Set("Content-Type", mime)
+	if obj.ContentLength != nil {
+		hdr.Set("Content-Length", strconv.FormatInt(*obj.ContentLength, 10))
+	}
+	hdr.Set("Content-Security-Policy", "sandbox allow-scripts")
+	hdr.Set("Referrer-Policy", "no-referrer")
+	hdr.Set("X-Content-Type-Options", "nosniff")
+	hdr.Set("Cache-Control", "private, no-store")
+	c.Status(http.StatusOK)
+
+	n, err := io.Copy(c.Writer, obj.Body)
+	h.Metrics.OSSPreviewBytes.Add(float64(n))
+	if err != nil {
+		h.Metrics.OSSPreviewTotal.WithLabelValues("stream_aborted").Inc()
+		h.Logger.LogAttrs(c.Request.Context(), slog.LevelError, "artifact_preview_stream_aborted",
+			slog.String("version_id", versionID.String()),
+			slog.Int64("bytes_sent", n),
+			slog.String("err", err.Error()),
+			slog.String("trace_id", observability.TraceIDFromContext(c.Request.Context())),
+		)
+		panic(http.ErrAbortHandler)
+	}
+	h.Metrics.OSSPreviewTotal.WithLabelValues("success").Inc()
+}
+
+// sanitizePreviewPath cleans the catch-all `*filepath` (gin returns it with a
+// leading slash, already percent-decoded) into a version-relative artifact
+// path. It rejects (returns ok=false) an empty / dot path, a backslash, or any
+// path that escapes the version namespace (`..` segments, absolute) — those map
+// to 404 so no traversal can reach a foreign object.
+func sanitizePreviewPath(raw string) (string, bool) {
+	rel := strings.TrimPrefix(raw, "/")
+	if rel == "" || strings.Contains(rel, "\\") {
+		return "", false
+	}
+	cleaned := path.Clean(rel)
+	if cleaned == "." || cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") {
+		return "", false
+	}
+	return cleaned, true
+}
+
+// countingWriter tallies bytes written through it (the compressed zip stream)
+// without buffering, for the archive bytes-streamed metric.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (cw *countingWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.n += int64(n)
+	return n, err
 }

@@ -32,7 +32,7 @@ func recoveryMiddleware(logger *slog.Logger, m *observability.Metrics) gin.Handl
 					slog.String("error", fmt.Sprintf("%v", rec)),
 					slog.String("stack", string(stack)),
 					slog.String("method", c.Request.Method),
-					slog.String("path", c.Request.URL.Path),
+					slog.String("path", accessLogPath(c)), // redacts the preview token segment
 				)
 				if !c.Writer.Written() {
 					Error(c, 500, "internal_error", "internal server error")

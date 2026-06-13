@@ -17,6 +17,7 @@ type Artifact struct {
 	Bytes     *int64             `json:"bytes"`
 	Sha256    *string            `json:"sha256"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Path      *string            `json:"path"`
 }
 
 type CostEvent struct {

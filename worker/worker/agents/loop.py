@@ -53,6 +53,12 @@ class ProducedArtifact:
 
 WriteFile = Callable[["RunContext", str, str], Awaitable[ProducedArtifact]]
 
+#: Persists one produced artifact's row (upsert) and returns its artifact id as
+#: a string for the ``artifact`` event payload. Injected by the agent; ``None``
+#: for direct callers (e.g. tests) that don't persist — those still accumulate
+#: ``LoopResult.artifacts`` but emit no ``artifact`` events.
+PersistArtifact = Callable[["RunContext", ProducedArtifact], Awaitable[str]]
+
 
 @dataclass(frozen=True, slots=True)
 class LoopResult:
@@ -140,6 +146,7 @@ async def run_agent_loop(
     metrics: Any | None = None,
     roles: RoleInstructions = DEFAULT_ROLE_INSTRUCTIONS,
     inherited: list[tuple[str, int]] | None = None,
+    persist_artifact: PersistArtifact | None = None,
 ) -> LoopResult:
     """Run the plan→execute→critic loop, returning artifacts + step summaries.
 
@@ -183,13 +190,26 @@ async def run_agent_loop(
         summaries[idx] = summary[:_SUMMARY_CAP]
 
         ctx.step = idx + 1
-        # Reserve the step event's seq BEFORE the checkpoint so the persisted
-        # high-water mark covers it: a crash between checkpoint and emit then
-        # leaves a harmless gap on resume instead of a (run_id, seq) collision
-        # (spec: "Resume-Safe Event Sequencing"). Concurrent control acks may
-        # still slip a seq in after the snapshot — max() on restore plus
+
+        # Persist this step's artifact rows BEFORE the checkpoint. A crash
+        # before the checkpoint re-executes the whole step on resume (the
+        # checkpoint never advanced) and the (version_id, oss_key) upsert
+        # converges — so a produced OSS object is never left without a row,
+        # since there is no end-of-run persistence pass to fall back on.
+        persisted: list[tuple[str, ProducedArtifact]] = []
+        if persist_artifact is not None:
+            for art in step_artifacts:
+                persisted.append((await persist_artifact(ctx, art), art))
+
+        # Reserve the step event's seq AND one seq per artifact event BEFORE the
+        # checkpoint so the persisted high-water mark covers them all: a crash
+        # between checkpoint and emit then leaves a harmless gap on resume
+        # instead of a (run_id, seq) collision the ingest side would silently
+        # drop (spec: "Resume-Safe Event Sequencing"). Concurrent control acks
+        # may still slip a seq in after the snapshot — max() on restore plus
         # at-most-one lost ack bounds that rare race.
         step_event_seq = ctx.next_event_seq()
+        artifact_event_seqs = [ctx.next_event_seq() for _ in persisted]
         step_state: dict[str, Any] = {
             "plan": _plan_state(plan, completed_through=idx, summaries=summaries),
             "step_count": len(plan),
@@ -206,6 +226,9 @@ async def run_agent_loop(
         if context_block:
             step_state["context_block"] = context_block
         await _safe_checkpoint(cp, step_seq=ctx.step, step_name=title, state=step_state, log=log)
+        # Emit AFTER the checkpoint: the step event, then one artifact event per
+        # persisted row (insert-then-publish — a consumer reacting to an
+        # artifact event always finds its row committed).
         await _emit(
             ctx,
             kind="step",
@@ -217,6 +240,19 @@ async def run_agent_loop(
             },
             seq=step_event_seq,
         )
+        for (artifact_id, art), art_seq in zip(persisted, artifact_event_seqs, strict=True):
+            await _emit(
+                ctx,
+                kind="artifact",
+                payload={
+                    "artifact_id": artifact_id,
+                    "path": art.path,
+                    "mime": art.mime,
+                    "bytes": art.bytes,
+                    "sha256": art.sha256,
+                },
+                seq=art_seq,
+            )
         if metrics is not None:
             metrics.agent_steps_total.labels(ctx.task_type).inc()
             metrics.agent_step_duration_seconds.observe(time.monotonic() - step_start)

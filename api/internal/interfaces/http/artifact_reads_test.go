@@ -48,6 +48,10 @@ type fakeArtQuerier struct {
 	artifacts  []sqlc.Artifact
 	artifact   sqlc.GetArtifactWithOwnerRow
 	artifErr   error
+	// improve-artifact-conversation-ux: archive + preview queries.
+	objects  []sqlc.ListArtifactObjectsByVersionRow
+	pathRows map[string]sqlc.GetArtifactObjectByVersionPathRow
+	pathErr  error
 }
 
 func (f *fakeArtQuerier) GetTaskVersionByID(context.Context, pgtype.UUID) (sqlc.TaskVersion, error) {
@@ -61,6 +65,22 @@ func (f *fakeArtQuerier) ListArtifactsByVersion(context.Context, pgtype.UUID) ([
 }
 func (f *fakeArtQuerier) GetArtifactWithOwner(context.Context, pgtype.UUID) (sqlc.GetArtifactWithOwnerRow, error) {
 	return f.artifact, f.artifErr
+}
+func (f *fakeArtQuerier) ListArtifactObjectsByVersion(context.Context, pgtype.UUID) ([]sqlc.ListArtifactObjectsByVersionRow, error) {
+	return f.objects, nil
+}
+func (f *fakeArtQuerier) GetArtifactObjectByVersionPath(_ context.Context, arg sqlc.GetArtifactObjectByVersionPathParams) (sqlc.GetArtifactObjectByVersionPathRow, error) {
+	if f.pathErr != nil {
+		return sqlc.GetArtifactObjectByVersionPathRow{}, f.pathErr
+	}
+	if arg.Path == nil {
+		return sqlc.GetArtifactObjectByVersionPathRow{}, pgx.ErrNoRows
+	}
+	row, ok := f.pathRows[*arg.Path]
+	if !ok {
+		return sqlc.GetArtifactObjectByVersionPathRow{}, pgx.ErrNoRows
+	}
+	return row, nil
 }
 
 type fakeArtPresigner struct {
@@ -100,8 +120,14 @@ func newArtEngine(t *testing.T, q sqlc.Querier, pre taskdomain.ArtifactPresigner
 	e.Use(gin.Recovery())
 	e.Use(injectPrincipal(artTenant, artUser))
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	domainSvc := taskdomain.NewArtifactReadService(q, pre, store)
+	// Wire the version-scoped presigners with the test secret so archive/preview
+	// tokens round-trip end-to-end (improve-artifact-conversation-ux).
+	issuer := auth.NewDownloadIssuer(artTestSecret, 5*time.Minute)
+	domainSvc.ArchivePresigner = auth.ArchiveURLSigner{Issuer: issuer}
+	domainSvc.PreviewPresigner = auth.PreviewURLSigner{Issuer: issuer}
 	h := &ArtifactHandlers{
-		App:     apptask.NewArtifactReadService(taskdomain.NewArtifactReadService(q, pre, store)),
+		App:     apptask.NewArtifactReadService(domainSvc),
 		Logger:  logger,
 		Metrics: m,
 		Tokens:  auth.NewDownloadVerifier(artTestSecret),

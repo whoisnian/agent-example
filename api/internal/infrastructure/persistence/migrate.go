@@ -42,6 +42,16 @@ func (m *Migrator) Down() error {
 	return nil
 }
 
+// To migrates up (or down) to a specific schema version. ErrNoChange is a
+// no-op success. Used to stage an intermediate schema (e.g. tests seeding
+// legacy rows before a backfilling migration is applied).
+func (m *Migrator) To(version uint) error {
+	if err := m.m.Migrate(version); err != nil && !errors.Is(err, migrate.ErrNoChange) {
+		return fmt.Errorf("migrate to %d: %w", version, err)
+	}
+	return nil
+}
+
 // Version returns the current applied version and dirty flag.
 func (m *Migrator) Version() (version uint, dirty bool, err error) {
 	v, d, err := m.m.Version()

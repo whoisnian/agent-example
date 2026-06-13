@@ -44,6 +44,12 @@ type Querier interface {
 	// detects a mutex hit. The unique partial index `one_active_version_per_task`
 	// guarantees at most one match.
 	GetActiveVersionByTask(ctx context.Context, taskID pgtype.UUID) (TaskVersion, error)
+	// Resolves one artifact's storage key + content type by (version_id, path) for
+	// the directory-aware version preview route. Ownership was enforced at preview
+	// mint time (the token's sub pins the version); the serve route only needs the
+	// object key and authoritative mime. The partial UNIQUE index on
+	// (version_id, path) WHERE path IS NOT NULL guarantees at most one match.
+	GetArtifactObjectByVersionPath(ctx context.Context, arg GetArtifactObjectByVersionPathParams) (GetArtifactObjectByVersionPathRow, error)
 	// Resolves an artifact's storage key + owning identity in one round-trip
 	// (artifacts → task_versions → tasks). Selects only what the presign endpoint
 	// needs; id/kind/created_at are intentionally omitted so unused columns never
@@ -141,6 +147,11 @@ type Querier interface {
 	// title-event branch can skip its side effect on a duplicate delivery
 	// (add-semantic-task-title).
 	InsertTaskEvent(ctx context.Context, arg InsertTaskEventParams) (int64, error)
+	// Storage keys + relative paths for streaming a version's artifacts as a zip
+	// archive (artifact-archive download). Includes oss_key by design: the archive
+	// handler streams object bytes, it does NOT assemble a metadata DTO, so the
+	// never-serialize-oss_key invariant (which guards DTO assembly) does not apply.
+	ListArtifactObjectsByVersion(ctx context.Context, versionID pgtype.UUID) ([]ListArtifactObjectsByVersionRow, error)
 	ListArtifactsByVersion(ctx context.Context, versionID pgtype.UUID) ([]Artifact, error)
 	// All pricing rows in force at now() — the source for GET /api/v1/pricing.
 	// Owner-agnostic; every authenticated caller receives the same body.

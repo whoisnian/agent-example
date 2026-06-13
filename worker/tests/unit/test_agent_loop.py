@@ -399,6 +399,115 @@ async def test_fresh_run_checkpoints_event_seq_high_water() -> None:
     assert [e["seq"] for e in events.events] == [1, 2]
 
 
+# --- per-step artifact persistence + events (improve-artifact-conversation-ux) --
+
+
+async def test_step_persists_before_checkpoint_then_emits_artifact_events() -> None:
+    """Spec ordering: a step's artifact rows are upserted AND the step+artifact
+    event seqs reserved BEFORE the step checkpoint; the artifact events are
+    emitted AFTER it (insert-then-publish), one per produced file."""
+    ops: list[str] = []
+
+    class RecordingCp(FakeCheckpointStore):
+        async def write(self, *, step_seq: int, step_name: str, state: dict[str, Any]) -> Any:
+            ops.append(f"checkpoint:{step_seq}")
+            return await super().write(step_seq=step_seq, step_name=step_name, state=state)
+
+    class RecordingEvents(FakeEventPublisher):
+        async def publish_event(self, **kwargs: Any) -> None:
+            ops.append(f"emit:{kwargs['kind']}")
+            await super().publish_event(**kwargs)
+
+    cp, events = RecordingCp(), RecordingEvents()
+    ctx = _make_ctx(cp, events)
+    model = scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "did one", "files": ['
+            '{"path": "a.py", "content": "x"}, {"path": "b/c.css", "content": "yy"}]}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(
+            path=path, oss_key=f"k/{path}", bytes=len(content), sha256="h", mime="text/plain"
+        )
+
+    async def persist_artifact(ctx_in: Any, art: ProducedArtifact) -> str:
+        ops.append(f"persist:{art.path}")
+        return f"id-{art.path}"
+
+    await run_agent_loop(
+        ctx,
+        _msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=write_file,
+        max_step_retries=0,
+        persist_artifact=persist_artifact,
+    )
+
+    # Plan emits then checkpoints; the step persists both rows, checkpoints,
+    # then emits the step event followed by one artifact event per file.
+    assert ops == [
+        "emit:plan",
+        "checkpoint:0",
+        "persist:a.py",
+        "persist:b/c.css",
+        "checkpoint:1",
+        "emit:step",
+        "emit:artifact",
+        "emit:artifact",
+    ]
+    # Artifact event payloads carry the persisted id + path + metadata.
+    artifacts = [e for e in events.events if e["kind"] == "artifact"]
+    assert [a["payload"]["artifact_id"] for a in artifacts] == ["id-a.py", "id-b/c.css"]
+    assert [a["payload"]["path"] for a in artifacts] == ["a.py", "b/c.css"]
+    assert all(a["payload"]["mime"] == "text/plain" for a in artifacts)
+    # Seqs: plan=1, step=2, artifacts=3,4 — and the step checkpoint's high-water
+    # mark covers every artifact seq, so a resume can never re-hand-out one.
+    assert [e["seq"] for e in events.events] == [1, 2, 3, 4]
+    step_checkpoint_state = cp.writes[1][2]
+    assert step_checkpoint_state["event_seq"] == 4
+
+
+async def test_persist_failure_aborts_before_step_checkpoint() -> None:
+    """If row persistence fails the run fails and the step checkpoint is NOT
+    written — so a redelivery re-executes the whole step (no orphaned object,
+    no half-advanced checkpoint)."""
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    model = scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "x", "files": [{"path": "a.py", "content": "y"}]}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def write_file(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+        return ProducedArtifact(path=path, oss_key=f"k/{path}", bytes=1, sha256="h")
+
+    async def persist_artifact(ctx_in: Any, art: ProducedArtifact) -> str:
+        raise RuntimeError("db down")
+
+    with pytest.raises(RuntimeError):
+        await run_agent_loop(
+            ctx,
+            _msg(),
+            model=model,
+            system_prompt="sys",
+            write_file=write_file,
+            max_step_retries=0,
+            persist_artifact=persist_artifact,
+        )
+    # Only the plan checkpoint exists; the step checkpoint never advanced, and
+    # no artifact event was emitted.
+    assert [w[0] for w in cp.writes] == [0]
+    assert [e["kind"] for e in events.events] == ["plan"]
+
+
 # --- conversation-context injection (refactor-task-conversation-continuity) --
 
 

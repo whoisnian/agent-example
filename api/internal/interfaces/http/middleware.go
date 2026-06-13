@@ -98,12 +98,28 @@ func accessLogMiddleware(logger *slog.Logger) gin.HandlerFunc {
 		c.Next()
 		logger.LogAttrs(c.Request.Context(), slog.LevelInfo, "http_access",
 			slog.String("method", c.Request.Method),
-			slog.String("path", c.Request.URL.Path),
+			slog.String("path", accessLogPath(c)),
 			slog.Int("status", c.Writer.Status()),
 			slog.Duration("duration", time.Since(start)),
 			slog.String("remote", c.ClientIP()),
 		)
 	}
+}
+
+// previewServeRoute is the matched template of the directory-aware preview
+// serve route, whose `:token` segment carries the grant and MUST NOT be logged.
+const previewServeRoute = "/api/v1/versions/:version_id/preview/:token/*filepath"
+
+// accessLogPath returns a loggable request path with any in-path secret
+// redacted. The preview serve route carries its token in a path segment, so
+// the raw URL.Path would leak it; reconstruct a redacted path from the safe
+// params (version_id + filepath) instead. All other routes log URL.Path as-is
+// (query strings — where the download/archive tokens ride — are never logged).
+func accessLogPath(c *gin.Context) string {
+	if c.FullPath() == previewServeRoute {
+		return "/api/v1/versions/" + c.Param("version_id") + "/preview/[redacted]" + c.Param("filepath")
+	}
+	return c.Request.URL.Path
 }
 
 // publicRoute is a (method, route-template) pair the auth middleware lets
@@ -127,6 +143,12 @@ var publicRoutes = map[publicRoute]bool{
 	{http.MethodPost, "/api/v1/auth/login"}:                     true,
 	{http.MethodGet, "/api/v1/ws"}:                              true,
 	{http.MethodGet, "/api/v1/artifacts/:artifact_id/download"}: true,
+	// Version-scoped artifact streams (improve-artifact-conversation-ux): the
+	// zip archive carries its grant in `?token=`, the preview carries it in a
+	// path segment — neither can send an Authorization header (navigation /
+	// <iframe> / <link>). They authenticate via their own token verifiers.
+	{http.MethodGet, "/api/v1/versions/:version_id/artifacts/archive"}:        true,
+	{http.MethodGet, "/api/v1/versions/:version_id/preview/:token/*filepath"}: true,
 }
 
 // authMiddleware authenticates every non-public request via a Bearer JWT. On

@@ -34,31 +34,56 @@ class FakePersistence:
         version_id: Any,
         kind: str,
         oss_key: str,
+        path: str | None,
         mime: str | None,
         bytes_size: int | None,
         sha256: str | None,
     ) -> Any:
+        row_id = uuid4()
         self.rows.append(
             {
+                "id": row_id,
                 "version_id": version_id,
                 "kind": kind,
                 "oss_key": oss_key,
+                "path": path,
                 "mime": mime,
                 "bytes_size": bytes_size,
                 "sha256": sha256,
             }
         )
-        return uuid4()
+        return row_id
+
+
+class FakeEventPublisher:
+    """Records published events for assertions."""
+
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
+
+    async def publish_event(self, **kwargs: Any) -> None:
+        self.events.append(kwargs)
 
 
 def _ctx(oss: FakeOss) -> Any:
     version_id = uuid4()
+    seq = SimpleNamespace(n=0)
+
+    def next_event_seq() -> int:
+        seq.n += 1
+        return seq.n
+
     return SimpleNamespace(
         tenant_id="tenant-a",
         task_id=uuid4(),
         version_id=version_id,
+        run_id=uuid4(),
+        task_type="code-gen",
         oss_prefix=f"tenant-a/task/{version_id}/",
         oss_client=oss,
+        event_publisher=FakeEventPublisher(),
+        traceparent=None,
+        next_event_seq=next_event_seq,
     )
 
 
@@ -80,6 +105,18 @@ async def test_inherit_copies_and_records_each_object() -> None:
     ]
     assert [r["bytes_size"] for r in persistence.rows] == [12, 5]
     assert all(r["kind"] == "file" and r["sha256"] is None for r in persistence.rows)
+    # Inheritance preserves the relative path as the new version's `path`.
+    assert [r["path"] for r in persistence.rows] == ["code/main.py", "README.md"]
+    # One kind="artifact" event per inherited row, carrying its id + path.
+    events = ctx.event_publisher.events
+    assert [e["kind"] for e in events] == ["artifact", "artifact"]
+    assert [e["payload"]["path"] for e in events] == ["code/main.py", "README.md"]
+    assert [e["payload"]["artifact_id"] for e in events] == [
+        str(persistence.rows[0]["id"]),
+        str(persistence.rows[1]["id"]),
+    ]
+    # Monotonic seqs (announced before the plan checkpoint's high-water).
+    assert [e["seq"] for e in events] == [1, 2]
 
 
 async def test_inherit_skips_checkpoint_blobs() -> None:
@@ -143,14 +180,25 @@ def _gate_ctx(oss: FakeOss, latest: Any = None) -> Any:
     import structlog
 
     version_id = uuid4()
+    seq = SimpleNamespace(n=0)
+
+    def next_event_seq() -> int:
+        seq.n += 1
+        return seq.n
+
     return SimpleNamespace(
         tenant_id="tenant-a",
         task_id=uuid4(),
         version_id=version_id,
+        run_id=uuid4(),
+        task_type="code-gen",
         oss_prefix=f"tenant-a/task/{version_id}/",
         oss_client=oss,
         checkpoint_store=FakeCheckpointStore(latest),
         logger=structlog.get_logger(),
+        event_publisher=FakeEventPublisher(),
+        traceparent=None,
+        next_event_seq=next_event_seq,
     )
 
 

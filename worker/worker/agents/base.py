@@ -23,7 +23,7 @@ from worker.agents.loop import DEFAULT_ROLE_INSTRUCTIONS, assemble_run_summary, 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-    from worker.agents.loop import WriteFile
+    from worker.agents.loop import ProducedArtifact, WriteFile
     from worker.agents.model import ModelFactory
     from worker.agents.subagent import RoleInstructions
     from worker.core.messages import TaskExecuteMessage
@@ -154,19 +154,15 @@ class LoopAgent:
                 metrics=self._metrics,
                 roles=self._roles,
                 inherited=inherited,
+                persist_artifact=self._persist_artifact,
             )
-            for art in result.artifacts:
-                await self._persistence.insert_artifact(
-                    version_id=ctx.version_id,
-                    kind="file",
-                    oss_key=art.oss_key,
-                    mime=art.mime,
-                    bytes_size=art.bytes,
-                    sha256=art.sha256,
-                )
-            # Run summary: after artifact rows, before returning — failed /
-            # cancelled runs raise above and never reach this (spec: "Run
-            # Summary Event"). The ingest side persists the version summary.
+            # Artifact rows + `kind="artifact"` events are written per-step
+            # inside the loop (improve-artifact-conversation-ux), not batched
+            # here — so a produced file is visible mid-run and a failed run
+            # keeps its partial outputs. Run summary: after the final step's
+            # artifacts, before returning — failed / cancelled runs raise above
+            # and never reach this (spec: "Run Summary Event"). The ingest side
+            # persists the version summary.
             await self._emit_summary(ctx, result.step_summaries)
         except asyncio.CancelledError:
             self._record_run("cancelled")
@@ -175,6 +171,22 @@ class LoopAgent:
             self._record_run("error")
             raise
         self._record_run("success")
+
+    async def _persist_artifact(self, ctx: RunContext, art: ProducedArtifact) -> str:
+        """Upsert one produced artifact's row, returning its id for the event
+        payload. The loop calls this at each step boundary BEFORE the step
+        checkpoint (improve-artifact-conversation-ux); `artifacts` is the only
+        business table the worker writes."""
+        artifact_id = await self._persistence.insert_artifact(
+            version_id=ctx.version_id,
+            kind="file",
+            oss_key=art.oss_key,
+            path=art.path,
+            mime=art.mime,
+            bytes_size=art.bytes,
+            sha256=art.sha256,
+        )
+        return str(artifact_id)
 
     async def _emit_summary(self, ctx: RunContext, step_summaries: list[str | None]) -> None:
         summary = assemble_run_summary(step_summaries)

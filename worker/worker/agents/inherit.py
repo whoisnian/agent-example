@@ -46,13 +46,38 @@ async def inherit_parent_artifacts(
         if key.startswith(_RESERVED_PREFIXES):
             continue
         abs_key = await ctx.oss_client.server_side_copy(parent_prefix, ctx.oss_prefix, key)
-        await persistence.insert_artifact(
+        mime = mimetypes.guess_type(key)[0]
+        # `key` is the parent-relative path; inheritance preserves relative
+        # paths, so it is also the new version's `path` (improve-artifact-
+        # conversation-ux).
+        artifact_id = await persistence.insert_artifact(
             version_id=ctx.version_id,
             kind="file",
             oss_key=abs_key,
-            mime=mimetypes.guess_type(key)[0],
+            path=key,
+            mime=mime,
             bytes_size=size,
             sha256=None,
+        )
+        # Announce the inherited file so the new version's turn shows its
+        # starting artifact set immediately (insert-then-publish). These run
+        # before the plan checkpoint, whose event_seq high-water then covers
+        # their seqs (spec: "Resume-Safe Event Sequencing").
+        await ctx.event_publisher.publish_event(
+            task_id=str(ctx.task_id),
+            version_id=str(ctx.version_id),
+            run_id=str(ctx.run_id),
+            task_type=ctx.task_type,
+            kind="artifact",
+            payload={
+                "artifact_id": str(artifact_id),
+                "path": key,
+                "mime": mime,
+                "bytes": size,
+                "sha256": None,
+            },
+            seq=ctx.next_event_seq(),
+            traceparent=ctx.traceparent,
         )
         copied.append((key, size))
     return copied

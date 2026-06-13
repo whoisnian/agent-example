@@ -56,6 +56,13 @@ type Metrics struct {
 	OSSPresignTotal  *prometheus.CounterVec
 	OSSDownloadTotal *prometheus.CounterVec
 	OSSDownloadBytes prometheus.Counter
+	// Version-scoped artifact routes (improve-artifact-conversation-ux): the zip
+	// archive download and the directory-aware preview, each with an outcome
+	// counter plus a bytes-streamed counter.
+	OSSArchiveTotal *prometheus.CounterVec
+	OSSArchiveBytes prometheus.Counter
+	OSSPreviewTotal *prometheus.CounterVec
+	OSSPreviewBytes prometheus.Counter
 
 	// Realtime-gateway metrics (add-realtime-gateway §"Realtime Observability").
 	WSConnectionsActive       prometheus.Gauge
@@ -225,6 +232,28 @@ func NewMetrics() *Metrics {
 			Name: "oss_download_bytes_total",
 			Help: "Artifact bytes streamed through the download proxy to clients.",
 		}),
+		OSSArchiveTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "oss_archive_total",
+				Help: "Version zip-archive download requests. status ∈ {success,token_invalid,oss_error,stream_aborted}; stream_aborted = failure after the zip stream began.",
+			},
+			[]string{"status"},
+		),
+		OSSArchiveBytes: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "oss_archive_bytes_total",
+			Help: "Compressed zip-archive bytes streamed to clients.",
+		}),
+		OSSPreviewTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "oss_preview_total",
+				Help: "Directory-aware version preview file requests. status ∈ {success,token_invalid,not_found,oss_error,stream_aborted}.",
+			},
+			[]string{"status"},
+		),
+		OSSPreviewBytes: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "oss_preview_bytes_total",
+			Help: "Preview file bytes streamed to clients.",
+		}),
 		WSConnectionsActive: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "ws_connections_active",
 			Help: "Live realtime-gateway WebSocket connections on this instance.",
@@ -285,6 +314,10 @@ func NewMetrics() *Metrics {
 		m.OSSPresignTotal,
 		m.OSSDownloadTotal,
 		m.OSSDownloadBytes,
+		m.OSSArchiveTotal,
+		m.OSSArchiveBytes,
+		m.OSSPreviewTotal,
+		m.OSSPreviewBytes,
 		m.WSConnectionsActive,
 		m.WSSubscriptionsActive,
 		m.WSEventsFannedTotal,

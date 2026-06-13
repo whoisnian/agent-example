@@ -11,6 +11,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getArtifactObjectByVersionPath = `-- name: GetArtifactObjectByVersionPath :one
+SELECT oss_key, mime
+FROM artifacts
+WHERE version_id = $1 AND path = $2
+`
+
+type GetArtifactObjectByVersionPathParams struct {
+	VersionID pgtype.UUID `json:"version_id"`
+	Path      *string     `json:"path"`
+}
+
+type GetArtifactObjectByVersionPathRow struct {
+	OssKey string  `json:"oss_key"`
+	Mime   *string `json:"mime"`
+}
+
+// Resolves one artifact's storage key + content type by (version_id, path) for
+// the directory-aware version preview route. Ownership was enforced at preview
+// mint time (the token's sub pins the version); the serve route only needs the
+// object key and authoritative mime. The partial UNIQUE index on
+// (version_id, path) WHERE path IS NOT NULL guarantees at most one match.
+func (q *Queries) GetArtifactObjectByVersionPath(ctx context.Context, arg GetArtifactObjectByVersionPathParams) (GetArtifactObjectByVersionPathRow, error) {
+	row := q.db.QueryRow(ctx, getArtifactObjectByVersionPath, arg.VersionID, arg.Path)
+	var i GetArtifactObjectByVersionPathRow
+	err := row.Scan(&i.OssKey, &i.Mime)
+	return i, err
+}
+
 const getArtifactWithOwner = `-- name: GetArtifactWithOwner :one
 SELECT a.oss_key, a.bytes, a.mime, a.sha256, t.tenant_id, t.user_id
 FROM artifacts a
@@ -46,8 +74,51 @@ func (q *Queries) GetArtifactWithOwner(ctx context.Context, id pgtype.UUID) (Get
 	return i, err
 }
 
+const listArtifactObjectsByVersion = `-- name: ListArtifactObjectsByVersion :many
+SELECT id, oss_key, path, mime
+FROM artifacts
+WHERE version_id = $1
+ORDER BY created_at ASC, id ASC
+`
+
+type ListArtifactObjectsByVersionRow struct {
+	ID     pgtype.UUID `json:"id"`
+	OssKey string      `json:"oss_key"`
+	Path   *string     `json:"path"`
+	Mime   *string     `json:"mime"`
+}
+
+// Storage keys + relative paths for streaming a version's artifacts as a zip
+// archive (artifact-archive download). Includes oss_key by design: the archive
+// handler streams object bytes, it does NOT assemble a metadata DTO, so the
+// never-serialize-oss_key invariant (which guards DTO assembly) does not apply.
+func (q *Queries) ListArtifactObjectsByVersion(ctx context.Context, versionID pgtype.UUID) ([]ListArtifactObjectsByVersionRow, error) {
+	rows, err := q.db.Query(ctx, listArtifactObjectsByVersion, versionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListArtifactObjectsByVersionRow
+	for rows.Next() {
+		var i ListArtifactObjectsByVersionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OssKey,
+			&i.Path,
+			&i.Mime,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listArtifactsByVersion = `-- name: ListArtifactsByVersion :many
-SELECT id, version_id, kind, oss_key, mime, bytes, sha256, created_at
+SELECT id, version_id, kind, oss_key, mime, bytes, sha256, created_at, path
 FROM artifacts
 WHERE version_id = $1
 ORDER BY created_at ASC, id ASC
@@ -71,6 +142,7 @@ func (q *Queries) ListArtifactsByVersion(ctx context.Context, versionID pgtype.U
 			&i.Bytes,
 			&i.Sha256,
 			&i.CreatedAt,
+			&i.Path,
 		); err != nil {
 			return nil, err
 		}

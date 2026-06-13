@@ -102,6 +102,20 @@ func migrateUp(t *testing.T, dsn string) {
 	}
 }
 
+// migrateUpTo applies migrations up to a specific version (inclusive) so a
+// test can seed pre-migration rows before a later backfilling migration runs.
+func migrateUpTo(t *testing.T, dsn string, version uint) {
+	t.Helper()
+	m, err := persistence.NewMigrator(migrationsDir(t), dsn)
+	if err != nil {
+		t.Fatalf("new migrator: %v", err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	if err := m.To(version); err != nil {
+		t.Fatalf("migrate to %d: %v", version, err)
+	}
+}
+
 // migrateAllDown rolls back step-by-step until no migrations remain.
 func migrateAllDown(t *testing.T, dsn string) {
 	t.Helper()
@@ -244,6 +258,7 @@ func TestStructuralIntegrity(t *testing.T) {
 		"cost_events_task_occurred_idx",
 		"cost_events_version_idx",
 		"task_costs_task_idx",
+		"artifacts_version_path_key", // 0010_artifacts_path
 	}
 	for _, name := range wantIndexes {
 		var n int
@@ -860,6 +875,106 @@ func TestOutboxExchangeDownIsNoOp(t *testing.T) {
 	}
 	if dirty {
 		t.Errorf("schema_migrations.dirty = true after 0006 down")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 0010_artifacts_path — backfill + partial unique index
+// ---------------------------------------------------------------------------
+
+// TestArtifactsPathBackfillAndUniqueness seeds artifact rows BEFORE 0010 is
+// applied (oss_key only), then asserts the migration's backfill derives `path`
+// from the deterministic {tenant}/{task}/{version}/ prefix, leaves a
+// prefix-mismatched row NULL, and that the partial UNIQUE index rejects a
+// duplicate non-null path while permitting multiple NULLs.
+func TestArtifactsPathBackfillAndUniqueness(t *testing.T) {
+	t.Parallel()
+	dsn := newPostgresContainer(t)
+	// Apply only up through 0009 so we can seed legacy rows before path exists.
+	migrateUpTo(t, dsn, 9)
+
+	conn := connect(t, dsn)
+	ctx := context.Background()
+
+	taskID := mustUUID(t)
+	tenantID := mustUUID(t)
+	userID := mustUUID(t)
+	versionID := mustUUID(t)
+	prefix := tenantID.String() + "/" + taskID.String() + "/" + versionID.String() + "/"
+
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO tasks (id, tenant_id, user_id, title, task_type, status)
+		 VALUES ($1, $2, $3, 'fixture', 'code-gen', 'succeeded')`,
+		taskID, tenantID, userID,
+	); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO task_versions (id, task_id, version_no, prompt, status)
+		 VALUES ($1, $2, 1, 'seed', 'succeeded')`,
+		versionID, taskID,
+	); err != nil {
+		t.Fatalf("seed version: %v", err)
+	}
+
+	matchID := mustUUID(t)      // oss_key under the expected prefix → path derived
+	mismatchID := mustUUID(t)   // oss_key NOT under the prefix → path stays NULL
+	emptyRemID := mustUUID(t)   // oss_key == prefix exactly → empty remainder → NULL
+	seed := []struct {
+		id     uuid.UUID
+		ossKey string
+	}{
+		{matchID, prefix + "css/style.css"},
+		{mismatchID, "some/foreign/object.txt"},
+		{emptyRemID, prefix},
+	}
+	for _, s := range seed {
+		if _, err := conn.Exec(ctx,
+			`INSERT INTO artifacts (id, version_id, kind, oss_key) VALUES ($1, $2, 'file', $3)`,
+			s.id, versionID, s.ossKey,
+		); err != nil {
+			t.Fatalf("seed artifact %s: %v", s.ossKey, err)
+		}
+	}
+
+	// Apply 0010.
+	migrateUp(t, dsn)
+
+	assertPath := func(id uuid.UUID, want *string) {
+		var got *string
+		if err := conn.QueryRow(ctx, `SELECT path FROM artifacts WHERE id = $1`, id).Scan(&got); err != nil {
+			t.Fatalf("read path for %s: %v", id, err)
+		}
+		switch {
+		case want == nil && got != nil:
+			t.Errorf("path for %s = %q, want NULL", id, *got)
+		case want != nil && (got == nil || *got != *want):
+			t.Errorf("path for %s = %v, want %q", id, got, *want)
+		}
+	}
+	wantCSS := "css/style.css"
+	assertPath(matchID, &wantCSS)
+	assertPath(mismatchID, nil)
+	assertPath(emptyRemID, nil)
+
+	// Partial UNIQUE index: a second row with the same non-null path under the
+	// same version is rejected (23505), while a second NULL-path row is fine.
+	_, err := conn.Exec(ctx,
+		`INSERT INTO artifacts (id, version_id, kind, oss_key, path)
+		 VALUES ($1, $2, 'file', $3, 'css/style.css')`,
+		mustUUID(t), versionID, prefix+"dup",
+	)
+	if err == nil {
+		t.Error("duplicate (version_id, path) insert succeeded; partial unique index not enforced")
+	} else if !strings.Contains(err.Error(), "artifacts_version_path_key") {
+		t.Errorf("duplicate path error = %v, want artifacts_version_path_key violation", err)
+	}
+	if _, err := conn.Exec(ctx,
+		`INSERT INTO artifacts (id, version_id, kind, oss_key, path)
+		 VALUES ($1, $2, 'file', $3, NULL)`,
+		mustUUID(t), versionID, prefix+"another-null",
+	); err != nil {
+		t.Errorf("second NULL-path row rejected: %v", err)
 	}
 }
 

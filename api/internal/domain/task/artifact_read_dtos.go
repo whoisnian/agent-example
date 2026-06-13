@@ -18,12 +18,14 @@ type VersionArtifacts struct {
 
 // ArtifactMeta is one artifact's public metadata. It deliberately omits
 // oss_key — the internal storage layout is never part of the contract (design
-// D6); clients reach bytes only through the presign endpoint. Mime / Bytes /
-// Sha256 are nullable in the table and render as JSON null (present, never
-// omitted) when absent.
+// D6); clients reach bytes only through the presign endpoint. Path / Mime /
+// Bytes / Sha256 are nullable in the table and render as JSON null (present,
+// never omitted) when absent. Path is the artifact's version-relative file
+// path (e.g. index.html, css/style.css) — the preferred display label.
 type ArtifactMeta struct {
 	ID        uuid.UUID `json:"id"`
 	Kind      string    `json:"kind"`
+	Path      *string   `json:"path"`
 	Mime      *string   `json:"mime"`
 	Bytes     *int64    `json:"bytes"`
 	Sha256    *string   `json:"sha256"`
@@ -43,4 +45,25 @@ type PresignResult struct {
 	Bytes     *int64    `json:"bytes"`
 	Mime      *string   `json:"mime"`
 	Sha256    *string   `json:"sha256"`
+}
+
+// --- /versions/{id}/artifacts/archive/presign ------------------------------
+
+// ArchivePresignResult is the payload of the version-archive presign endpoint:
+// a short-lived API-relative URL that streams a zip of the version's artifacts,
+// plus its advisory expiry (mint-time + configured TTL, UTC).
+type ArchivePresignResult struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+// --- /versions/{id}/preview ------------------------------------------------
+
+// PreviewMintResult is the payload of the version-preview mint endpoint:
+// an opaque API-relative base URL (`/api/v1/versions/{id}/preview/<token>`)
+// under which a rendered HTML artifact's relative asset references resolve to
+// sibling artifacts of the version, plus its advisory expiry.
+type PreviewMintResult struct {
+	BaseURL   string    `json:"base_url"`
+	ExpiresAt time.Time `json:"expires_at"`
 }

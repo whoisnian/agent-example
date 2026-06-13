@@ -110,7 +110,12 @@ type VersionFull struct {
 	Status       string          `json:"status"`
 	IsActive     bool            `json:"is_active"`
 	ArtifactRoot *string         `json:"artifact_root"`
-	CreatedAt    time.Time       `json:"created_at"`
+	// Summary is the run-result summary (task_versions.summary, populated by a
+	// worker kind=summary event). Present-and-null: JSON null until a run
+	// emits one. The web conversation labels a turn's collapsed execution
+	// section from it without eagerly fetching that version's events.
+	Summary   *string   `json:"summary"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // RunSummary is one execution attempt. Error is raw JSON and renders as JSON
@@ -251,6 +256,7 @@ func versionFullFromRow(v *sqlc.TaskVersion) VersionFull {
 		Status:       v.Status,
 		IsActive:     derefBool(v.IsActive),
 		ArtifactRoot: v.ArtifactRoot,
+		Summary:      v.Summary,
 		CreatedAt:    v.CreatedAt.Time,
 	}
 }

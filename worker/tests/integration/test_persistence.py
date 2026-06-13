@@ -134,6 +134,7 @@ async def test_insert_artifact(pg_pool):  # type: ignore[no-untyped-def]
         version_id=uuid4(),
         kind="report",
         oss_key="x/y/report.md",
+        path="report.md",
         mime="text/markdown",
         bytes_size=42,
         sha256="abc",

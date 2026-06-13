@@ -321,12 +321,14 @@ func runServer(args []string) int {
 		AccessKeySecret: cfg.OSSAccessKeySecret,
 		UsePathStyle:    cfg.OSSUsePathStyle,
 	})
-	downloadSigner := auth.DownloadURLSigner{
-		Issuer: auth.NewDownloadIssuer(cfg.AuthJWTSecret, cfg.OSSPresignTTL),
-	}
-	appArtifactSvc := apptask.NewArtifactReadService(
-		taskdomain.NewArtifactReadService(queries, downloadSigner, ossClient),
-	)
+	downloadIssuer := auth.NewDownloadIssuer(cfg.AuthJWTSecret, cfg.OSSPresignTTL)
+	downloadSigner := auth.DownloadURLSigner{Issuer: downloadIssuer}
+	domainArtifactSvc := taskdomain.NewArtifactReadService(queries, downloadSigner, ossClient)
+	// Version-scoped presigners (improve-artifact-conversation-ux) share the one
+	// download issuer (same secret + TTL), differing only by token audience.
+	domainArtifactSvc.ArchivePresigner = auth.ArchiveURLSigner{Issuer: downloadIssuer}
+	domainArtifactSvc.PreviewPresigner = auth.PreviewURLSigner{Issuer: downloadIssuer}
+	appArtifactSvc := apptask.NewArtifactReadService(domainArtifactSvc)
 	artifactHandlers := &httpapi.ArtifactHandlers{
 		App:     appArtifactSvc,
 		Logger:  logger,

@@ -1,26 +1,26 @@
 ## 1. 数据模型：artifacts.path
 
-- [ ] 1.1 迁移 0010：`ALTER TABLE artifacts ADD COLUMN path TEXT`，回填（按 `task_versions → tasks` join 剥 `{tenant_id}/{task_id}/{version_id}/` 前缀，不匹配或剥出空串均留 NULL），加部分唯一索引 `(version_id, path) WHERE path IS NOT NULL`，down 为 drop index + drop column；验证 up→down→up 干净往返、空串回填留 NULL、多 NULL 不冲突唯一索引
-- [ ] 1.2 更新 sqlc：`ListArtifactsByVersion` 返回 `path`；新增 `GetArtifactByVersionAndPath(version_id, path)`（preview 路由用）；重新生成
+- [x] 1.1 迁移 0010：`ALTER TABLE artifacts ADD COLUMN path TEXT`，回填（按 `task_versions → tasks` join 剥 `{tenant_id}/{task_id}/{version_id}/` 前缀，不匹配或剥出空串均留 NULL），加部分唯一索引 `(version_id, path) WHERE path IS NOT NULL`，down 为 drop index + drop column；验证 up→down→up 干净往返、空串回填留 NULL、多 NULL 不冲突唯一索引
+- [x] 1.2 更新 sqlc：`ListArtifactsByVersion` 返回 `path`；新增 `GetArtifactByVersionAndPath(version_id, path)`（preview 路由用）；重新生成
 
 ## 2. Worker：step 级产物持久化 + artifact 事件
 
-- [ ] 2.1 `persistence.insert_artifact` 增加 `path` 参数（upsert SET 列同步更新）；`ProducedArtifact` 已携带 path，贯通传递
-- [ ] 2.2 `run_agent_loop` 注入 `persist_artifacts` 回调，step 收尾顺序固定为：**upsert 产物行 → 预留 step+artifact 全部 seq（`ctx.next_event_seq()`）→ 写 checkpoint → 发 step 事件 + 逐个 `kind="artifact"` 事件**（payload `{artifact_id, path, mime, bytes, sha256}`，insert-then-publish）。即产物落库与 seq 预留必须在 checkpoint 之前（崩溃窗口下重跑收敛、seq 被高水位覆盖）。移除 `AgentBase.run()` 末尾批量 insert；同步处理 `LoopResult.artifacts`（删除该字段或注明保留理由，避免死契约）
-- [ ] 2.3 `inherit.py`：继承行写 `path`（剥版本前缀的相对 key），落库后逐个发 `kind="artifact"` 事件
-- [ ] 2.4 单测：step 级落库时机（step 1 完成即可见）、**顺序断言（upsert+seq 预留先于 checkpoint，insert 先于 publish）**、crash-before-checkpoint resume 重跑不产生孤儿行/不复用已持久化 seq、失败仍 fail run、继承事件发射
+- [x] 2.1 `persistence.insert_artifact` 增加 `path` 参数（upsert SET 列同步更新）；`ProducedArtifact` 已携带 path，贯通传递
+- [x] 2.2 `run_agent_loop` 注入 `persist_artifacts` 回调，step 收尾顺序固定为：**upsert 产物行 → 预留 step+artifact 全部 seq（`ctx.next_event_seq()`）→ 写 checkpoint → 发 step 事件 + 逐个 `kind="artifact"` 事件**（payload `{artifact_id, path, mime, bytes, sha256}`，insert-then-publish）。即产物落库与 seq 预留必须在 checkpoint 之前（崩溃窗口下重跑收敛、seq 被高水位覆盖）。移除 `AgentBase.run()` 末尾批量 insert；同步处理 `LoopResult.artifacts`（删除该字段或注明保留理由，避免死契约）
+- [x] 2.3 `inherit.py`：继承行写 `path`（剥版本前缀的相对 key），落库后逐个发 `kind="artifact"` 事件
+- [x] 2.4 单测：step 级落库时机（step 1 完成即可见）、**顺序断言（upsert+seq 预留先于 checkpoint，insert 先于 publish）**、crash-before-checkpoint resume 重跑不产生孤儿行/不复用已持久化 seq、失败仍 fail run、继承事件发射
 
 ## 3. API：DTO path + zip 归档 + 目录化预览
 
-- [ ] 3.1 列表 DTO 增加 `path`（present-and-null）；契约测试覆盖 null 序列化
-- [ ] 3.2 通用化下载 token：mint/verify 支持 `aud ∈ {artifact-download, artifact-archive, version-preview}`，`sub` 校验对应资源 id；access-token 双向隔离回归测试
-- [ ] 3.3 `GET /versions/{id}/artifacts/archive/presign`（Bearer + owner 校验）+ `GET /versions/{id}/artifacts/archive?token=`（公开路由，`archive/zip` 流式打包，entry 名 = path / 回退 `artifact-<id>`，UTF-8 entry，attachment 头，空版本空 zip，OSS 失败 502/断流 abort+metric，token 不进日志）
-- [ ] 3.4 `GET /versions/{id}/preview`（mint，返回 `{base_url, expires_at}`）+ `GET /versions/{id}/preview/{token}/{filepath...}`（公开路由：token 校验、filepath 解码+净化拒绝 `..`/`\`/绝对路径/空或 `.`、按 `(version_id, path)` 精确解析、下载代理同款安全头、404/403/502 口径；token 在路径段——必须以脱敏 route template 记日志，不复用默认 path 记录）
-- [ ] 3.5 路由注册 + 归档/预览 metrics（outcome 标签 + bytes counter）+ HTTP 契约测试（zip 内容、相对引用解析、穿越/空路径拒绝、跨 version/aud token 403、**archive 与 preview 两路由访问日志均不含 token**）
+- [x] 3.1 列表 DTO 增加 `path`（present-and-null）；契约测试覆盖 null 序列化
+- [x] 3.2 通用化下载 token：mint/verify 支持 `aud ∈ {artifact-download, artifact-archive, version-preview}`，`sub` 校验对应资源 id；access-token 双向隔离回归测试
+- [x] 3.3 `GET /versions/{id}/artifacts/archive/presign`（Bearer + owner 校验）+ `GET /versions/{id}/artifacts/archive?token=`（公开路由，`archive/zip` 流式打包，entry 名 = path / 回退 `artifact-<id>`，UTF-8 entry，attachment 头，空版本空 zip，OSS 失败 502/断流 abort+metric，token 不进日志）
+- [x] 3.4 `GET /versions/{id}/preview`（mint，返回 `{base_url, expires_at}`）+ `GET /versions/{id}/preview/{token}/{filepath...}`（公开路由：token 校验、filepath 解码+净化拒绝 `..`/`\`/绝对路径/空或 `.`、按 `(version_id, path)` 精确解析、下载代理同款安全头、404/403/502 口径；token 在路径段——必须以脱敏 route template 记日志，不复用默认 path 记录）
+- [x] 3.5 路由注册 + 归档/预览 metrics（outcome 标签 + bytes counter）+ HTTP 契约测试（zip 内容、相对引用解析、穿越/空路径拒绝、跨 version/aud token 403、**archive 与 preview 两路由访问日志均不含 token**）
 
 ## 3b. API：版本详情 summary（供历史回合折叠行）
 
-- [ ] 3b.1 迁移已存在 `task_versions.summary`（0009）；`GetVersionDetail`/相关 sqlc 查询 SELECT `summary`；`VersionFull` 增 `Summary *string`（present-and-null JSON）；契约测试覆盖有值/NULL 两态
+- [x] 3b.1 迁移已存在 `task_versions.summary`（0009）；`GetVersionDetail`/相关 sqlc 查询 SELECT `summary`；`VersionFull` 增 `Summary *string`（present-and-null JSON）；契约测试覆盖有值/NULL 两态
 - [ ] 3b.2 web `VersionFull`/`types.ts` 增 `summary: string | null`；MSW handler 返回 summary；现有 version-detail 测试不回归
 
 ## 4. Web：数据访问与实时失效

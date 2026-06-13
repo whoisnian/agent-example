@@ -80,6 +80,7 @@ async def pg_pool(pg_container: Any) -> AsyncIterator[Any]:
                 version_id  UUID NOT NULL,
                 kind        TEXT NOT NULL,
                 oss_key     TEXT NOT NULL,
+                path        TEXT,
                 mime        TEXT,
                 bytes       BIGINT,
                 sha256      TEXT,
@@ -88,6 +89,9 @@ async def pg_pool(pg_container: Any) -> AsyncIterator[Any]:
             -- Mirrors api migration 0008: insert_artifact upserts on this key.
             CREATE UNIQUE INDEX IF NOT EXISTS artifacts_version_oss_key_key
                 ON artifacts (version_id, oss_key);
+            -- Mirrors api migration 0010: at most one row per (version_id, path).
+            CREATE UNIQUE INDEX IF NOT EXISTS artifacts_version_path_key
+                ON artifacts (version_id, path) WHERE path IS NOT NULL;
             """
         )
     try:

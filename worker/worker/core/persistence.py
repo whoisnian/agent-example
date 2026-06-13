@@ -352,6 +352,7 @@ class Persistence:
         version_id: UUID,
         kind: str,
         oss_key: str,
+        path: str | None,
         mime: str | None,
         bytes_size: int | None,
         sha256: str | None,
@@ -360,14 +361,17 @@ class Persistence:
         # redelivered run re-inheriting a parent artifact) or overwriting a
         # produced file collapses to one row. RETURNING yields the existing
         # row's id on conflict, so callers always get the authoritative id.
+        # ``path`` is the version-relative file path (improve-artifact-
+        # conversation-ux); refreshed on overwrite alongside the metadata.
         artifact_id = uuid4()
         async with self._pool.acquire() as conn:
             row_id: UUID = await conn.fetchval(
                 """
-                INSERT INTO artifacts (id, version_id, kind, oss_key, mime, bytes, sha256)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO artifacts (id, version_id, kind, oss_key, path, mime, bytes, sha256)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (version_id, oss_key) DO UPDATE
                 SET kind = EXCLUDED.kind,
+                    path = EXCLUDED.path,
                     mime = EXCLUDED.mime,
                     bytes = EXCLUDED.bytes,
                     sha256 = EXCLUDED.sha256
@@ -377,6 +381,7 @@ class Persistence:
                 version_id,
                 kind,
                 oss_key,
+                path,
                 mime,
                 bytes_size,
                 sha256,
