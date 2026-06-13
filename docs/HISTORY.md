@@ -179,3 +179,13 @@ web 前端界面依旧需要优化：
 
 /opsx:archive
 ```
+
+### 2026-06-14-add-artifact-deletion
+```md
+在已有版本基础上输入“删除 styles.css”，执行过程中 worker 报错 {"worker_id": "534290ed-16ef-4f54-b082-329c07a77a01", "component": "consumer", "lane": "default", "error": "oss_fs write requires `content`", "event": "dispatch_error", "level": "error", "ts": "2026-06-13T16:50:17.766963Z"}
+
+/opsx:apply
+执行并修复 .github/workflows/worker-ci.yml 中的测试
+
+/opsx:archive
+```
