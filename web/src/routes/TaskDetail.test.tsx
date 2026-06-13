@@ -119,6 +119,68 @@ describe("TaskDetail", () => {
     await waitFor(() => expect(screen.getByTestId("iterate-prompt")).toHaveValue(""));
   });
 
+  it("submits on plain Enter and clears the composer", async () => {
+    let iterated = false;
+    server.use(
+      http.post("http://localhost/api/v1/tasks/:id/iterate", () => {
+        iterated = true;
+        return HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: { version_id: "ver-2", version_no: 2, status: "pending" },
+          trace_id: "t",
+        });
+      }),
+    );
+    render(wrap("task-1"));
+    const prompt = await screen.findByTestId("iterate-prompt");
+    await userEvent.type(prompt, "add a page");
+    await userEvent.type(prompt, "{Enter}");
+    await waitFor(() => expect(iterated).toBe(true));
+    await waitFor(() => expect(screen.getByTestId("iterate-prompt")).toHaveValue(""));
+  });
+
+  it("Ctrl+Enter inserts a newline and does NOT submit", async () => {
+    let iterated = false;
+    server.use(
+      http.post("http://localhost/api/v1/tasks/:id/iterate", () => {
+        iterated = true;
+        return HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: { version_id: "ver-2", version_no: 2, status: "pending" },
+          trace_id: "t",
+        });
+      }),
+    );
+    render(wrap("task-1"));
+    const prompt = await screen.findByTestId("iterate-prompt");
+    await userEvent.type(prompt, "line one");
+    await userEvent.type(prompt, "{Control>}{Enter}{/Control}");
+    await userEvent.type(prompt, "line two");
+    expect(screen.getByTestId("iterate-prompt")).toHaveValue("line one\nline two");
+    expect(iterated).toBe(false);
+  });
+
+  it("does not submit on an empty Enter", async () => {
+    let iterated = false;
+    server.use(
+      http.post("http://localhost/api/v1/tasks/:id/iterate", () => {
+        iterated = true;
+        return HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: { version_id: "ver-2", version_no: 2, status: "pending" },
+          trace_id: "t",
+        });
+      }),
+    );
+    render(wrap("task-1"));
+    const prompt = await screen.findByTestId("iterate-prompt");
+    await userEvent.type(prompt, "{Enter}");
+    expect(iterated).toBe(false);
+  });
+
   it("surfaces a 409 conflict naming the active version and keeps the typed prompt", async () => {
     server.use(
       http.post("http://localhost/api/v1/tasks/:id/iterate", () =>

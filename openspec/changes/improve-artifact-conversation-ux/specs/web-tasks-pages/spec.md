@@ -53,6 +53,44 @@ A loading state MUST show while the detail query is pending, and an unowned/unkn
 - **WHEN** `GET /api/v1/tasks/{id}` returns `404`
 - **THEN** a not-found state is shown (no infinite ret/refetch loop; 404 is not retried)
 
+### Requirement: Iterate Action With UI Task-Level Mutex
+
+The Task Detail page SHALL expose the Iterate action as a **persistent composer** (a prompt textarea plus a submit control) pinned at the bottom of the conversation column, replacing the previous toggle-button-revealed form. Submitting the composer issues `POST /api/v1/tasks/{id}/iterate` via a mutation; on success the composer's input MUST be cleared. While `task.status` is in an active state (`pending`, `running`, `paused`, `cancelling`) the composer (textarea and submit) MUST be disabled with a reason indicating the task is busy; while a submission is in flight the submit control MUST be disabled to prevent double submission. The backend remains the source of truth: a `409 active_version_exists` response MUST surface a message naming the active version (from `data.active_version_id` / `data.active_version_status`) and trigger a refetch of the task; it MUST NOT be retried, and the composer input MUST be preserved on failure.
+
+The composer SHALL use **chat-style keyboard shortcuts** that invert the textarea default: a plain **Enter** submits (same guards as the submit control — a no-op when the task is active, a submission is in flight, or the trimmed input is empty), and **Ctrl/Cmd+Enter** inserts a newline at the caret. **Shift+Enter** also inserts a newline (the native default). An Enter that is confirming an IME composition (e.g. a Chinese/Japanese input method) MUST NOT submit — it completes the composition only. A short hint near the composer SHALL communicate the Enter / Ctrl+Enter behavior.
+
+#### Scenario: Composer disabled while task active
+
+- **WHEN** the loaded task's status is `running` (or any active status)
+- **THEN** the composer textarea and submit control are disabled and a reason is shown
+- **AND** no iterate request can be sent from the UI
+
+#### Scenario: Composer enabled in a terminal state
+
+- **WHEN** the task's status is terminal (`succeeded` / `failed` / `cancelled`)
+- **THEN** the composer is enabled
+- **AND** submitting it issues `POST /api/v1/tasks/{id}/iterate` and, on success, clears the composer input and invalidates the task + versions queries
+
+#### Scenario: Plain Enter submits
+
+- **WHEN** the composer is enabled, holds a non-empty prompt, and the user presses Enter without a modifier (and not while composing via an IME)
+- **THEN** the iterate request MUST be issued exactly as the submit control would, and on success the composer clears
+
+#### Scenario: Ctrl+Enter inserts a newline and does not submit
+
+- **WHEN** the user presses Ctrl (or Cmd) + Enter in the composer
+- **THEN** a newline MUST be inserted at the caret and NO iterate request MUST be issued
+
+#### Scenario: Empty Enter is a no-op
+
+- **WHEN** the composer is empty (or whitespace only) and the user presses Enter
+- **THEN** no iterate request MUST be issued
+
+#### Scenario: 409 conflict is surfaced, not retried
+
+- **WHEN** an iterate submission races the backend and receives `409 active_version_exists`
+- **THEN** a message naming the active version is shown, the task query is refetched, the request is not retried, and the typed prompt remains in the composer
+
 ### Requirement: Live Observation With Polling Fallback
 
 The Task Detail page SHALL subscribe to the realtime topic `task:<id>` (and, when the task has a non-null current version, `version:<current_version_id>`) via the existing `realtimeClient`, and on each received frame invalidate the corresponding React Query caches: a `task:` frame invalidates the task + versions queries; a `version:` frame invalidates that version's events query, AND — when the frame's `kind` is `"artifact"` or `"status"` — additionally invalidates that version's artifact-list query, so produced files surface in the conversation while the run executes and the final set lands at completion without a manual refresh. Because the Realtime Gateway server may be unavailable, the page MUST additionally poll via React Query `refetchInterval` (function form, re-evaluated each tick) while the task is in an active status **and** no WS connection is open, and MUST stop polling once the task reaches a terminal status or the WS connection opens. Gap-fill of missed events MUST go through the client's `onGap` callback hitting `GET /versions/{id}/events?after_id=<global event id cursor>` — using the highest event `id` already seen, NOT the per-run `seq`.

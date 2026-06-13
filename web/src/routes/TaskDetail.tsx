@@ -1,4 +1,4 @@
-import type { JSX } from "react";
+import type { JSX, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -194,6 +194,30 @@ export function TaskDetail(): JSX.Element {
     );
   };
 
+  // Chat-style composer keys: Enter sends, Ctrl/Cmd+Enter inserts a newline
+  // (inverting the textarea default). An Enter that is confirming an IME
+  // composition (e.g. Chinese input) MUST NOT submit — guarded via isComposing.
+  const onPromptKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    if (e.ctrlKey || e.metaKey) {
+      // Newline at the caret (the browser inserts nothing for Ctrl+Enter).
+      // setRangeText mutates the element value AND advances the caret
+      // synchronously; syncing state to el.value keeps the controlled value in
+      // step without a caret-restoring rAF (which races typing in tests).
+      e.preventDefault();
+      const el = e.currentTarget;
+      el.setRangeText("\n", el.selectionStart, el.selectionEnd, "end");
+      setIteratePrompt(el.value);
+      return;
+    }
+    if (e.shiftKey) return; // Shift+Enter falls through to the default newline.
+    // Plain Enter → send, mirroring the button's guards.
+    e.preventDefault();
+    if (!isActive && !iterate.isPending && iteratePrompt.trim()) {
+      submitIterate();
+    }
+  };
+
   const versions = versionsQuery.data?.items ?? null;
   const byId = new Map((versions ?? []).map((v) => [v.id, v]));
   const busyReason = isActive
@@ -281,13 +305,17 @@ export function TaskDetail(): JSX.Element {
           data-testid="iterate-prompt"
           value={iteratePrompt}
           onChange={(e) => setIteratePrompt(e.target.value)}
+          onKeyDown={onPromptKeyDown}
           rows={3}
           disabled={isActive || iterate.isPending}
           title={busyReason}
           placeholder="Describe the change for the next version…"
           className="resize-none rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground disabled:opacity-50"
         />
-        <div className="flex justify-end">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">
+            Enter to send · Ctrl+Enter for a new line
+          </span>
           <Button
             data-testid="iterate-submit"
             disabled={isActive || iterate.isPending}
