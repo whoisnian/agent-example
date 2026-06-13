@@ -1,6 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { useState } from "react";
-import { ChevronDown, ChevronRight, FileArchive, FileText } from "lucide-react";
+import { FileArchive, FileText } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/features/ui/store";
@@ -128,49 +127,34 @@ function TurnPrompt({ versionId }: { versionId: string }): JSX.Element | null {
 }
 
 /**
- * A historical (non-current) turn's execution section: collapsed by default to
- * a single affordance line showing the version's `summary` (read from the
- * detail DTO the prompt already fetched — no extra request, no eager events
- * read). Expanding lazily fetches that version's events and renders the same
- * assistant-position log; collapsing keeps the cache (no refetch on re-expand).
+ * A historical (non-current) turn's execution section, rendered inline and
+ * expanded — a prior version's conversation stays visible after iterating,
+ * like a chat history (no collapse, no truncated summary line). Each turn reads
+ * its own version's events lazily (React Query caches; terminal versions are
+ * static, so no polling). The summary surfaces inside the log itself as the
+ * assistant reply (the `summary` event), so no separate summary line is needed.
  */
 function HistoricalExecution({ versionId }: { versionId: string }): JSX.Element {
-  const [expanded, setExpanded] = useState(false);
-  // Shares the cached detail read TurnPrompt issued — summary costs no request.
-  const summary = useVersionQuery(versionId).data?.version.summary ?? null;
-  const events = useVersionEventsQuery(versionId, undefined, expanded);
+  const events = useVersionEventsQuery(versionId);
 
-  return (
-    <div className="flex flex-col gap-1.5 self-start">
-      <button
-        type="button"
-        data-testid="execution-toggle"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground"
+  if (events.isPending) {
+    return <Skeleton data-testid="execution-events-loading" className="h-6 w-1/2 self-start" />;
+  }
+  if (!events.data) {
+    return (
+      <p
+        data-testid="execution-events-error"
+        className="self-start text-xs text-muted-foreground"
       >
-        {expanded ? (
-          <ChevronDown className="size-3.5 shrink-0" aria-hidden />
-        ) : (
-          <ChevronRight className="size-3.5 shrink-0" aria-hidden />
-        )}
-        <span className="truncate">{summary ? summary : "Execution log"}</span>
-      </button>
-      {expanded ? (
-        events.isPending ? (
-          <Skeleton data-testid="execution-events-loading" className="h-6 w-1/2" />
-        ) : events.data ? (
-          <EventLog
-            events={events.data.items}
-            truncated={events.data.items.length >= EVENTS_PAGE_LIMIT}
-          />
-        ) : (
-          <p data-testid="execution-events-error" className="text-xs text-muted-foreground">
-            Execution log unavailable.
-          </p>
-        )
-      ) : null}
-    </div>
+        Execution log unavailable.
+      </p>
+    );
+  }
+  return (
+    <EventLog
+      events={events.data.items}
+      truncated={events.data.items.length >= EVENTS_PAGE_LIMIT}
+    />
   );
 }
 

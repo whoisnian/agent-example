@@ -72,11 +72,11 @@ web 侧：HTML 渲染视图改为 mint 一次 preview base，iframe `src = base_
 
 ### D6 对话连续性：每回合自带执行过程，历史折叠 + 懒加载
 
-去掉 "EventLog 只挂 current" 的特判：每个回合渲染自己的执行过程区。历史回合默认**折叠**为一行摘要（"Execution log · 展开查看"，有 summary 时显示 summary 文本），展开时才发起该版本的 events 查询（React Query `enabled: expanded`，避免 N 版本 N 个 eager 请求）；当前回合保持展开 + 实时追加（现有 live/poll 路径不动）。
+去掉 "EventLog 只挂 current" 的特判：每个回合渲染自己的执行过程区。历史回合**内联展开**直接渲染该版本事件日志（无折叠、无截断摘要行）——迭代到 v2 后 v1 的对话历史保持可见，符合聊天历史直觉；当前回合保持展开 + 实时追加（现有 live/poll 路径不动）。
 
-折叠行的 summary 文本来源是**版本详情 DTO 的新 `summary` 字段**（`GET /versions/{id}`，见 task-read-api delta）——`TurnPrompt` 本就为每个回合拉这个详情取 `prompt`，折叠行复用同一查询、零额外请求，且不触发 events 拉取。`task_versions.summary` 此前只用于 execute 的 history 注入，从未经任何读 DTO 暴露，故必须扩 DTO（不能从 events 取，否则折叠态就被迫 eager 拉事件）。
+> 设计调整（实测反馈）：初版让历史回合默认折叠为一行 `summary`（`truncate` span），但该行会横向溢出对话列，且把刚迭代完的 v1 过程藏起来，违背"连续对话"诉求。改为内联展开。summary 不再单列——它本就作为 `summary` 事件在日志里以助手正文呈现。代价：每个历史回合各发一次 events 首页查询（不再 lazy-on-expand）；MVP 版本数有限、React Query 缓存、终态版本事件静态不轮询，可接受；版本极多时的窗口化留后续提案。`task_versions.summary` 仍经 `VersionFull` DTO 暴露（task-read-api delta），供折叠行外的其它用途/未来需要——保留无害。
 
-事件懒加载的分页边界：events 读是 `after_id`+`limit`（默认 200）。当前回合靠 live 追加 + gap-fill 补满；历史回合展开只发首页查询，>200 事件的 run 仅显示首页并**显式提示截断**（MVP 不做 "load more"，留后续提案），不静默丢尾。
+事件分页边界：events 读是 `after_id`+`limit`（默认 200）。当前回合靠 live 追加 + gap-fill 补满；历史回合发首页查询，>200 事件的 run 仅显示首页并**显式提示截断**（MVP 不做 "load more"，留后续提案），不静默丢尾。
 
 ### D7 按 kind 的对话式事件渲染
 

@@ -174,31 +174,37 @@ describe("ConversationTurn", () => {
     await waitFor(() => expect(useUiStore.getState().toasts).toHaveLength(1));
   });
 
-  it("renders a historical turn's execution log collapsed, lazily on expand", async () => {
+  it("renders a historical turn's execution log inline (no collapse) so v1 stays visible", async () => {
     emptyArtifacts();
-    let eventsHits = 0;
     server.use(
-      http.get("http://localhost/api/v1/versions/:id/events", () => {
-        eventsHits += 1;
-        return HttpResponse.json({
+      http.get("http://localhost/api/v1/versions/:id/events", () =>
+        HttpResponse.json({
           code: 0,
           message: "ok",
-          data: { items: [{ id: 1, version_id: "ver-1", run_id: "r", seq: 1, kind: "summary", payload: { summary: "did the thing" }, created_at: "2026-05-26T00:00:00Z" }], next_after_id: 1 },
+          data: {
+            items: [
+              {
+                id: 1,
+                version_id: "ver-1",
+                run_id: "r",
+                seq: 1,
+                kind: "summary",
+                payload: { summary: "did the thing" },
+                created_at: "2026-05-26T00:00:00Z",
+              },
+            ],
+            next_after_id: 1,
+          },
           trace_id: "t",
-        });
-      }),
+        }),
+      ),
     );
     render(wrap({ version: node("ver-1", 1) })); // isCurrent:false → historical
 
-    const toggle = await screen.findByTestId("execution-toggle");
-    // Collapsed: no events query fired yet.
-    expect(eventsHits).toBe(0);
-    expect(screen.queryByTestId("event-log")).toBeNull();
-
-    await userEvent.click(toggle);
+    // The log renders directly, with no collapse toggle to hide it.
     await screen.findByTestId("event-log");
-    expect(eventsHits).toBe(1);
     expect(screen.getByText("did the thing")).toBeInTheDocument();
+    expect(screen.queryByTestId("execution-toggle")).toBeNull();
   });
 
   it("offers rollback on non-current turns only", async () => {

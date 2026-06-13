@@ -82,14 +82,11 @@ const EVENTS_LIMIT = 200;
 export function useVersionEventsQuery(
   versionId: string | null,
   refetchInterval?: RefetchInterval,
-  enabled = true,
 ): UseQueryResult<EventPage, ApiError> {
   return useQuery({
     queryKey: taskKeys.events(versionId ?? "none"),
     queryFn: ({ signal }) => listVersionEvents(versionId as string, 0, EVENTS_LIMIT, signal),
-    // `enabled` lets a historical turn defer its read until expanded (the live
-    // current turn passes the default true).
-    enabled: !!versionId && enabled,
+    enabled: !!versionId,
     ...(refetchInterval !== undefined ? { refetchInterval } : {}),
   });
 }

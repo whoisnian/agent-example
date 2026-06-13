@@ -149,7 +149,7 @@ src/
 - **状态分层**：本地 UI 状态用 Zustand；服务端状态用 React Query（自带缓存、失效、轮询兜底）。
 - **实时通道**：MVP 默认 WebSocket，失败降级为 5s 轮询；SSE 与更复杂的多级降级为 Post-MVP。
 - **大文件上传**：前端拿临时 STS 凭证后直传 OSS，不走后端 API，避免后端带宽瓶颈。
-- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。每个回合内按对话顺序排列：prompt → 结果行 → 执行过程（当前回合实时展开、历史回合折叠并在展开时懒加载该版本事件，迭代不再隐藏旧回合）→ 产物聚合卡（同版本产物合并为单卡，显示文件数/总大小，支持 zip 整包下载，点击在右栏展开文件列表）→ 回滚控件。执行流按 WS 事件 kind 分型为对话样式（summary 作助手正文、plan 清单、step 进度行、artifact 文件行等），非裸 JSON。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`；响应自带 `Content-Security-Policy: sandbox allow-scripts` 双保险）整页渲染：有 `path` 的产物经**目录化预览**路由加载（`<base>/<path>`，使相对 css/js 解析到同版本兄弟产物），null-path 退回单文件下载 URL；frame 跑在 opaque origin，内部加载失败不可探测，恢复手段为工具栏 Refresh（重新 mint 重载）。产物实时性：前端订阅 `version:` 主题，`kind=artifact`/`status` 帧失效该版本产物缓存，执行中即出卡片。
+- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。每个回合内按对话顺序排列：prompt → 结果行 → 执行过程（当前回合实时展开、历史回合内联展开直接渲染该版本事件日志——迭代后旧回合历史保持可见，不折叠）→ 产物聚合卡（同版本产物合并为单卡，显示文件数/总大小，支持 zip 整包下载，点击在右栏展开文件列表）→ 回滚控件。执行流按 WS 事件 kind 分型为对话样式（summary 作助手正文、plan 清单、step 进度行、artifact 文件行等），非裸 JSON。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`；响应自带 `Content-Security-Policy: sandbox allow-scripts` 双保险）整页渲染：有 `path` 的产物经**目录化预览**路由加载（`<base>/<path>`，使相对 css/js 解析到同版本兄弟产物），null-path 退回单文件下载 URL；frame 跑在 opaque origin，内部加载失败不可探测，恢复手段为工具栏 Refresh（重新 mint 重载）。产物实时性：前端订阅 `version:` 主题，`kind=artifact`/`status` 帧失效该版本产物缓存，执行中即出卡片。
 - **互斥提交保护**：前端在 task.status 处于活跃态时禁用"迭代/回滚"按钮并提示原因；提交时仍以后端 409 为准（后端是真相之源）。
 - **成本展示**：
   - TaskDetail 顶栏显示该 task 累计 cost（USD）+ token 数（input/output/cached 分项），以及当前 running 版本的实时累计；

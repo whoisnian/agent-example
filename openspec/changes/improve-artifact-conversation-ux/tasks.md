@@ -31,8 +31,8 @@
 ## 5. Web：回合布局 + 聚合卡片 + 对话连续性
 
 - [x] 5.1 `ConversationTurn` 重排为 prompt → result line → 执行区 → 产物 → 回滚 footer；产物改单张聚合卡（icon + "N file(s)" + 总大小 + path 摘要 + Download zip），激活写 `selectArtifact(versionId, firstId)`，Download zip 走 archive presign + navigate；0 产物省略、读失败静默、null path 回退 kind
-- [x] 5.2 历史回合执行区：折叠行（有 `summary`（来自版本详情 DTO，复用 `TurnPrompt` 已发起的 `useVersionQuery`）显示 summary，否则 "Execution log"）、展开才 `enabled` 事件查询、>1 页时显示首页 + 截断提示（不做 load-more）、当前回合保持展开+实时；`TaskDetail` 移除"仅 current 渲染 EventLog"特判
-- [x] 5.3 组件测试：迭代后 v1 执行区仍可展开、懒加载只在展开时发请求、聚合卡行为（激活/下载/错误单 toast）
+- [x] 5.2 历史回合执行区：**内联展开**直接渲染该版本事件日志（无折叠/无截断摘要行——避免横向溢出且不隐藏刚迭代的 v1）、>1 页时显示首页 + 截断提示（不做 load-more）、当前回合保持展开+实时；`TaskDetail` 移除"仅 current 渲染 EventLog"特判
+- [x] 5.3 组件测试：迭代后 v1 执行区内联可见（无折叠 toggle）、聚合卡行为（激活/下载/错误单 toast）
 
 ## 6. Web：按 kind 的对话式事件渲染
 

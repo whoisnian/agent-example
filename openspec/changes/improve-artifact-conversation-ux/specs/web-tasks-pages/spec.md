@@ -9,7 +9,7 @@ Versions from `GET /api/v1/tasks/{id}/versions` MUST render as turns in ascendin
 **Every turn owns an execution section** — the conversation history MUST stay continuous across iterations (iterating to v2 MUST NOT hide v1's execution process):
 
 - The **current version's** turn renders its event log (from `GET /api/v1/versions/{version_id}/events`) expanded, appended to live via the existing live/polling pipeline (unchanged).
-- A **historical (non-current) version's** turn renders its execution section **collapsed by default** as a single affordance line (showing the version's `summary` text when present, a neutral "Execution log" label otherwise). The `summary` MUST be read from the version detail DTO (`GET /api/v1/versions/{id}.version.summary`, present-and-null — see `task-read-api`), which the turn already fetches for its `prompt`, so the collapsed line needs no extra request and in particular MUST NOT eagerly fetch the version's events. Expanding the section lazily fetches that version's events (the events query MUST be `enabled` only once expanded — N historical turns MUST NOT fire N eager event reads) and renders the same assistant-position event log; collapsing it again MUST NOT refetch on later re-expansion (normal React Query caching). The expand fetch loads the events' first page (the existing `after_id=0`, `limit` default page); for the MVP a run with more events than one page MUST render the first page and indicate the log is truncated (a "load more" affordance is out of scope — see design), never silently dropping the tail without a marker.
+- A **historical (non-current) version's** turn renders its execution section **inline and expanded** — a prior version's conversation stays visible after iterating, like a chat history. There MUST be no collapse toggle and no truncated single-line summary affordance (that line overflowed the conversation column horizontally). The turn reads its own version's events (`GET /api/v1/versions/{version_id}/events`, React Query cached; a terminal version's events are static, so no polling) and renders the same assistant-position event log as the current turn. The version's `summary` surfaces inside that log as the assistant reply (the `summary` event), so no separate summary line is needed. Each turn's read loads the events' first page (`after_id=0`, default `limit`); a run with more events than one page MUST render the first page and indicate the log is truncated (a "load more" affordance is out of scope — see design), never silently dropping the tail without a marker.
 
 The event log renders inside an **assistant message** block (left-aligned, visually consistent with a chat reply, distinct from the right-aligned user prompt), with each event rendered per its kind as defined in "Conversation-Style Event Rendering" — never as raw JSON-only monospace rows.
 
@@ -24,13 +24,13 @@ A loading state MUST show while the detail query is pending, and an unowned/unkn
 
 - **GIVEN** a task whose v1 turn has a finished event log
 - **WHEN** the user iterates and v2 becomes current
-- **THEN** v1's turn MUST still render its execution section (collapsed, expandable to the full v1 event log) and v2's turn renders the live expanded log — no version's execution process disappears
+- **THEN** v1's turn MUST still render its execution section (its event log shown inline) and v2's turn renders the live log — no version's execution process disappears, and v1's history is NOT hidden behind a collapse control
 
-#### Scenario: Historical logs load lazily on expand
+#### Scenario: Historical turn shows its log inline without a collapse toggle
 
-- **GIVEN** a task with five historical versions
+- **GIVEN** a historical (non-current) turn
 - **WHEN** the conversation renders
-- **THEN** no events query fires for the collapsed historical turns; expanding one turn fires exactly that version's events read and renders its log
+- **THEN** that turn MUST render its version's event log inline (reading that version's events) with no collapse toggle and no truncated summary line
 
 #### Scenario: Composer stays pinned while the body scrolls
 
