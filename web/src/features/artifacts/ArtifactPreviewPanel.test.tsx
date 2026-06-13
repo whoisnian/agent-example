@@ -490,4 +490,68 @@ describe("ArtifactPreviewPanel", () => {
     const img = within(imgWrap).getByRole("img");
     expect(img).toHaveAttribute("src", "/api/v1/artifacts/art-img/download?img=1");
   });
+
+  // --- directory-aware HTML preview + path labels (improve-artifact-conversation-ux) ---
+
+  it("renders a path-bearing HTML artifact under the directory preview base", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/versions/:id/artifacts", ({ params }) =>
+        HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: {
+            version_id: String(params["id"]),
+            artifacts: [
+              {
+                id: "art-html",
+                kind: "file",
+                path: "index.html",
+                mime: "text/html",
+                bytes: 512,
+                sha256: null,
+                created_at: "2026-05-26T00:00:00Z",
+              },
+            ],
+          },
+          trace_id: "t",
+        }),
+      ),
+    );
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    await userEvent.click(
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
+    );
+    const frame = await screen.findByTestId("preview-html-frame");
+    // src = <preview base from the mint handler>/index.html (relative css/js
+    // then resolve under the same token prefix).
+    expect(frame.getAttribute("src")).toMatch(/\/preview\/stub-preview-token\/index\.html$/);
+    // The toolbar + row label by path, not the opaque kind.
+    expect(screen.getByTestId("preview-title")).toHaveTextContent("index.html");
+  });
+
+  it("labels an artifact row by its path, falling back to kind when null", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/versions/:id/artifacts", ({ params }) =>
+        HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: {
+            version_id: String(params["id"]),
+            artifacts: [
+              { id: "a1", kind: "file", path: "css/style.css", mime: "text/css", bytes: 10, sha256: null, created_at: "2026-05-26T00:00:00Z" },
+              { id: "a2", kind: "report", path: null, mime: null, bytes: null, sha256: null, created_at: "2026-05-26T00:00:00Z" },
+            ],
+          },
+          trace_id: "t",
+        }),
+      ),
+    );
+    render(wrap());
+    const list = await screen.findByTestId("artifact-list");
+    const rows = within(list).getAllByTestId("artifact-row");
+    expect(rows[0]).toHaveTextContent("css/style.css");
+    // Null-path row falls back to kind, never an empty label.
+    expect(rows[1]).toHaveTextContent("report");
+  });
 });

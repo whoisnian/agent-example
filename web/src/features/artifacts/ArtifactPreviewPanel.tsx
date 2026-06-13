@@ -9,6 +9,7 @@ import { useUiStore } from "@/features/ui/store";
 import { formatBytes } from "@/features/artifacts/format";
 import {
   useArtifactPresignMutation,
+  usePreviewMintMutation,
   useVersionArtifactsQuery,
 } from "@/features/artifacts/queries";
 import type { ArtifactMeta } from "@/features/artifacts/types";
@@ -33,6 +34,20 @@ function isHtml(mime: string | null): boolean {
 /** mime, or a neutral placeholder when null. */
 function mimeLabel(a: ArtifactMeta): string {
   return a.mime ?? "—";
+}
+
+/** Preferred display label: the version-relative path, falling back to the
+ *  opaque `kind` for legacy null-path rows (never an empty label). */
+function displayLabel(a: ArtifactMeta): string {
+  return a.path ?? a.kind;
+}
+
+/** Build a preview file URL under the tokenized base: `<base>/<encoded path>`,
+ *  encoding each path segment but preserving the `/` separators so relative
+ *  asset references resolve correctly. */
+function previewFileURL(baseURL: string, path: string): string {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return `${baseURL}/${encoded}`;
 }
 
 /** Human-readable size, or a neutral placeholder when bytes is null. */
@@ -77,7 +92,7 @@ function PanelChrome({
           data-testid="preview-title"
           className="min-w-0 flex-1 truncate text-sm font-medium text-foreground"
         >
-          {artifact ? `${artifact.kind} · ${mimeLabel(artifact)}` : "Artifact Preview"}
+          {artifact ? `${displayLabel(artifact)} · ${mimeLabel(artifact)}` : "Artifact Preview"}
         </span>
         {viewToggle}
         <Button
@@ -304,8 +319,8 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
                   data-testid="artifact-select"
                   aria-pressed={a.id === selected?.id}
                 >
-                  <span className="text-muted-foreground">{a.kind}</span>
-                  <span className="truncate font-mono text-foreground">{mimeLabel(a)}</span>
+                  <span className="truncate font-mono text-foreground">{displayLabel(a)}</span>
+                  <span className="shrink-0 text-muted-foreground">{mimeLabel(a)}</span>
                   <span className="ml-auto shrink-0 font-mono text-muted-foreground">
                     {sizeLabel(a)}
                   </span>
@@ -332,6 +347,7 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
             <ArtifactPreviewBody
               key={`${selected.id}:${refreshNonce}:${htmlView}`}
               artifact={selected}
+              versionId={versionId}
               htmlRender={isHtml(selected.mime) && htmlView === "render"}
               onDownload={onDownload}
               onTextLoaded={(text, truncated) =>
@@ -375,16 +391,19 @@ type PreviewState =
  */
 function ArtifactPreviewBody({
   artifact,
+  versionId,
   htmlRender,
   onDownload,
   onTextLoaded,
 }: {
   artifact: ArtifactMeta;
+  versionId: string;
   htmlRender: boolean;
   onDownload: (id: string) => void;
   onTextLoaded?: ((text: string, truncated: boolean) => void) | undefined;
 }): JSX.Element {
   const presign = useArtifactPresignMutation();
+  const previewMint = usePreviewMintMutation();
   const mime = artifact.mime;
   const previewable = htmlRender || isImage(mime) || isTextLike(mime);
   // Initial phase is derived synchronously at mount (this body is keyed by
@@ -398,6 +417,23 @@ function ArtifactPreviewBody({
     if (!previewable) return;
     let cancelled = false;
     void (async () => {
+      // HTML rendered view: prefer the directory-aware preview base so the
+      // document's relative css/js/img references resolve to sibling artifacts
+      // of the version (src = <base>/<path>). Fall back to the single-file
+      // signed URL for a legacy null-path artifact (no relative resolution).
+      if (htmlRender && artifact.path) {
+        let baseURL: string;
+        try {
+          ({ base_url: baseURL } = await previewMint.mutateAsync(versionId));
+        } catch {
+          if (!cancelled) setState({ phase: "presign-error" });
+          return;
+        }
+        if (cancelled) return;
+        setState({ phase: "html", url: previewFileURL(baseURL, artifact.path) });
+        return;
+      }
+
       let url: string;
       try {
         // Re-mint a short-lived URL for THIS artifact only (not cached).
@@ -410,8 +446,8 @@ function ArtifactPreviewBody({
       if (cancelled) return;
       try {
         if (htmlRender) {
-          // Mount the iframe immediately on a fresh URL; what happens inside
-          // the sandboxed opaque-origin frame is not observable from here.
+          // Null-path fallback: mount the iframe on the single-file URL; what
+          // happens inside the sandboxed opaque-origin frame is not observable.
           setState({ phase: "html", url });
           return;
         }

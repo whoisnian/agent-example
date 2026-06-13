@@ -106,6 +106,10 @@ export interface VersionFull {
   status: string;
   is_active: boolean;
   artifact_root: string | null;
+  /** Run-result summary (worker kind=summary event); present-and-null until a
+   *  run emits one. Labels a turn's collapsed execution section without
+   *  eagerly fetching that version's events. */
+  summary: string | null;
   created_at: string;
 }
 

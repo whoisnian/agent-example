@@ -21,30 +21,30 @@
 ## 3b. API：版本详情 summary（供历史回合折叠行）
 
 - [x] 3b.1 迁移已存在 `task_versions.summary`（0009）；`GetVersionDetail`/相关 sqlc 查询 SELECT `summary`；`VersionFull` 增 `Summary *string`（present-and-null JSON）；契约测试覆盖有值/NULL 两态
-- [ ] 3b.2 web `VersionFull`/`types.ts` 增 `summary: string | null`；MSW handler 返回 summary；现有 version-detail 测试不回归
+- [x] 3b.2 web `VersionFull`/`types.ts` 增 `summary: string | null`；MSW handler 返回 summary；现有 version-detail 测试不回归
 
 ## 4. Web：数据访问与实时失效
 
-- [ ] 4.1 `ArtifactMeta` 增加 `path: string | null`；`features/artifacts/` 新增 archive presign 与 preview mint 两个 mutation（双层静默、不缓存）；MSW handler + 单测
-- [ ] 4.2 `use-task-live.ts`：`version:` 帧 `kind === "artifact" | "status"` 时失效该版本 artifacts 查询；单测覆盖两种 kind 与既有失效不回归
+- [x] 4.1 `ArtifactMeta` 增加 `path: string | null`；`features/artifacts/` 新增 archive presign 与 preview mint 两个 mutation（双层静默、不缓存）；MSW handler + 单测
+- [x] 4.2 `use-task-live.ts`：`version:` 帧 `kind === "artifact" | "status"` 时失效该版本 artifacts 查询；单测覆盖两种 kind 与既有失效不回归
 
 ## 5. Web：回合布局 + 聚合卡片 + 对话连续性
 
-- [ ] 5.1 `ConversationTurn` 重排为 prompt → result line → 执行区 → 产物 → 回滚 footer；产物改单张聚合卡（icon + "N file(s)" + 总大小 + path 摘要 + Download zip），激活写 `selectArtifact(versionId, firstId)`，Download zip 走 archive presign + navigate；0 产物省略、读失败静默、null path 回退 kind
-- [ ] 5.2 历史回合执行区：折叠行（有 `summary`（来自版本详情 DTO，复用 `TurnPrompt` 已发起的 `useVersionQuery`）显示 summary，否则 "Execution log"）、展开才 `enabled` 事件查询、>1 页时显示首页 + 截断提示（不做 load-more）、当前回合保持展开+实时；`TaskDetail` 移除"仅 current 渲染 EventLog"特判
-- [ ] 5.3 组件测试：迭代后 v1 执行区仍可展开、懒加载只在展开时发请求、聚合卡行为（激活/下载/错误单 toast）
+- [x] 5.1 `ConversationTurn` 重排为 prompt → result line → 执行区 → 产物 → 回滚 footer；产物改单张聚合卡（icon + "N file(s)" + 总大小 + path 摘要 + Download zip），激活写 `selectArtifact(versionId, firstId)`，Download zip 走 archive presign + navigate；0 产物省略、读失败静默、null path 回退 kind
+- [x] 5.2 历史回合执行区：折叠行（有 `summary`（来自版本详情 DTO，复用 `TurnPrompt` 已发起的 `useVersionQuery`）显示 summary，否则 "Execution log"）、展开才 `enabled` 事件查询、>1 页时显示首页 + 截断提示（不做 load-more）、当前回合保持展开+实时；`TaskDetail` 移除"仅 current 渲染 EventLog"特判
+- [x] 5.3 组件测试：迭代后 v1 执行区仍可展开、懒加载只在展开时发请求、聚合卡行为（激活/下载/错误单 toast）
 
 ## 6. Web：按 kind 的对话式事件渲染
 
-- [ ] 6.1 `EventLog` 拆 per-kind 渲染器：`summary` 正文段落、`plan` 有序清单、`step` verdict 进度行、`artifact` 文件行（点击联动预览选中，按 `artifact_id` 去重）、`status` 弱化行、`log` 弱化等宽、`error` 保留、`title`/其它非对话 kind 不渲染、未知 kind 紧凑 JSON 兜底；payload 缺字段降级不抛错
-- [ ] 6.2 组件测试：各 kind 渲染断言、隐藏 kind 不出行、同 `artifact_id` 重发只一行、malformed payload 走兜底
+- [x] 6.1 `EventLog` 拆 per-kind 渲染器：`summary` 正文段落、`plan` 有序清单、`step` verdict 进度行、`artifact` 文件行（点击联动预览选中，按 `artifact_id` 去重）、`status` 弱化行、`log` 弱化等宽、`error` 保留、`title`/其它非对话 kind 不渲染、未知 kind 紧凑 JSON 兜底；payload 缺字段降级不抛错
+- [x] 6.2 组件测试：各 kind 渲染断言、隐藏 kind 不出行、同 `artifact_id` 重发只一行、malformed payload 走兜底
 
 ## 7. Web：目录化 HTML 预览 + path 显示
 
-- [ ] 7.1 `ArtifactPreviewPanel`：HTML 渲染视图改用 preview mint（iframe src = `base_url + "/" + encodePath(path)`，path 为 null 回退单文件 URL）；Refresh 重 mint；mint 失败 inline error
-- [ ] 7.2 面板行与 toolbar 标题改用 `path` 优先（null 回退 kind）；测试：目录预览 src 组装、null path 回退、path 标签显示
+- [x] 7.1 `ArtifactPreviewPanel`：HTML 渲染视图改用 preview mint（iframe src = `base_url + "/" + encodePath(path)`，path 为 null 回退单文件 URL）；Refresh 重 mint；mint 失败 inline error
+- [x] 7.2 面板行与 toolbar 标题改用 `path` 优先（null 回退 kind）；测试：目录预览 src 组装、null path 回退、path 标签显示
 - [ ] 7.3 手动验证（/verify）：生成含相对 css/js 的 html 产物，确认 iframe 内样式脚本正常加载、zip 下载内容完整、运行中产物实时出现、迭代后历史回合可回看
 
 ## 8. 文档同步
 
-- [ ] 8.1 `docs/ARCHITECTURE.md`：§4.2 worker 职责（step 级产物 + artifact 事件）、§5.2/§5.3 事件 kind 清单与 payload、API 面新增 archive/preview 端点
+- [x] 8.1 `docs/ARCHITECTURE.md`：§4.2 worker 职责（step 级产物 + artifact 事件）、§5.2/§5.3 事件 kind 清单与 payload、API 面新增 archive/preview 端点

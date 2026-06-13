@@ -6,8 +6,18 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { ApiError } from "@/services/http";
-import { getArtifactPresign, getVersionArtifacts } from "./api";
-import type { PresignResult, VersionArtifacts } from "./types";
+import {
+  getArtifactPresign,
+  getVersionArchivePresign,
+  getVersionArtifacts,
+  getVersionPreviewMint,
+} from "./api";
+import type {
+  ArchivePresignResult,
+  PresignResult,
+  PreviewMintResult,
+  VersionArtifacts,
+} from "./types";
 
 export const artifactKeys = {
   all: ["artifacts"] as const,
@@ -44,6 +54,33 @@ export function useVersionArtifactsQuery(
 export function useArtifactPresignMutation(): UseMutationResult<PresignResult, ApiError, string> {
   return useMutation({
     mutationFn: (artifactId: string) => getArtifactPresign(artifactId),
+    meta: { silent: true },
+  });
+}
+
+/**
+ * Version zip-archive presign action. Same non-cached, double-silent posture as
+ * the single-artifact presign: each call re-mints, the calling component's
+ * `onError` is the single error surface. Input is the `versionId`.
+ */
+export function useArchivePresignMutation(): UseMutationResult<
+  ArchivePresignResult,
+  ApiError,
+  string
+> {
+  return useMutation({
+    mutationFn: (versionId: string) => getVersionArchivePresign(versionId),
+    meta: { silent: true },
+  });
+}
+
+/**
+ * Version preview-base mint action. Non-cached, double-silent. The returned
+ * `base_url` is opaque; callers append the segment-encoded artifact path.
+ */
+export function usePreviewMintMutation(): UseMutationResult<PreviewMintResult, ApiError, string> {
+  return useMutation({
+    mutationFn: (versionId: string) => getVersionPreviewMint(versionId),
     meta: { silent: true },
   });
 }

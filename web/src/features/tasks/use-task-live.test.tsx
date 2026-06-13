@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { __resetRealtimeForTests, getRealtimeClient } from "@/services/ws";
 import { useTaskLive, liveRefetchInterval } from "@/features/tasks/use-task-live";
 import { taskKeys } from "@/features/tasks/queries";
+import { artifactKeys } from "@/features/artifacts/queries";
 
 /** Minimal in-process fake socket; the singleton picks it up via globalThis. */
 class FakeWebSocket {
@@ -97,6 +98,59 @@ describe("useTaskLive", () => {
     );
     // The list prefix refreshes too, so TaskList and the nav Recents follow.
     expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.lists });
+  });
+
+  it("invalidates the version's artifacts on an artifact frame", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    __resetRealtimeForTests?.();
+
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <Harness taskId="t1" versionId="v1" qc={qc} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    const sock = FakeWebSocket.instances[0]!;
+    sock.openConn();
+    sock.deliver({
+      topic: "version:v1",
+      kind: "artifact",
+      seq: 3,
+      ts: "2026-05-26T00:00:00Z",
+      payload: { artifact_id: "a1", path: "index.html" },
+    });
+
+    await waitFor(() =>
+      expect(spy).toHaveBeenCalledWith({ queryKey: artifactKeys.byVersion("v1") }),
+    );
+    // The version's events cache is also refreshed.
+    expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.events("v1") });
+  });
+
+  it("does NOT invalidate artifacts on a non-artifact/status version frame", async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket as unknown as typeof WebSocket);
+    __resetRealtimeForTests?.();
+
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, "invalidateQueries");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <Harness taskId="t1" versionId="v1" qc={qc} />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
+    const sock = FakeWebSocket.instances[0]!;
+    sock.openConn();
+    sock.deliver({ topic: "version:v1", kind: "log", seq: 4, ts: "2026-05-26T00:00:00Z", payload: {} });
+
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.events("v1") }));
+    expect(spy).not.toHaveBeenCalledWith({ queryKey: artifactKeys.byVersion("v1") });
   });
 
   it("unsubscribes on unmount", async () => {

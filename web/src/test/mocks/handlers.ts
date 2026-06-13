@@ -224,6 +224,23 @@ export const handlers = [
         },
       }),
   ),
+
+  // Version zip-archive presign (improve-artifact-conversation-ux): a relative
+  // archive download URL + advisory expiry.
+  http.get("http://localhost/api/v1/versions/:id/artifacts/archive/presign", ({ params }) =>
+    ok({
+      url: `/api/v1/versions/${String(params["id"])}/artifacts/archive?token=stub-archive-token`,
+      expires_at: "2026-05-26T00:05:00Z",
+    }),
+  ),
+
+  // Version preview mint: a tokenized base URL under which relative assets load.
+  http.get("http://localhost/api/v1/versions/:id/preview", ({ params }) =>
+    ok({
+      base_url: `/api/v1/versions/${String(params["id"])}/preview/stub-preview-token`,
+      expires_at: "2026-05-26T00:05:00Z",
+    }),
+  ),
 ];
 
 // ---------------------------------------------------------------------------
@@ -325,6 +342,7 @@ export function versionDetailFixture(
       status,
       is_active: status === "pending" || status === "running",
       artifact_root: null,
+      summary: status === "succeeded" ? `Summary for ${id}` : null,
       created_at: "2026-05-26T00:00:00Z",
     },
     runs: [],
@@ -339,6 +357,7 @@ export function artifactFixture(
   id: string,
   overrides: Partial<{
     kind: string;
+    path: string | null;
     mime: string | null;
     bytes: number | null;
     sha256: string | null;
@@ -348,6 +367,7 @@ export function artifactFixture(
   return {
     id,
     kind: "file",
+    path: `${id}.md`,
     mime: "text/markdown",
     bytes: 1024,
     sha256: "f".repeat(64),

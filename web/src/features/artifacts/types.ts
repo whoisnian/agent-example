@@ -17,6 +17,9 @@ export interface ArtifactMeta {
   /** Opaque free text recorded by the worker (today always "file"). Never
    *  validated or enumerated client-side. */
   kind: string;
+  /** Version-relative file path (e.g. `index.html`, `css/style.css`). The
+   *  preferred display label; nullable for legacy rows (fall back to `kind`). */
+  path: string | null;
   mime: string | null;
   bytes: number | null;
   sha256: string | null;
@@ -40,4 +43,21 @@ export interface PresignResult {
   bytes: number | null;
   mime: string | null;
   sha256: string | null;
+}
+
+/** `GET /versions/{version_id}/artifacts/archive/presign`. A short-lived
+ *  API-relative URL that streams a zip of the version's artifacts. */
+export interface ArchivePresignResult {
+  url: string;
+  expires_at: string;
+}
+
+/** `GET /versions/{version_id}/preview`. An opaque API-relative base URL
+ *  (`/api/v1/versions/{id}/preview/<token>`) under which a rendered HTML
+ *  artifact's relative asset references resolve to sibling artifacts. Compose
+ *  per-file URLs as `base_url + "/" + <segment-encoded path>`; never parse the
+ *  token segment. `expires_at` is advisory. */
+export interface PreviewMintResult {
+  base_url: string;
+  expires_at: string;
 }

@@ -82,11 +82,18 @@ const EVENTS_LIMIT = 200;
 export function useVersionEventsQuery(
   versionId: string | null,
   refetchInterval?: RefetchInterval,
+  enabled = true,
 ): UseQueryResult<EventPage, ApiError> {
   return useQuery({
     queryKey: taskKeys.events(versionId ?? "none"),
     queryFn: ({ signal }) => listVersionEvents(versionId as string, 0, EVENTS_LIMIT, signal),
-    enabled: !!versionId,
+    // `enabled` lets a historical turn defer its read until expanded (the live
+    // current turn passes the default true).
+    enabled: !!versionId && enabled,
     ...(refetchInterval !== undefined ? { refetchInterval } : {}),
   });
 }
+
+/** The events page size (mirrors the API default). A page filled to this many
+ *  rows means there may be older events not shown — the UI marks it truncated. */
+export const EVENTS_PAGE_LIMIT = EVENTS_LIMIT;

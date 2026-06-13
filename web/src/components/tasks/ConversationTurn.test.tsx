@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -118,8 +118,17 @@ describe("ConversationTurn", () => {
     emptyArtifacts();
     render(wrap({ version: node("ver-1", 1) }));
     await waitFor(() => expect(screen.queryByTestId("turn-artifacts-loading")).toBeNull());
-    expect(screen.queryByTestId("turn-artifact-item")).toBeNull();
+    expect(screen.queryByTestId("turn-artifact-card")).toBeNull();
     expect(screen.queryByTestId("turn-artifacts-error")).toBeNull();
+  });
+
+  it("aggregates the version's artifacts into one card with a file count", async () => {
+    render(wrap({ version: node("ver-1", 1) }));
+    // Default MSW fixture lists art-1 / art-2 for any version.
+    const card = await screen.findByTestId("turn-artifact-card");
+    expect(card).toHaveTextContent("2 files");
+    // Exactly one aggregate card (not one per file).
+    expect(screen.getAllByTestId("turn-artifact-card")).toHaveLength(1);
   });
 
   it("shows a quiet inline error when the artifact read fails", async () => {
@@ -138,13 +147,12 @@ describe("ConversationTurn", () => {
     expect(useUiStore.getState().toasts).toHaveLength(0);
   });
 
-  it("activating an artifact writes the selection pair and expands the preview", async () => {
+  it("activating the card opens the version's files in the preview panel", async () => {
     useUiStore.setState({ previewCollapsed: true });
     render(wrap({ version: node("ver-1", 1) }));
 
-    // Default MSW fixture lists art-1 / art-2 for any version.
-    const items = await screen.findAllByTestId("turn-artifact-item");
-    await userEvent.click(within(items[0]!).getByTestId("turn-artifact-select"));
+    // Default MSW fixture lists art-1 / art-2; activating selects the first.
+    await userEvent.click(await screen.findByTestId("turn-artifact-open"));
 
     const s = useUiStore.getState();
     expect(s.selectedVersionId).toBe("ver-1");
@@ -152,19 +160,45 @@ describe("ConversationTurn", () => {
     expect(s.previewCollapsed).toBe(false);
   });
 
-  it("Download re-mints a presigned URL and surfaces a single error on failure", async () => {
+  it("Download zip re-mints the archive URL and surfaces a single error on failure", async () => {
     server.use(
-      http.get("http://localhost/api/v1/artifacts/:id/presign", () =>
+      http.get("http://localhost/api/v1/versions/:id/artifacts/archive/presign", () =>
         HttpResponse.json(
-          { code: "artifact_not_found", message: "boom", data: null, trace_id: "t" },
+          { code: "version_not_found", message: "boom", data: null, trace_id: "t" },
           { status: 404 },
         ),
       ),
     );
     render(wrap({ version: node("ver-1", 1) }));
-    const items = await screen.findAllByTestId("turn-artifact-item");
-    await userEvent.click(within(items[0]!).getByTestId("turn-artifact-download"));
+    await userEvent.click(await screen.findByTestId("turn-artifact-download-zip"));
     await waitFor(() => expect(useUiStore.getState().toasts).toHaveLength(1));
+  });
+
+  it("renders a historical turn's execution log collapsed, lazily on expand", async () => {
+    emptyArtifacts();
+    let eventsHits = 0;
+    server.use(
+      http.get("http://localhost/api/v1/versions/:id/events", () => {
+        eventsHits += 1;
+        return HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: { items: [{ id: 1, version_id: "ver-1", run_id: "r", seq: 1, kind: "summary", payload: { summary: "did the thing" }, created_at: "2026-05-26T00:00:00Z" }], next_after_id: 1 },
+          trace_id: "t",
+        });
+      }),
+    );
+    render(wrap({ version: node("ver-1", 1) })); // isCurrent:false → historical
+
+    const toggle = await screen.findByTestId("execution-toggle");
+    // Collapsed: no events query fired yet.
+    expect(eventsHits).toBe(0);
+    expect(screen.queryByTestId("event-log")).toBeNull();
+
+    await userEvent.click(toggle);
+    await screen.findByTestId("event-log");
+    expect(eventsHits).toBe(1);
+    expect(screen.getByText("did the thing")).toBeInTheDocument();
   });
 
   it("offers rollback on non-current turns only", async () => {

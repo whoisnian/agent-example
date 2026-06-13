@@ -149,7 +149,7 @@ src/
 - **状态分层**：本地 UI 状态用 Zustand；服务端状态用 React Query（自带缓存、失效、轮询兜底）。
 - **实时通道**：MVP 默认 WebSocket，失败降级为 5s 轮询；SSE 与更复杂的多级降级为 Post-MVP。
 - **大文件上传**：前端拿临时 STS 凭证后直传 OSS，不走后端 API，避免后端带宽瓶颈。
-- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`；下载响应自带 `Content-Security-Policy: sandbox allow-scripts` 双保险）整页渲染，加载源是同源 API 下载代理（CSP `frame-src 'self'`）；frame 跑在 opaque origin，内部加载失败不可探测，恢复手段为工具栏 Refresh（重新 presign 重载）。
+- **版本历史（对话回合流）**：数据仍为父子树（每个版本最多一个 parent，无 merge）；UI 按 `version_no` 线性渲染为对话回合，分支以「from v{n}」标注，不做图形化树可视化。每个回合内按对话顺序排列：prompt → 结果行 → 执行过程（当前回合实时展开、历史回合折叠并在展开时懒加载该版本事件，迭代不再隐藏旧回合）→ 产物聚合卡（同版本产物合并为单卡，显示文件数/总大小，支持 zip 整包下载，点击在右栏展开文件列表）→ 回滚控件。执行流按 WS 事件 kind 分型为对话样式（summary 作助手正文、plan 清单、step 进度行、artifact 文件行等），非裸 JSON。HTML 产物经沙箱 iframe（`sandbox="allow-scripts"`，**禁** `allow-same-origin`；响应自带 `Content-Security-Policy: sandbox allow-scripts` 双保险）整页渲染：有 `path` 的产物经**目录化预览**路由加载（`<base>/<path>`，使相对 css/js 解析到同版本兄弟产物），null-path 退回单文件下载 URL；frame 跑在 opaque origin，内部加载失败不可探测，恢复手段为工具栏 Refresh（重新 mint 重载）。产物实时性：前端订阅 `version:` 主题，`kind=artifact`/`status` 帧失效该版本产物缓存，执行中即出卡片。
 - **互斥提交保护**：前端在 task.status 处于活跃态时禁用"迭代/回滚"按钮并提示原因；提交时仍以后端 409 为准（后端是真相之源）。
 - **成本展示**：
   - TaskDetail 顶栏显示该 task 累计 cost（USD）+ token 数（input/output/cached 分项），以及当前 running 版本的实时累计；
@@ -387,11 +387,14 @@ CREATE TABLE artifacts (
   version_id   UUID NOT NULL REFERENCES task_versions(id),
   kind         TEXT NOT NULL,              -- code-bundle/report/image/log
   oss_key      TEXT NOT NULL,
+  path         TEXT,                       -- 版本相对路径（index.html / css/style.css）；存量可空，回退 kind
   mime         TEXT,
   bytes        BIGINT,
   sha256       TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- 唯一：(version_id, oss_key)；部分唯一：(version_id, path) WHERE path IS NOT NULL
+-- （同版本每个相对路径至多一行——支撑 zip entry 名与目录化预览的精确解析）
 
 -- 价格表：模型/工具单价；变更不回溯，按 effective_at 取生效行
 CREATE TABLE pricing (
@@ -526,9 +529,13 @@ CREATE INDEX ON outbox (status, next_retry_at);
 | GET    | `/tasks/{task_id}/versions` | 版本列表（树） |
 | GET    | `/versions/{version_id}` | 版本详情 |
 | GET    | `/versions/{version_id}/events?after_id=...` | 事件流（用于断线后补齐） |
-| GET    | `/versions/{version_id}/artifacts` | 产物列表（元数据；不含 `oss_key`） — capability `artifacts-api` |
+| GET    | `/versions/{version_id}/artifacts` | 产物列表（元数据；含 `path`，不含 `oss_key`） — capability `artifacts-api` |
 | GET    | `/artifacts/{id}/presign` | 取临时下载链接：API 本地签发的**相对路径** `/artifacts/{id}/download?token=...`（HS256 token，单产物作用域，TTL 由 `OSS_PRESIGN_TTL` 控制；mint 时校验所有权） — capability `artifacts-api` |
 | GET    | `/artifacts/{id}/download?token=...` | **下载反向代理**：校验 token 后从 OSS 流式转发产物字节（浏览器不接触 `OSS_ENDPOINT`；token 即授权，public route）。**显式偏离** `add-artifacts-api` D1/D2「产物字节不经过 API」：拓扑解耦（OSS 无需浏览器可达）优先于进程带宽，回退路径保留（presign 契约未变，签发者可换回 OSS）— capability `artifacts-api`（change `add-artifact-download-proxy`） |
+| GET    | `/versions/{version_id}/artifacts/archive/presign` | 取版本级 zip 归档下载链接（`aud=artifact-archive` token，版本作用域；mint 时校验所有权） — capability `artifacts-api`（change `improve-artifact-conversation-ux`） |
+| GET    | `/versions/{version_id}/artifacts/archive?token=...` | **zip 流式归档**：校验 token 后将版本全部产物逐个从 OSS 流式打包为 zip（entry 名 = `path`，回退 `artifact-<id>`；空版本=合法空 zip；public route） — capability `artifacts-api`（change `improve-artifact-conversation-ux`） |
+| GET    | `/versions/{version_id}/preview` | 取目录化预览 base URL `/versions/{id}/preview/<token>`（`aud=version-preview` token 走**路径段**，承接 HTML 相对引用解析） — capability `artifacts-api`（change `improve-artifact-conversation-ux`） |
+| GET    | `/versions/{version_id}/preview/{token}/{filepath...}` | **目录化预览服务**：校验路径段 token，按 `(version_id, path)` 精确解析同版本产物并流式回传（净化拒绝 `..`/绝对路径/空；下载代理同款安全头；token 路径段从访问日志脱敏；public route）。仅支持标签型相对子资源（`<link>`/`<script>`/`<img>`），脚本 `fetch`/XHR 因 opaque origin 跨源不支持 — capability `artifacts-api`（change `improve-artifact-conversation-ux`） |
 | POST   | `/uploads/sts` | 颁发 OSS 上传临时凭证 — **[Deferred]** 输入上传侧（SeaweedFS STS），与下载预签名机制不同；MVP 暂无文件上传流程，留到后续独立变更（见 `add-artifacts-api` design D5） |
 | GET    | `/tasks/{task_id}/cost` | 任务累计成本（按版本展开 + 合计） — capability `task-cost-api` |
 | GET    | `/versions/{version_id}/cost` | 单版本成本（聚合 + 可选明细） — capability `task-cost-api` |
@@ -675,6 +682,9 @@ Routing key: `event.<task_type>.<kind>`
 ```
 Realtime Gateway 持久化到 `task_events`（幂等键 = run_id+seq）并推送 WS。
 
+> 当前 kind 集合：`status` / `log` / `plan` / `step` / `artifact` / `error` / `title` / `summary`。
+> **`kind=artifact`**（improve-artifact-conversation-ux）：每个 step 产出文件落 `artifacts` 行后**逐个**发出，payload `{artifact_id, path, mime, bytes, sha256}`，使前端执行中即可见产物（无需刷新）。落库与该 step 事件 seq 的预留**必须先于该 step 的 checkpoint**（崩溃窗口下 resume 重跑 step、`(version_id, oss_key)` upsert 收敛，且 checkpoint 的 `event_seq` 高水位覆盖 artifact seq，避免 resume 复用被 ingest 幂等丢弃）；继承产物在 agent 循环前一次性落库并同样发 `kind=artifact`。前端按 `artifact_id` 去重渲染。
+
 #### 成本事件（Worker → Cost Service）
 独立 Exchange `cost.exchange` (topic) → 队列 `q.cost.events`，由 Cost Service 消费。
 Routing key: `cost.<kind>` （llm / tool / compute）
@@ -721,11 +731,11 @@ User ─► Web ─► API: POST /tasks
                                             ├─ deep agent 执行
                                             │   ├─ 每次 LLM/tool 调用 → cost_meter → PUBLISH cost.<kind>
                                             │   │   (Cost Service 异步消费，结算并广播 task.events.cost 增量)
-                                            │   ├─ step1 → checkpoint → event.step
-                                            │   ├─ step2 → checkpoint → event.step
-                                            │   └─ ...
+                                            │   ├─ step1 → 上传OSS+INSERT artifacts → checkpoint → event.step + event.artifact*
+                                            │   ├─ step2 → 上传OSS+INSERT artifacts → checkpoint → event.step + event.artifact*
+                                            │   └─ ...（产物逐 step 落库并即时回写，落库+seq预留先于该step checkpoint）
                                             │
-                                            ├─ 上传产物到 OSS，INSERT artifacts
+                                            ├─ PUBLISH event.summary（运行结果摘要回写 task_versions.summary）
                                             ├─ UPDATE task_runs/versions/tasks → succeeded
                                             │   （version 从 is_active=true → false，
                                             │    自动释放 one_active_version_per_task 索引位）
