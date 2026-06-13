@@ -685,6 +685,8 @@ Realtime Gateway 持久化到 `task_events`（幂等键 = run_id+seq）并推送
 > 当前 kind 集合：`status` / `log` / `plan` / `step` / `artifact` / `error` / `title` / `summary`。
 > **`kind=artifact`**（improve-artifact-conversation-ux）：每个 step 产出文件落 `artifacts` 行后**逐个**发出，payload `{artifact_id, path, mime, bytes, sha256}`。落库与该 step 事件 seq 的预留**必须先于该 step 的 checkpoint**（崩溃窗口下 resume 重跑 step、`(version_id, oss_key)` upsert 收敛，且 checkpoint 的 `event_seq` 高水位覆盖 artifact seq，避免 resume 复用被 ingest 幂等丢弃）；继承产物在 agent 循环前一次性落库并同样发 `kind=artifact`。该事件持久化进 `task_events` 作可观测/审计；**前端不据此即时渲染产物**——聚合产物卡仅在版本终态显示（收尾的 `kind=status` 帧驱动刷新），避免 mid-run 产物集变动造成歧义。
 
+> **`kind=artifact_deleted`**（add-artifact-deletion）：迭代时用户可删除已继承的文件——executor 在输出里用 `deletions:[path,...]` 表达（绝不靠写空/null content）。loop 在该 step 内**先写后删**：删 OSS 对象 + 删本版本 `(version_id, path)` 的 `artifacts` 行（worker 对 `artifacts` 的写权放宽为 INSERT/upsert + 按 `(version_id, path)` 的**作用域 DELETE**，仅限本版本；父版本是另一 `version_id`，不受影响，故历史按版本粒度保留，无需迁移/软删）。**仅当确实删掉了行**才发一条 `artifact_deleted`，payload `{path, version_id}`（不含 `oss_key`），seq 同 artifact 事件一样在 checkpoint 前预留。删除幂等（缺失对象/行均为安全 no-op），resume 安全。前端两处消费者都不需改：产物卡终态从 DB 重取（删行后自然不出现），事件日志把 `artifact_deleted` 与 `artifact` 一同隐藏；该事件存在仅为 `task_events` 时间线完整。executor 输出畸形（`files` 项 content 非字符串）不再被吞成通用 `internal`，而是经 `ExecutorOutputError` 映射为 `executor_output_invalid`（事件 + 终态记录同码），与基础设施故障区分。
+
 #### 成本事件（Worker → Cost Service）
 独立 Exchange `cost.exchange` (topic) → 队列 `q.cost.events`，由 Cost Service 消费。
 Routing key: `cost.<kind>` （llm / tool / compute）

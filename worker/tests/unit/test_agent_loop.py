@@ -11,6 +11,7 @@ import structlog
 from langchain_core.callbacks import BaseCallbackHandler
 from worker.agents.loop import (
     DeadlineExceededError,
+    ExecutorOutputError,
     ProducedArtifact,
     StepRetryBudgetExceeded,
     run_agent_loop,
@@ -506,6 +507,182 @@ async def test_persist_failure_aborts_before_step_checkpoint() -> None:
     # no artifact event was emitted.
     assert [w[0] for w in cp.writes] == [0]
     assert [e["kind"] for e in events.events] == ["plan"]
+
+
+# --- file deletion (add-artifact-deletion) ----------------------------------
+
+
+async def _noop_write(ctx_in: Any, path: str, content: str) -> ProducedArtifact:
+    return ProducedArtifact(path=path, oss_key=f"k/{path}", bytes=len(content), sha256="h")
+
+
+async def test_deletion_removes_row_and_emits_artifact_deleted_after_checkpoint() -> None:
+    """A declared deletion whose row is removed emits one artifact_deleted event,
+    applied AFTER the (empty) persist pass and BEFORE the checkpoint; the event is
+    emitted AFTER the checkpoint with a pre-reserved seq, and carries no oss_key."""
+    ops: list[str] = []
+
+    class RecordingCp(FakeCheckpointStore):
+        async def write(self, *, step_seq: int, step_name: str, state: dict[str, Any]) -> Any:
+            ops.append(f"checkpoint:{step_seq}")
+            return await super().write(step_seq=step_seq, step_name=step_name, state=state)
+
+    class RecordingEvents(FakeEventPublisher):
+        async def publish_event(self, **kwargs: Any) -> None:
+            ops.append(f"emit:{kwargs['kind']}")
+            await super().publish_event(**kwargs)
+
+    cp, events = RecordingCp(), RecordingEvents()
+    ctx = _make_ctx(cp, events)
+    model = scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "removed styles", "files": [], "deletions": ["styles.css"]}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def delete_file(ctx_in: Any, path: str) -> bool:
+        ops.append(f"delfile:{path}")
+        return True
+
+    async def delete_artifact(ctx_in: Any, path: str) -> bool:
+        ops.append(f"delrow:{path}")
+        return True
+
+    await run_agent_loop(
+        ctx,
+        _msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=_noop_write,
+        max_step_retries=0,
+        delete_file=delete_file,
+        delete_artifact=delete_artifact,
+    )
+
+    assert ops == [
+        "emit:plan",
+        "checkpoint:0",
+        "delfile:styles.css",
+        "delrow:styles.css",
+        "checkpoint:1",
+        "emit:step",
+        "emit:artifact_deleted",
+    ]
+    deleted = [e for e in events.events if e["kind"] == "artifact_deleted"]
+    assert len(deleted) == 1
+    assert deleted[0]["payload"]["path"] == "styles.css"
+    assert "version_id" in deleted[0]["payload"]
+    assert "oss_key" not in deleted[0]["payload"]
+    # The artifact_deleted seq is covered by the step checkpoint's high-water.
+    assert deleted[0]["seq"] == cp.writes[-1][2]["event_seq"]
+
+
+async def test_deletion_of_absent_path_emits_nothing() -> None:
+    """A deletion that removes no row (path absent from this version) is a silent
+    no-op: the step still finishes and no artifact_deleted event is emitted."""
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    model = scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "tried delete", "files": [], "deletions": ["nope.txt"]}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def delete_file(ctx_in: Any, path: str) -> bool:
+        return False
+
+    async def delete_artifact(ctx_in: Any, path: str) -> bool:
+        return False  # no row matched
+
+    await run_agent_loop(
+        ctx,
+        _msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=_noop_write,
+        max_step_retries=0,
+        delete_file=delete_file,
+        delete_artifact=delete_artifact,
+    )
+    assert [e["kind"] for e in events.events] == ["plan", "step"]
+    assert ctx.step == 1
+
+
+async def test_same_step_write_and_delete_of_one_path_nets_to_absent() -> None:
+    """When a step writes AND deletes the same path, the write is dropped from
+    the persisted/emitted set (delete wins) — no artifact row is inserted-then-
+    deleted, and the OSS object the write created is removed via delete_file."""
+    persisted: list[str] = []
+    deleted_files: list[str] = []
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    model = scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "rewrite then drop", "files": '
+            '[{"path": "x.css", "content": "body{}"}], "deletions": ["x.css"]}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def persist_artifact(ctx_in: Any, art: ProducedArtifact) -> str:
+        persisted.append(art.path)
+        return f"id-{art.path}"
+
+    async def delete_file(ctx_in: Any, path: str) -> bool:
+        deleted_files.append(path)
+        return True
+
+    async def delete_artifact(ctx_in: Any, path: str) -> bool:
+        return False  # nothing was persisted for x.css this run
+
+    await run_agent_loop(
+        ctx,
+        _msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=_noop_write,
+        max_step_retries=0,
+        persist_artifact=persist_artifact,
+        delete_file=delete_file,
+        delete_artifact=delete_artifact,
+    )
+    # The write was NOT persisted (delete supersedes it) and produced no artifact
+    # event; the OSS object the write created was deleted; no artifact_deleted
+    # (no row existed to remove).
+    assert persisted == []
+    assert deleted_files == ["x.css"]
+    kinds = [e["kind"] for e in events.events]
+    assert "artifact" not in kinds
+    assert "artifact_deleted" not in kinds
+
+
+async def test_malformed_file_content_raises_executor_output_error() -> None:
+    """A files entry with null content raises ExecutorOutputError (carrying the
+    path) instead of writing — the consumer maps it to executor_output_invalid."""
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    model = scripted_model(
+        [
+            '{"steps": ["only step"]}',
+            '{"summary": "oops", "files": [{"path": "styles.css", "content": null}]}',
+        ]
+    )
+
+    with pytest.raises(ExecutorOutputError) as ei:
+        await run_agent_loop(
+            ctx,
+            _msg(),
+            model=model,
+            system_prompt="sys",
+            write_file=_noop_write,
+            max_step_retries=0,
+        )
+    assert ei.value.path == "styles.css"
 
 
 # --- conversation-context injection (refactor-task-conversation-continuity) --

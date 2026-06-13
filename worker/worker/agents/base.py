@@ -23,7 +23,7 @@ from worker.agents.loop import DEFAULT_ROLE_INSTRUCTIONS, assemble_run_summary, 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
 
-    from worker.agents.loop import ProducedArtifact, WriteFile
+    from worker.agents.loop import DeleteFile, ProducedArtifact, WriteFile
     from worker.agents.model import ModelFactory
     from worker.agents.subagent import RoleInstructions
     from worker.core.messages import TaskExecuteMessage
@@ -117,11 +117,13 @@ class LoopAgent:
         max_step_retries: int,
         metrics: Any | None = None,
         roles: RoleInstructions = DEFAULT_ROLE_INSTRUCTIONS,
+        delete_file: DeleteFile | None = None,
     ) -> None:
         self._spec = spec
         self._model_factory = model_factory
         self._persistence = persistence
         self._write_file = write_file
+        self._delete_file = delete_file
         self._max_step_retries = max_step_retries
         self._metrics = metrics
         self._roles = roles
@@ -155,6 +157,8 @@ class LoopAgent:
                 roles=self._roles,
                 inherited=inherited,
                 persist_artifact=self._persist_artifact,
+                delete_file=self._delete_file,
+                delete_artifact=self._delete_artifact,
             )
             # Artifact rows + `kind="artifact"` events are written per-step
             # inside the loop (improve-artifact-conversation-ux), not batched
@@ -187,6 +191,13 @@ class LoopAgent:
             sha256=art.sha256,
         )
         return str(artifact_id)
+
+    async def _delete_artifact(self, ctx: RunContext, path: str) -> bool:
+        """Delete the running version's ``(version_id, path)`` artifact row,
+        returning whether a row was removed. Scoped to the run's own version —
+        the only delete the worker is permitted on the `artifacts` table
+        (add-artifact-deletion)."""
+        return await self._persistence.delete_artifact(version_id=ctx.version_id, path=path)
 
     async def _emit_summary(self, ctx: RunContext, step_summaries: list[str | None]) -> None:
         summary = assemble_run_summary(step_summaries)

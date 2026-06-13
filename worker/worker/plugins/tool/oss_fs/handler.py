@@ -31,4 +31,11 @@ async def oss_fs(ctx: Any, *, op: str, path: str, content: str | None = None) ->
     if op == "read":
         data = await ctx.oss_client.get(ctx.oss_prefix, path)
         return {"path": path, "content": data.decode("utf-8")}
+    if op == "delete":
+        # Idempotent: a missing object is a successful no-op (``deleted: False``)
+        # so a redelivered / resumed run can safely re-apply the deletion
+        # (add-artifact-deletion). ``content`` is not consulted. Prefix safety
+        # is enforced by the client's ``delete`` (same guard as write/read).
+        deleted = await ctx.oss_client.delete(ctx.oss_prefix, path)
+        return {"path": path, "deleted": deleted}
     raise ValueError(f"unknown oss_fs op: {op!r}")

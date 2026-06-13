@@ -21,6 +21,8 @@ func TestVersionTargetStatus(t *testing.T) {
 		{"status empty → no transition", "status", "", "", false},
 		{"plan kind → persist only", "plan", "", "", false},
 		{"step kind → persist only", "step", "running", "", false},
+		{"artifact kind → persist only", "artifact", "", "", false},
+		{"artifact_deleted kind → persist only", "artifact_deleted", "", "", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

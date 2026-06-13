@@ -64,6 +64,23 @@ describe("EventLog split-block rendering", () => {
     expect(rows[0]).toHaveAttribute("data-kind", "status");
   });
 
+  it("hides artifact_deleted events entirely (no raw fallback row)", () => {
+    render(
+      <EventLog
+        events={[
+          ev(1, "artifact_deleted", { path: "styles.css", version_id: "ver-1" }),
+          ev(2, "status", { status: "running" }),
+        ]}
+      />,
+    );
+    // No fallback/JSON row for the deletion; only the status row renders.
+    expect(screen.queryByText("styles.css")).toBeNull();
+    expect(screen.queryByText(/artifact_deleted/)).toBeNull();
+    const rows = screen.getAllByTestId("event-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveAttribute("data-kind", "status");
+  });
+
   it("hides non-conversational kinds (title)", () => {
     render(<EventLog events={[ev(1, "title", { title: "My task" }), ev(2, "log", { message: "hi" })]} />);
     const rows = screen.getAllByTestId("event-row");

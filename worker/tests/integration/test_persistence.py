@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import dataclasses
-
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -140,3 +139,53 @@ async def test_insert_artifact(pg_pool):  # type: ignore[no-untyped-def]
         sha256="abc",
     )
     assert aid is not None
+
+
+async def test_delete_artifact_scoped_and_idempotent(pg_pool):  # type: ignore[no-untyped-def]
+    p = await _make_persistence(pg_pool)
+    version_id = uuid4()
+    other_version = uuid4()
+    await p.insert_artifact(
+        version_id=version_id,
+        kind="file",
+        oss_key=f"a/b/{version_id}/styles.css",
+        path="styles.css",
+        mime="text/css",
+        bytes_size=6,
+        sha256="h1",
+    )
+    await p.insert_artifact(
+        version_id=version_id,
+        kind="file",
+        oss_key=f"a/b/{version_id}/index.html",
+        path="index.html",
+        mime="text/html",
+        bytes_size=9,
+        sha256="h2",
+    )
+    # Same relative path under a DIFFERENT version — must stay untouched.
+    await p.insert_artifact(
+        version_id=other_version,
+        kind="file",
+        oss_key=f"a/b/{other_version}/styles.css",
+        path="styles.css",
+        mime="text/css",
+        bytes_size=6,
+        sha256="h3",
+    )
+
+    # Deletes exactly the (version_id, "styles.css") row.
+    assert await p.delete_artifact(version_id=version_id, path="styles.css") is True
+    # Idempotent: a second delete of the same pair removes nothing.
+    assert await p.delete_artifact(version_id=version_id, path="styles.css") is False
+
+    async with pg_pool.acquire() as conn:
+        remaining = await conn.fetch(
+            "SELECT version_id, path FROM artifacts WHERE version_id = ANY($1::uuid[]) ORDER BY path",
+            [version_id, other_version],
+        )
+    pairs = {(r["version_id"], r["path"]) for r in remaining}
+    # The sibling file and the other version's same-named file both survive.
+    assert (version_id, "index.html") in pairs
+    assert (other_version, "styles.css") in pairs
+    assert (version_id, "styles.css") not in pairs

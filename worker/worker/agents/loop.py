@@ -53,11 +53,20 @@ class ProducedArtifact:
 
 WriteFile = Callable[["RunContext", str, str], Awaitable[ProducedArtifact]]
 
+#: Deletes ``path``'s object under the run's OSS prefix, returning whether an
+#: object was removed (idempotent no-op when absent). Injected by the agent.
+DeleteFile = Callable[["RunContext", str], Awaitable[bool]]
+
 #: Persists one produced artifact's row (upsert) and returns its artifact id as
 #: a string for the ``artifact`` event payload. Injected by the agent; ``None``
 #: for direct callers (e.g. tests) that don't persist — those still accumulate
 #: ``LoopResult.artifacts`` but emit no ``artifact`` events.
 PersistArtifact = Callable[["RunContext", ProducedArtifact], Awaitable[str]]
+
+#: Deletes the current version's ``(version_id, path)`` artifact row, returning
+#: whether a row was removed. Injected by the agent; ``None`` for direct callers
+#: that don't persist (no ``artifact_deleted`` event is emitted for those).
+DeleteArtifact = Callable[["RunContext", str], Awaitable[bool]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +91,20 @@ class StepRetryBudgetExceeded(RuntimeError):
         self.step_idx = step_idx
 
 
+class ExecutorOutputError(RuntimeError):
+    """Raised when the executor emits a malformed ``files`` entry — a missing or
+    non-string ``content`` (e.g. ``{"path": "x", "content": null}``, which the
+    model should have expressed via ``deletions``). The consumer maps this to a
+    typed ``executor_output_invalid`` error rather than a generic ``internal``
+    dispatch failure, so an LLM-output mistake is distinguishable from a real
+    infrastructure fault (add-artifact-deletion).
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"executor produced a file entry with non-string content: {path!r}")
+        self.path = path
+
+
 class DeadlineExceededError(RuntimeError):
     """Raised at a step boundary when the run's deadline has passed (design D14)."""
 
@@ -92,7 +115,9 @@ _PLANNER_INSTRUCTION = (
 )
 _EXECUTOR_INSTRUCTION = (
     "You are the EXECUTOR. Perform the given step. If you produce files, include them. "
-    'Respond with JSON only: {"summary": "...", "files": [{"path": "...", "content": "..."}]}.'
+    "To remove a file (e.g. one inherited from a previous version), list its path under "
+    '"deletions" — never emit empty or null content to delete. Respond with JSON only: '
+    '{"summary": "...", "files": [{"path": "...", "content": "..."}], "deletions": ["path"]}.'
 )
 _CRITIC_INSTRUCTION = (
     "You are the CRITIC. Judge the step result and decide what to do next. "
@@ -147,6 +172,8 @@ async def run_agent_loop(
     roles: RoleInstructions = DEFAULT_ROLE_INSTRUCTIONS,
     inherited: list[tuple[str, int]] | None = None,
     persist_artifact: PersistArtifact | None = None,
+    delete_file: DeleteFile | None = None,
+    delete_artifact: DeleteArtifact | None = None,
 ) -> LoopResult:
     """Run the plan→execute→critic loop, returning artifacts + step summaries.
 
@@ -174,7 +201,7 @@ async def run_agent_loop(
         await _check_boundary(ctx, deadline_ts)
         title = plan[idx]
         step_start = time.monotonic()
-        verdict, summary, step_artifacts = await _run_step(
+        verdict, summary, step_artifacts, deletions = await _run_step(
             ctx,
             model,
             system_prompt,
@@ -191,6 +218,13 @@ async def run_agent_loop(
 
         ctx.step = idx + 1
 
+        # A path written AND deleted in the same step nets to deleted (spec:
+        # within-step writes apply first, then deletions): drop such a write from
+        # the persisted/emitted set so we never insert-then-delete a row — the
+        # OSS object the write created is still removed by delete_file below.
+        deletion_set = set(deletions)
+        to_persist = [a for a in step_artifacts if a.path not in deletion_set]
+
         # Persist this step's artifact rows BEFORE the checkpoint. A crash
         # before the checkpoint re-executes the whole step on resume (the
         # checkpoint never advanced) and the (version_id, oss_key) upsert
@@ -198,18 +232,35 @@ async def run_agent_loop(
         # since there is no end-of-run persistence pass to fall back on.
         persisted: list[tuple[str, ProducedArtifact]] = []
         if persist_artifact is not None:
-            for art in step_artifacts:
+            for art in to_persist:
                 persisted.append((await persist_artifact(ctx, art), art))
 
-        # Reserve the step event's seq AND one seq per artifact event BEFORE the
-        # checkpoint so the persisted high-water mark covers them all: a crash
-        # between checkpoint and emit then leaves a harmless gap on resume
-        # instead of a (run_id, seq) collision the ingest side would silently
-        # drop (spec: "Resume-Safe Event Sequencing"). Concurrent control acks
-        # may still slip a seq in after the snapshot — max() on restore plus
-        # at-most-one lost ack bounds that rare race.
+        # Apply deletions AFTER the writes/upserts (writes-then-deletes order)
+        # and BEFORE the checkpoint (so a resume does not re-run them; re-running
+        # is a safe no-op regardless, since both deletes are idempotent). Only a
+        # delete that actually removed a row yields an artifact_deleted event —
+        # a path absent from this version is a silent no-op.
+        removed_paths: list[str] = []
+        for dpath in deletions:
+            if delete_file is not None:
+                await delete_file(ctx, dpath)
+            row_removed = (
+                await delete_artifact(ctx, dpath) if delete_artifact is not None else False
+            )
+            if row_removed:
+                removed_paths.append(dpath)
+
+        # Reserve the step event's seq, one seq per artifact event, AND one per
+        # artifact_deleted event BEFORE the checkpoint so the persisted
+        # high-water mark covers them all: a crash between checkpoint and emit
+        # then leaves a harmless gap on resume instead of a (run_id, seq)
+        # collision the ingest side would silently drop (spec: "Resume-Safe
+        # Event Sequencing"). Concurrent control acks may still slip a seq in
+        # after the snapshot — max() on restore plus at-most-one lost ack bounds
+        # that rare race.
         step_event_seq = ctx.next_event_seq()
         artifact_event_seqs = [ctx.next_event_seq() for _ in persisted]
+        deleted_event_seqs = [ctx.next_event_seq() for _ in removed_paths]
         step_state: dict[str, Any] = {
             "plan": _plan_state(plan, completed_through=idx, summaries=summaries),
             "step_count": len(plan),
@@ -252,6 +303,15 @@ async def run_agent_loop(
                     "sha256": art.sha256,
                 },
                 seq=art_seq,
+            )
+        # Then one artifact_deleted per removed row — payload carries no oss_key
+        # (never-serialize-oss_key), letting the UI/event-log retract the file.
+        for dpath, del_seq in zip(removed_paths, deleted_event_seqs, strict=True):
+            await _emit(
+                ctx,
+                kind="artifact_deleted",
+                payload={"path": dpath, "version_id": str(ctx.version_id)},
+                seq=del_seq,
             )
         if metrics is not None:
             metrics.agent_steps_total.labels(ctx.task_type).inc()
@@ -335,8 +395,13 @@ async def _run_step(
     log: Any,
     roles: RoleInstructions,
     context_block: str = "",
-) -> tuple[str, str, list[ProducedArtifact]]:
-    """Execute + critique one step with bounded retries."""
+) -> tuple[str, str, list[ProducedArtifact], list[str]]:
+    """Execute + critique one step with bounded retries.
+
+    Returns ``(verdict, summary, written_artifacts, deletion_paths)``. Writes are
+    applied here; the requested ``deletion_paths`` are returned for the caller to
+    apply after the row-persist pass (writes-then-deletes ordering).
+    """
     attempt = 0
     while True:
         result = await _execute(
@@ -345,7 +410,16 @@ async def _run_step(
         summary = str(result.get("summary", ""))
         attempt_artifacts: list[ProducedArtifact] = []
         for f in result.get("files", []) or []:
-            attempt_artifacts.append(await write_file(ctx, f["path"], f.get("content", "")))
+            path = f["path"]
+            content = f.get("content")
+            # A file write MUST carry string content. A null/missing content is a
+            # malformed entry (the model should have used ``deletions``) — raise a
+            # typed error the consumer maps to ``executor_output_invalid`` instead
+            # of letting oss_fs raise a generic ValueError → ``internal``.
+            if not isinstance(content, str):
+                raise ExecutorOutputError(str(path))
+            attempt_artifacts.append(await write_file(ctx, path, content))
+        deletions = _parse_deletions(result.get("deletions"))
 
         verdict = await _critic(ctx, model, system_prompt, title, summary, roles.critic)
         if verdict == "retry":
@@ -354,7 +428,7 @@ async def _run_step(
                 log.info("agent_step_retry", title=title, attempt=attempt)
                 continue
             raise StepRetryBudgetExceeded(message.attempt_no)
-        return verdict, summary, attempt_artifacts
+        return verdict, summary, attempt_artifacts, deletions
 
 
 # --- role invocations ------------------------------------------------------
@@ -452,6 +526,22 @@ def _extract_json(text: str) -> dict[str, Any]:
         except json.JSONDecodeError:
             pass
     raise ValueError(f"could not parse JSON from model output: {text[:120]!r}")
+
+
+def _parse_deletions(raw: Any) -> list[str]:
+    """Normalize the executor's optional ``deletions`` field to an ordered,
+    de-duplicated list of non-empty string paths. Non-list input or non-string /
+    empty entries are ignored (a deletion is opt-in; malformed entries simply
+    don't request a delete rather than failing the run)."""
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if isinstance(entry, str) and entry and entry not in seen:
+            seen.add(entry)
+            out.append(entry)
+    return out
 
 
 def _plan_state(

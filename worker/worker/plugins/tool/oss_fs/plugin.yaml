@@ -8,7 +8,7 @@ schema:
     properties:
       op:
         type: string
-        enum: [write, read]
+        enum: [write, read, delete]
       path: { type: string }
       content: { type: string }
     required: [op, path]

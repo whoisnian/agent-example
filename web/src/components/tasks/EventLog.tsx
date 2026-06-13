@@ -23,13 +23,14 @@ function preview(payload: unknown): string {
 }
 
 /**
- * Kinds that render nothing in the log. `artifact` is intentionally hidden:
- * produced files surface ONLY via the per-turn aggregate artifact card (and
- * only once the version completes — see ConversationTurn), so a mid-run file
- * line never creates ambiguity about what the final products are. `title`
+ * Kinds that render nothing in the log. `artifact` and `artifact_deleted` are
+ * intentionally hidden: file lifecycle (a produced file and its later removal)
+ * surfaces ONLY via the per-turn aggregate artifact card (and only once the
+ * version completes — see ConversationTurn), whose refetched set already
+ * reflects deletions, so a raw `artifact_deleted` row never appears. `title`
  * already lives in the page header.
  */
-const HIDDEN_KINDS = new Set(["title", "artifact"]);
+const HIDDEN_KINDS = new Set(["title", "artifact", "artifact_deleted"]);
 
 function planSteps(event: EventItem): unknown[] | null {
   const p = event.payload;

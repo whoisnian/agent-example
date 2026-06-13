@@ -8,7 +8,10 @@ PostgreSQL. The set of allowed write targets is hard-coded and enumerated by
   (status flips done as part of claim / heartbeat boundary), ``started_at``,
   ``ended_at``, ``error`` (matched against the run's own ``id``).
 - ``task_checkpoints`` — INSERTs only.
-- ``artifacts`` — INSERTs only.
+- ``artifacts`` — INSERT/upsert on ``(version_id, oss_key)`` PLUS a scoped
+  DELETE of a single ``(version_id, path)`` row of the *running* version
+  (file deletion on iterate; add-artifact-deletion). No other delete shape is
+  permitted — never another version, never an unscoped delete.
 
 No other tables may be written from the Worker. Per AGENTS.md §4.2 the
 business state tables (``tasks``, ``task_versions``) are owned by the API
@@ -35,7 +38,7 @@ ALLOWED_WRITE_TABLES: Final[frozenset[str]] = frozenset(
     {
         "task_runs",  # only last_heartbeat / worker_run_id / status timestamps / error
         "task_checkpoints",  # INSERT only
-        "artifacts",  # INSERT only
+        "artifacts",  # INSERT/upsert + scoped DELETE by (version_id, path)
     }
 )
 
@@ -387,6 +390,25 @@ class Persistence:
                 sha256,
             )
         return row_id
+
+    async def delete_artifact(self, *, version_id: UUID, path: str) -> bool:
+        """Delete the single ``(version_id, path)`` artifact row of the running
+        version. Returns ``True`` if a row was removed, ``False`` if none
+        matched (idempotent — a redelivered / resumed run can re-apply the
+        deletion safely; add-artifact-deletion).
+
+        Scoped by design: the worker may delete ONLY its own version's row by
+        ``(version_id, path)`` — never another version, never another table.
+        ``tasks`` / ``task_versions`` stay API-owned (AGENTS.md §4.2).
+        """
+        async with self._pool.acquire() as conn:
+            tag: str = await conn.execute(
+                "DELETE FROM artifacts WHERE version_id = $1 AND path = $2",
+                version_id,
+                path,
+            )
+        # asyncpg returns a command tag like "DELETE 1" / "DELETE 0".
+        return tag.rsplit(" ", 1)[-1] != "0"
 
 
 def _terminal(row: asyncpg.Record, outcome: ClaimOutcome) -> ClaimResult:

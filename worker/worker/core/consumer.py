@@ -18,6 +18,7 @@ import aio_pika
 import structlog
 from pydantic import ValidationError
 
+from worker.agents.loop import ExecutorOutputError
 from worker.core.checkpoint import CheckpointStore
 from worker.core.cost_meter import CostMeter
 from worker.core.dispatcher import (
@@ -319,6 +320,23 @@ class TaskConsumer:
                     self._log.warning("dispatch_cancelled_by_runtime")
                     await delivery.nack(requeue=True)
                     self._metrics.messages_consumed_total.labels(outcome="cancelled").inc()
+                    return
+                if isinstance(dispatch_exc, ExecutorOutputError):
+                    # Malformed executor output (e.g. null `content` where the
+                    # model meant a deletion) is an LLM mistake, NOT an infra
+                    # fault: surface a typed `executor_output_invalid` code in
+                    # both the error event and the terminal mark rather than
+                    # flattening to `internal` (add-artifact-deletion). Mirrors
+                    # the AgentNotImplementedError branch above.
+                    self._log.warning("executor_output_invalid", path=dispatch_exc.path)
+                    await self._publish_error(
+                        ctx, msg, code="executor_output_invalid", message=str(dispatch_exc)
+                    )
+                    await self._persistence.mark_run_terminal(
+                        msg.run_id, status="failed", error={"code": "executor_output_invalid"}
+                    )
+                    await delivery.nack(requeue=False)
+                    self._metrics.messages_consumed_total.labels(outcome="error").inc()
                     return
                 if dispatch_exc is not None:
                     self._log.error("dispatch_error", error=str(dispatch_exc))

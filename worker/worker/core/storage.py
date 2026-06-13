@@ -17,6 +17,7 @@ import posixpath
 from typing import Any
 
 import aioboto3
+from botocore.exceptions import ClientError
 
 
 class OssPathError(ValueError):
@@ -101,6 +102,29 @@ class OssClient:
             stream = response["Body"]
             data: bytes = await stream.read()
             return data
+
+    async def delete(self, prefix: str, key: str) -> bool:
+        """Delete the object at ``prefix + key``. Returns ``True`` if an object
+        was removed, ``False`` if it did not exist (idempotent no-op).
+
+        Applies the SAME ``_normalize_key`` prefix-safety guard as ``put`` /
+        ``get`` so a relative ``key`` can never escape the run's namespace
+        (add-artifact-deletion). A missing object is reported via a ``404``
+        ``head_object`` probe rather than relying on ``delete_object`` (which S3
+        treats as a success regardless), so the caller can tell "removed" from
+        "already absent".
+        """
+        absolute_key = _normalize_key(prefix, key)
+        async with self._client_cm() as s3:
+            try:
+                await s3.head_object(Bucket=self._bucket, Key=absolute_key)
+            except ClientError as exc:
+                code = str(exc.response.get("Error", {}).get("Code", ""))
+                if code in {"404", "NoSuchKey", "NotFound"}:
+                    return False
+                raise
+            await s3.delete_object(Bucket=self._bucket, Key=absolute_key)
+            return True
 
     async def server_side_copy(self, src_prefix: str, dst_prefix: str, key: str) -> str:
         """Copy an object from ``src_prefix + key`` to ``dst_prefix + key`` server-side.

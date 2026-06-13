@@ -53,6 +53,13 @@ class _InMemoryOss:
     async def get(self, prefix: str, key: str) -> bytes:
         return self.objects[prefix + key]
 
+    async def delete(self, prefix: str, key: str) -> bool:
+        absolute = prefix + key
+        if absolute in self.objects:
+            del self.objects[absolute]
+            return True
+        return False
+
 
 class _CapturingEvents:
     def __init__(self) -> None:
@@ -173,6 +180,58 @@ async def test_code_agent_success_writes_artifact_and_checkpoints(
     assert len(rows) == 1
     assert rows[0]["oss_key"] == f"{ctx.oss_prefix}main.py"
     assert [c["step_seq"] for c in cps] == [0, 1, 2]
+
+
+async def test_code_agent_deletes_inherited_file(
+    pg_pool,  # type: ignore[no-untyped-def]
+    settings_for_agent,  # type: ignore[no-untyped-def]
+) -> None:
+    """End-to-end (add-artifact-deletion): a step declaring ``deletions`` removes
+    the inherited file's OSS object AND its artifact row, and emits exactly one
+    artifact_deleted event. A sibling inherited file is untouched."""
+    persistence = Persistence(pg_pool, heartbeat_interval_seconds=5.0)
+    oss = _InMemoryOss()
+    events = _CapturingEvents()
+    ctx = await _make_ctx(persistence, oss, events)
+    await _seed_run(pg_pool, ctx)
+
+    # Seed two "inherited" files: OSS objects + artifact rows in this version.
+    for path, body in (("styles.css", b"body{}"), ("index.html", b"<h1>x</h1>")):
+        oss.objects[f"{ctx.oss_prefix}{path}"] = body
+        await persistence.insert_artifact(
+            version_id=ctx.version_id,
+            kind="file",
+            oss_key=f"{ctx.oss_prefix}{path}",
+            path=path,
+            mime=None,
+            bytes_size=len(body),
+            sha256="h",
+        )
+
+    model = scripted_model(
+        [
+            '{"steps": ["remove styles"]}',
+            '{"summary": "removed styles", "files": [], "deletions": ["styles.css"]}',
+            '{"verdict": "finish"}',
+        ]
+    )
+    agent = build_code_agent(FakeModelFactory(model=model), persistence, settings_for_agent)
+    await agent.run(ctx, _msg(ctx))
+
+    # The deleted file's OSS object is gone; the sibling remains.
+    assert f"{ctx.oss_prefix}styles.css" not in oss.objects
+    assert f"{ctx.oss_prefix}index.html" in oss.objects
+    # The deleted file's artifact row is gone; the sibling row remains.
+    async with pg_pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT path FROM artifacts WHERE version_id = $1 ORDER BY path", ctx.version_id
+        )
+    assert [r["path"] for r in rows] == ["index.html"]
+    # Exactly one artifact_deleted event, naming the path, carrying no oss_key.
+    deleted = [e for e in events.events if e["kind"] == "artifact_deleted"]
+    assert len(deleted) == 1
+    assert deleted[0]["payload"]["path"] == "styles.css"
+    assert "oss_key" not in deleted[0]["payload"]
 
 
 async def test_code_agent_upload_failure_fails_run_no_artifacts(

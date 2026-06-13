@@ -53,3 +53,42 @@ async def test_list_keys_and_copy(minio_container) -> None:  # type: ignore[no-u
 
     # Empty prefix lists nothing.
     assert await client.list_keys("tenant/task/empty/") == []
+
+
+async def test_delete_roundtrip_and_idempotency(minio_container) -> None:  # type: ignore[no-untyped-def]
+    endpoint = (
+        f"http://{minio_container.get_container_host_ip()}:{minio_container.get_exposed_port(9000)}"
+    )
+    client = OssClient(
+        endpoint_url=endpoint,
+        bucket="worker-bucket",
+        access_key_id=minio_container.access_key,
+        access_key_secret=minio_container.secret_key,
+    )
+    await client.ensure_bucket()
+
+    prefix = "tenant/task/del/"
+    await client.put(prefix, "styles.css", b"body{}")
+    # Deleting an existing object reports True and removes it.
+    assert await client.delete(prefix, "styles.css") is True
+    # Deleting again (now absent) is an idempotent no-op reporting False.
+    assert await client.delete(prefix, "styles.css") is False
+    assert await client.list_keys(prefix) == []
+
+
+async def test_delete_rejects_prefix_escape(minio_container) -> None:  # type: ignore[no-untyped-def]
+    from worker.core.storage import OssPathError
+
+    endpoint = (
+        f"http://{minio_container.get_container_host_ip()}:{minio_container.get_exposed_port(9000)}"
+    )
+    client = OssClient(
+        endpoint_url=endpoint,
+        bucket="worker-bucket",
+        access_key_id=minio_container.access_key,
+        access_key_secret=minio_container.secret_key,
+    )
+    # Same prefix-safety guard as put/get: a traversal path is rejected before
+    # any S3 call.
+    with pytest.raises(OssPathError):
+        await client.delete("tenant/task/del/", "../other/secret")

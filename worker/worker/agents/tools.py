@@ -32,3 +32,15 @@ async def oss_write_file(ctx: RunContext, path: str, content: str) -> ProducedAr
         sha256=res["sha256"],
         mime=mime,
     )
+
+
+async def oss_delete_file(ctx: RunContext, path: str) -> bool:
+    """Delete ``path`` under the run's OSS prefix (cost-metered).
+
+    Returns whether an object was removed; a missing object is an idempotent
+    no-op (``False``). Routed through the same ``cost_metered_tool("oss_fs")``
+    wrapper as the write so every deletion emits a ``cost.tool`` event
+    (AGENTS.md §4.2; add-artifact-deletion).
+    """
+    res = await _metered_oss_fs(ctx, op="delete", path=path)
+    return bool(res["deleted"])

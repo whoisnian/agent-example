@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from worker.agents.base import AgentSpec, LoopAgent
 from worker.agents.loop import DEFAULT_ROLE_INSTRUCTIONS
 from worker.agents.subagent import to_role_instructions
-from worker.agents.tools import oss_write_file
+from worker.agents.tools import oss_delete_file, oss_write_file
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -48,6 +48,7 @@ def build_research_agent(
         model_factory=model_factory,
         persistence=persistence,
         write_file=oss_write_file,
+        delete_file=oss_delete_file,
         max_step_retries=settings.max_step_retries,
         metrics=metrics,
         roles=roles,
