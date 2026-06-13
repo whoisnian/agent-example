@@ -43,7 +43,7 @@
 
 - [x] 7.1 `ArtifactPreviewPanel`：HTML 渲染视图改用 preview mint（iframe src = `base_url + "/" + encodePath(path)`，path 为 null 回退单文件 URL）；Refresh 重 mint；mint 失败 inline error
 - [x] 7.2 面板行与 toolbar 标题改用 `path` 优先（null 回退 kind）；测试：目录预览 src 组装、null path 回退、path 标签显示
-- [ ] 7.3 手动验证（/verify）：生成含相对 css/js 的 html 产物，确认 iframe 内样式脚本正常加载、zip 下载内容完整、运行中产物实时出现、迭代后历史回合可回看
+- [x] 7.3 手动验证（/verify）：生成含相对 css/js 的 html 产物，确认 iframe 内样式脚本正常加载、zip 下载内容完整、运行中产物实时出现、迭代后历史回合可回看
 
 ## 8. 文档同步
 

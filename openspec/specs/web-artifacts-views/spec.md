@@ -3,14 +3,12 @@
 ## Purpose
 
 The `features/artifacts/` slice of the web client provides typed, owner-scoped access to a version's produced artifacts. It exposes the per-version artifact list (`GET /api/v1/versions/{version_id}/artifacts`) through the shared `apiFetch` + React Query read pattern, and an on-demand single-artifact presign action (`GET /api/v1/artifacts/{artifact_id}/presign`) modeled as a non-cached mutation that re-mints a short-lived API-signed relative download URL (opaque to the client; served by the API download proxy since `add-artifact-download-proxy`) on each invocation. The slice keeps error surfacing single (no double toasts) and preserves the backend's serialization contract (server ordering, present-and-nullable metadata, opaque `kind`). This capability was established by archiving the `add-web-artifacts-views` change.
-
 ## Requirements
-
 ### Requirement: Version Artifact Data Access
 
 The web client SHALL provide a `features/artifacts/` data-access slice exposing typed access to the `artifacts-api` endpoints through the existing `apiFetch` + React Query pattern.
 
-The slice MUST expose a read for `GET /api/v1/versions/{version_id}/artifacts` parsed as `{ version_id: string; artifacts: ArtifactMeta[] }`, where each `ArtifactMeta` is `{ id: string; kind: string; mime: string | null; bytes: number | null; sha256: string | null; created_at: string }`. The slice MUST preserve the server-provided ordering (`created_at ASC, id ASC`) and MUST NOT re-sort client-side. The nullable fields (`mime`, `bytes`, `sha256`) MUST be modeled as present-and-nullable (`T | null`), never optional/omitted, mirroring the backend serialization. `kind` MUST be treated as opaque free text and MUST NOT be validated or enumerated by the client.
+The slice MUST expose a read for `GET /api/v1/versions/{version_id}/artifacts` parsed as `{ version_id: string; artifacts: ArtifactMeta[] }`, where each `ArtifactMeta` is `{ id: string; kind: string; path: string | null; mime: string | null; bytes: number | null; sha256: string | null; created_at: string }`. The slice MUST preserve the server-provided ordering (`created_at ASC, id ASC`) and MUST NOT re-sort client-side. The nullable fields (`path`, `mime`, `bytes`, `sha256`) MUST be modeled as present-and-nullable (`T | null`), never optional/omitted, mirroring the backend serialization. `kind` MUST be treated as opaque free text and MUST NOT be validated or enumerated by the client. `path` is the artifact's version-relative file path and is the preferred display name wherever the UI labels an artifact; a `null` path falls back to the previous `kind`-based labeling.
 
 The read MUST be keyed by `version_id` and SHALL be lazily enabled (`enabled: !!versionId`) so it only fires when a consumer actually requests that version's artifacts. Because the consuming surface renders its own inline error/empty state, the list read MUST suppress BOTH toast layers — `toastOnError:false` on the transport call AND `meta:{silent:true}` on the query — so the inline state is the single error surface (mirroring `getMyCost`+`useMyCostQuery`), never a duplicate toast. A `404` (`version_not_found`) MUST additionally skip retry, surfacing as a no-op/empty render rather than a thrown unhandled error — mirroring `useTaskCostQuery`. An owned version with no artifacts yet returns `artifacts: []` (HTTP `200`, never `404`) and MUST therefore render as an empty state, not a not-found state. Non-`404` errors (including the practically-unreachable `400 invalid_input` from a malformed id — `version_id` is always a server-sourced `VersionNode.id`) MUST follow the same posture as `useTaskCostQuery` and render the consumer's error state; no distinct `400` handling is required (consistent with the archived `web-cost-views`).
 
@@ -20,8 +18,8 @@ The slice MUST expose a presign action for `GET /api/v1/artifacts/{artifact_id}/
 
 #### Scenario: Version artifact list parses in server order with nullable fields preserved
 
-- **WHEN** the slice reads `/api/v1/versions/{id}/artifacts` for a version with two artifacts, one of which has `mime`, `bytes`, and `sha256` all `null`
-- **THEN** the parsed value MUST be `{ version_id, artifacts }` with the two entries in the server-provided `created_at ASC, id ASC` order (no client re-sort), and the null-metadata entry MUST carry `mime: null`, `bytes: null`, `sha256: null` (present-and-null, never omitted)
+- **WHEN** the slice reads `/api/v1/versions/{id}/artifacts` for a version with two artifacts, one of which has `path`, `mime`, `bytes`, and `sha256` all `null`
+- **THEN** the parsed value MUST be `{ version_id, artifacts }` with the two entries in the server-provided `created_at ASC, id ASC` order (no client re-sort), and the null-metadata entry MUST carry `path: null`, `mime: null`, `bytes: null`, `sha256: null` (present-and-null, never omitted)
 
 #### Scenario: Owned-but-empty version reads as an empty list, not 404
 
@@ -42,3 +40,28 @@ The slice MUST expose a presign action for `GET /api/v1/artifacts/{artifact_id}/
 
 - **WHEN** the presign action receives a `404` (`artifact_not_found`) or a `500` (`internal_error`)
 - **THEN** the failure MUST surface through the calling component's `onError` as a single user-facing error (one toast and/or a per-action indication), and MUST NOT be silently swallowed, AND MUST NOT fire a second toast from either the transport layer or `mutationCache.onError` (the action is `toastOnError:false` + `meta:{silent:true}`)
+
+### Requirement: Version Archive and Preview Mint Actions
+
+The `features/artifacts/` slice SHALL additionally expose two version-scoped on-demand actions, both modeled exactly like the artifact presign action (React Query mutations, never cached, silent at both toast layers with the calling component's `onError` as the single error surface):
+
+- An **archive presign** action for `GET /api/v1/versions/{version_id}/artifacts/archive/presign` parsed as `{ url: string; expires_at: string }`. Each invocation re-mints; callers hand the browser directly to the returned relative `url`.
+- A **preview mint** action for `GET /api/v1/versions/{version_id}/preview` parsed as `{ base_url: string; expires_at: string }`. `base_url` is an opaque relative prefix; callers compose file URLs as `base_url + "/" + <segment-encoded path>` and MUST NOT parse or rewrite the token segment.
+
+Errors (`version_not_found` `404`, `internal_error` `500`) follow the established single-error-surface posture.
+
+#### Scenario: Archive presign is an on-demand, non-cached action
+
+- **WHEN** a consumer invokes the archive presign action twice for the same version
+- **THEN** two requests MUST be issued (no cached URL reuse), each returning a fresh `{ url, expires_at }`
+
+#### Scenario: Preview mint returns an opaque base URL
+
+- **WHEN** a consumer invokes the preview mint action for a version
+- **THEN** the parsed result MUST be `{ base_url, expires_at }` returned to the caller without entering the React Query cache, and the caller composes per-file URLs by appending the encoded artifact `path`
+
+#### Scenario: Mint failures surface exactly one error
+
+- **WHEN** either action receives a `404` (`version_not_found`) or `500`
+- **THEN** the failure MUST surface only through the calling component's `onError` (transport `toastOnError:false` + mutation `meta:{silent:true}`), never double-toasted
+
