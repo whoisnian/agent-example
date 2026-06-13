@@ -685,6 +685,60 @@ async def test_malformed_file_content_raises_executor_output_error() -> None:
     assert ei.value.path == "styles.css"
 
 
+async def test_resume_reexecutes_deletion_idempotently_no_duplicate_event() -> None:
+    """Resume-safety (8.2): after a crash before the deletion step's checkpoint,
+    the redelivered run re-executes the step but finds the OSS object AND row
+    already gone (the delete happened pre-crash; inheritance is skipped on resume
+    because a checkpoint exists). The re-applied deletes are idempotent no-ops, no
+    duplicate artifact_deleted event is emitted, and the step event's seq
+    continues past the restored high-water (no (run_id, seq) collision)."""
+    cp, events = FakeCheckpointStore(), FakeEventPublisher()
+    ctx = _make_ctx(cp, events)
+    # Seed a plan checkpoint (step 0) whose single deletion step is NOT yet done,
+    # with event_seq high-water 1 — the state a pre-step-checkpoint crash leaves.
+    cp.seeded_latest = SimpleNamespace(
+        step_seq=0,
+        step_name="plan",
+        state={
+            "plan": [{"idx": 0, "title": "remove styles", "done": False}],
+            "step_count": 1,
+            "event_seq": 1,
+        },
+    )
+    # Resume consumes only the executor+critic for the step (no planner call).
+    model = scripted_model(
+        [
+            '{"summary": "removed styles", "files": [], "deletions": ["styles.css"]}',
+            '{"verdict": "finish"}',
+        ]
+    )
+
+    async def delete_file(ctx_in: Any, path: str) -> bool:
+        return False  # object already removed by the crashed attempt
+
+    async def delete_artifact(ctx_in: Any, path: str) -> bool:
+        return False  # row already removed by the crashed attempt
+
+    await run_agent_loop(
+        ctx,
+        _msg(),
+        model=model,
+        system_prompt="sys",
+        write_file=_noop_write,
+        max_step_retries=0,
+        delete_file=delete_file,
+        delete_artifact=delete_artifact,
+    )
+    # The deletion step re-ran (converging to absent) but emitted NO
+    # artifact_deleted — nothing was removed the second time — and its seq
+    # continues above the restored high-water (1), never colliding.
+    kinds = [e["kind"] for e in events.events]
+    assert kinds == ["step"]
+    assert "artifact_deleted" not in kinds
+    assert events.events[0]["seq"] == 2
+    assert ctx.step == 1
+
+
 # --- conversation-context injection (refactor-task-conversation-continuity) --
 
 

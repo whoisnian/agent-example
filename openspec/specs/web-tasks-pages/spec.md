@@ -369,7 +369,7 @@ The event log SHALL render the turn's events as **distinct blocks rather than on
 - **Process card** — every remaining recognized/unknown event (step / status / log / error / a malformed plan / unknown kinds), in sequence order, as de-emphasized rows: `step` as a progress row (verdict glyph for pass/finish vs retry + `title` + de-emphasized `summary`); `status` as a human-readable transition line; `log` as small monospace; `error` with destructive styling naming the code/message; anything else as a bounded compact payload preview (the only place a JSON-ish rendering may appear).
 - **Summary card** — the last non-empty `summary` event's text, rendered as paragraph prose and visually distinct from the muted plan/process cards (it is the turn's "answer"). An empty summary renders nothing.
 
-`artifact` events MUST NOT be rendered in the log at all — produced files surface only via the per-turn aggregate products card (and only once the version is terminal). `title` and any other non-conversational kind MUST also render nothing (the task title lives in the header; cost flows on a separate exchange and never reaches this event stream). **Never raw JSON for a recognized kind.** A recognized kind whose payload is missing expected fields MUST degrade to the compact fallback row, never throw.
+`artifact` AND `artifact_deleted` events MUST NOT be rendered in the log at all — file lifecycle (a produced file and its later removal) surfaces only via the per-turn aggregate products card (and only once the version is terminal, where the card reflects the current persisted artifact set with deleted files already absent). `title` and any other non-conversational kind MUST also render nothing (the task title lives in the header; cost flows on a separate exchange and never reaches this event stream). **Never raw JSON for a recognized kind.** A recognized kind whose payload is missing expected fields MUST degrade to the compact fallback row, never throw.
 
 #### Scenario: Plan, process, and summary render as separate blocks
 
@@ -390,6 +390,11 @@ The event log SHALL render the turn's events as **distinct blocks rather than on
 
 - **WHEN** the events include an `artifact` event with `path = "index.html"`
 - **THEN** the log MUST NOT render any row or file line for it (products appear only in the aggregate card)
+
+#### Scenario: Artifact-deleted events are not rendered in the log
+
+- **WHEN** the events include an `artifact_deleted` event with `payload = {path: "styles.css", version_id}`
+- **THEN** the log MUST NOT render any row, file line, or compact JSON-fallback preview for it (it is hidden exactly like `artifact`); the deleted file's absence surfaces only through the terminal products card's refetched artifact set
 
 #### Scenario: Non-conversational kinds are hidden
 

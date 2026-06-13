@@ -435,9 +435,7 @@ async def test_executor_output_invalid_dispatch_round_trip(
 
         # Terminal run record carries the same typed code (not internal).
         async with pg_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT status, error FROM task_runs WHERE id = $1", run_id
-            )
+            row = await conn.fetchrow("SELECT status, error FROM task_runs WHERE id = $1", run_id)
         assert row is not None and row["status"] == "failed"
         err = row["error"]
         if isinstance(err, str):

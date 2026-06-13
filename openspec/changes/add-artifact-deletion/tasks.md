@@ -47,7 +47,7 @@
 ## 8. Integration & docs
 
 - [x] 8.1 Worker integration test: a fresh run that inherits `styles.css` + `index.html` and whose executor declares `deletions: ["styles.css"]` ends with the `styles.css` object and `(version_id, path)` row gone, an `artifact_deleted` event emitted, `index.html` intact, and the parent version's `styles.css` untouched.
-- [ ] 8.2 Resume test: crash before the deletion step's checkpoint, redeliver, and assert convergence (object + row absent, no `(run_id, seq)` collision).
+- [x] 8.2 Resume test: crash before the deletion step's checkpoint, redeliver, and assert convergence (object + row absent, no `(run_id, seq)` collision). (`test_resume_reexecutes_deletion_idempotently_no_duplicate_event`.)
 - [x] 8.2b Ordering test: a single step whose `files` and `deletions` both name `x` ends with `x` absent (write applied first, delete second).
 - [x] 8.3 Update `docs/ARCHITECTURE.md` artifact/iteration section to note deletion semantics (version-scoped hard delete; parent preserved) if it currently implies write-only artifacts.
-- [ ] 8.4 Manual verification: on an existing version, submit "删除 styles.css" and confirm the run succeeds, the terminal-time products card no longer lists `styles.css`, and no `internal` failure is recorded.
+- [x] 8.4 Manual verification: on an existing version, submit "删除 styles.css" and confirm the run succeeds, the terminal-time products card no longer lists `styles.css`, and no `internal` failure is recorded. (User-confirmed manual test passed.)
