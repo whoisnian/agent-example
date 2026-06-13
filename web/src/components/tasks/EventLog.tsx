@@ -44,12 +44,17 @@ function PlanCard({ steps }: { steps: unknown[] }): JSX.Element {
   return (
     <div data-testid="event-plan" className="rounded-lg bg-muted px-3 py-2 text-sm text-foreground">
       <span className="text-xs font-medium text-muted-foreground">Plan</span>
-      {/* pl-5 (padding, not margin) so the `outside` decimal markers render
-          inside the card instead of being clipped at the left edge. */}
-      <ol className="mt-1 list-decimal space-y-0.5 pl-5">
+      {/* Render the ordinal in a fixed column (not a CSS list marker): a real
+          `list-decimal` marker is positioned `outside` and detaches far to the
+          left of CJK text. A flex row keeps "N." tight to its text and wraps
+          long lines under the text (hanging indent). */}
+      <ol className="mt-1 flex flex-col gap-0.5">
         {steps.map((s, i) => (
-          <li key={i} className="break-words">
-            {typeof s === "string" ? s : String(isRecord(s) ? (s["title"] ?? "") : s)}
+          <li key={i} className="flex gap-2">
+            <span className="shrink-0 tabular-nums text-muted-foreground">{i + 1}.</span>
+            <span className="min-w-0 break-words">
+              {typeof s === "string" ? s : String(isRecord(s) ? (s["title"] ?? "") : s)}
+            </span>
           </li>
         ))}
       </ol>
