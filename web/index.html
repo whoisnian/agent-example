@@ -9,9 +9,33 @@
          cross-origin OSS text fetch (ws:/wss: stay for the realtime client). -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+      content="default-src 'self'; script-src 'self' 'sha256-THEME_BOOT_HASH'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; frame-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     />
     <title>Agent Task Platform</title>
+    <!--
+      FOUC-safe theme boot. Runs before first paint to set `.dark` on <html> from
+      the persisted preference (or `system` → prefers-color-scheme). MUST stay in
+      sync with src/features/theme/store.ts on key + values + resolution rule.
+      Under the strict `script-src 'self'` CSP this inline script is allow-listed
+      by the 'sha256-…' above; the hash is injected from the EMITTED bytes by the
+      theme-csp-hash Vite plugin (vite.config.ts), so it can never drift.
+    -->
+    <script>
+      (function () {
+        try {
+          var p = localStorage.getItem("theme");
+          if (p !== "light" && p !== "dark" && p !== "system") p = "system";
+          var dark =
+            p === "dark" ||
+            (p === "system" &&
+              typeof window.matchMedia === "function" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.classList.toggle("dark", dark);
+        } catch (e) {
+          /* storage/matchMedia unavailable → leave default (light) */
+        }
+      })();
+    </script>
   </head>
   <body class="bg-background text-foreground">
     <div id="root"></div>

@@ -11,6 +11,7 @@ import { RequireAuth } from "@/routes/require-auth";
 import { RootLayout } from "@/routes/root-layout";
 import { useAuthStore } from "@/features/auth/store";
 import { useUiStore } from "@/features/ui/store";
+import { useThemeStore } from "@/features/theme/store";
 import { SideNav } from "@/components/layout/SideNav";
 
 const USER = { id: "u1", tenant_id: "t1", email: "dev@example.com" } as const;
@@ -59,8 +60,10 @@ function GatedTree({ initial }: { initial: string }): JSX.Element {
 describe("SideNav (left navigation column)", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    document.documentElement.classList.remove("dark");
     useAuthStore.setState({ token: null, user: null });
     useUiStore.setState({ toasts: [] });
+    useThemeStore.setState({ theme: "system", resolved: "light" });
   });
 
   it("shows the logged-in user's email", () => {
@@ -178,6 +181,46 @@ describe("SideNav (left navigation column)", () => {
     renderNav("/", { retry: false });
     expect(await screen.findByTestId("recent-tasks-error")).toBeInTheDocument();
     expect(useUiStore.getState().toasts).toHaveLength(0);
+  });
+
+  it("user-area menu hosts the three theme options", async () => {
+    useAuthStore.setState({ token: "t", user: USER });
+    renderNav();
+
+    await userEvent.click(screen.getByTestId("user-area"));
+
+    expect(await screen.findByTestId("theme-option-light")).toBeInTheDocument();
+    expect(screen.getByTestId("theme-option-dark")).toBeInTheDocument();
+    expect(screen.getByTestId("theme-option-system")).toBeInTheDocument();
+  });
+
+  it("selecting a theme persists the preference and keeps the menu open", async () => {
+    useAuthStore.setState({ token: "t", user: USER });
+    renderNav();
+
+    await userEvent.click(screen.getByTestId("user-area"));
+    await userEvent.click(await screen.findByTestId("theme-option-dark"));
+
+    expect(useThemeStore.getState().theme).toBe("dark");
+    expect(window.localStorage.getItem("theme")).toBe("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    // onSelect preventDefault keeps the menu open so options can be tried.
+    expect(screen.getByTestId("theme-option-light")).toBeInTheDocument();
+  });
+
+  it("marks the stored preference (system) as selected, not the resolved theme", async () => {
+    useAuthStore.setState({ token: "t", user: USER });
+    // system preference resolving to dark must still check `system`, not `dark`.
+    useThemeStore.setState({ theme: "system", resolved: "dark" });
+    renderNav();
+
+    await userEvent.click(screen.getByTestId("user-area"));
+
+    expect(await screen.findByTestId("theme-option-system")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(screen.getByTestId("theme-option-dark")).toHaveAttribute("aria-checked", "false");
   });
 
   it("logout (in the menu) clears the session and gating routes /tasks → /login", async () => {

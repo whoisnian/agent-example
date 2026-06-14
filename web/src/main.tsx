@@ -11,6 +11,7 @@ import { createQueryClient } from "@/services/query-client";
 import { setNavigator } from "@/services/http";
 import { setRealtimeNavigator } from "@/services/ws";
 import { installRealtimeGapFill } from "@/features/tasks/use-task-live";
+import { initThemeSystemSync } from "@/features/theme/store";
 
 import "@/styles/globals.css";
 
@@ -29,6 +30,10 @@ setRealtimeNavigator(navigate);
 // the React Query cache); avoids a per-page setRealtimeOnGap that remounts
 // would clobber.
 installRealtimeGapFill(queryClient);
+
+// Follow OS color-scheme changes while the theme preference is `system`. The
+// FOUC-safe boot script in index.html already applied the initial class.
+initThemeSystemSync();
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {

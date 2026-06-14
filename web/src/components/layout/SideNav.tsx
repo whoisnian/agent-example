@@ -2,12 +2,16 @@ import type { JSX } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Bot,
+  Check,
   ChevronsUpDown,
   DollarSign,
   ListTodo,
   LogOut,
+  Monitor,
+  Moon,
   Plus,
   Settings,
+  Sun,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -21,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { RecentTasks } from "@/components/layout/RecentTasks";
 import { useAuthStore } from "@/features/auth/store";
+import { useThemeStore, type ThemePreference } from "@/features/theme/store";
 
 interface MenuItem {
   to: string;
@@ -34,6 +39,12 @@ const menuItems: readonly MenuItem[] = [
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
+const themeOptions: readonly { value: ThemePreference; label: string; icon: LucideIcon }[] = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
+] as const;
+
 /**
  * Left navigation column of the three-column shell, fixed width (the collapse
  * toggle is retired). Top to bottom: brand row, the "New task" primary action,
@@ -45,6 +56,8 @@ export function SideNav(): JSX.Element {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
 
   const onLogout = (): void => {
     logout();
@@ -111,12 +124,7 @@ export function SideNav(): JSX.Element {
             <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent
-          side="top"
-          align="start"
-          className="w-52"
-          data-testid="user-menu"
-        >
+        <DropdownMenuContent side="top" align="start" className="w-52" data-testid="user-menu">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const active = location.pathname.startsWith(item.to);
@@ -129,6 +137,30 @@ export function SideNav(): JSX.Element {
               >
                 <Icon aria-hidden />
                 <span>{item.label}</span>
+              </DropdownMenuItem>
+            );
+          })}
+          <DropdownMenuSeparator />
+          {/* Theme switch. `onSelect` preventDefault keeps the menu open so the
+              user can try options; the check marks the stored PREFERENCE (so
+              `system` reads selected even when it resolves to dark). */}
+          {themeOptions.map((opt) => {
+            const Icon = opt.icon;
+            const active = theme === opt.value;
+            return (
+              <DropdownMenuItem
+                key={opt.value}
+                data-testid={`theme-option-${opt.value}`}
+                aria-checked={active}
+                className={cn(active && "bg-accent text-accent-foreground")}
+                onSelect={(e) => {
+                  e.preventDefault();
+                  setTheme(opt.value);
+                }}
+              >
+                <Icon aria-hidden />
+                <span className="flex-1">{opt.label}</span>
+                {active ? <Check className="size-4" aria-hidden /> : null}
               </DropdownMenuItem>
             );
           })}

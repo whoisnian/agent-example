@@ -18,6 +18,20 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 if (typeof window !== "undefined" && !window.HTMLElement.prototype.scrollIntoView) {
   window.HTMLElement.prototype.scrollIntoView = () => {};
 }
+// jsdom has no matchMedia; the theme store + DropdownMenu-bearing components
+// touch it. Minimal stub (no-op listeners, defaults to light / not-dark).
+if (typeof window !== "undefined" && typeof window.matchMedia !== "function") {
+  window.matchMedia = ((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
 
 beforeAll(() => {
   server.listen({ onUnhandledRequest: "error" });
