@@ -9,7 +9,7 @@
 ## 1. 项目语境（Context）
 
 - **目标**：构建一个 LLM Agent 任务平台 MVP：用户提交任务 → 后端编排 → Worker（deepagents）执行 → 迭代/回滚 + 成本统计。
-- **当前阶段**：**MVP 设计完成，代码尚未实现**。仓库中只有架构文档与 OpenSpec 框架；任何模块的首次实现都应先通过 OpenSpec 提案。
+- **当前阶段**：**MVP 核心链路已实现**（web / api / worker 三端可端到端跑通）。后续的功能新增或公共契约变更仍应先通过 OpenSpec 提案；已落地的变更归档在 `openspec/changes/archive/`，沉淀规格在 `openspec/specs/`。
 - **唯一架构事实来源**：[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。任何与该文档冲突的实现必须先更新文档或在 OpenSpec 提案中显式声明偏离原因。
 - **历史背景**：[`docs/HISTORY.md`](docs/HISTORY.md) 记录每轮迭代的用户原始诉求，可用于回溯"为什么做成这样"。
 
