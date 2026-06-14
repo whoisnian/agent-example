@@ -19,7 +19,7 @@
 - `web-theme-switching`: 主题偏好的存取与持久化、`<html>.dark` 的应用、跟随系统、首帧前 FOUC-safe 启动（CSP 兼容）、SideNav 切换 UI。
 
 ### Modified Capabilities
-- `web-design-system`: **MODIFY** `CSS-Variable Theme Tokens` 仅两处——(1) `:root`/`.dark` 约定翻转到 shadcn 标准（`:root`=light、`.dark`=dark，把 B 的 authored-inactive `.light` 值提升进 `:root`）；(2) "Default theme resolves without a class toggle" 场景改写为"偏好驱动 + FOUC-safe boot"。这是默认主题行为翻转的**唯一落点**（A 定义该场景、B 不碰、C 改），避免三方争用同一 spec 块。结构/格式/token 列表沿用 A。
+- `web-design-system`: **MODIFY** `CSS-Variable Theme Tokens` 仅一处——把 "Default theme resolves without a class toggle" 场景改写为"偏好驱动 + FOUC-safe boot"。`:root`=light/`.dark`=dark 的标准约定已由 B（用户决定默认浅色）建立，故 C **无值搬移/无约定翻转**，只接机制。默认主题行为改写仍由 C 这一个 change 承担（A 定义、B 不碰、C 改）。结构/格式/token 列表沿用 A。
 
 ## Impact
 

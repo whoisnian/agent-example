@@ -12,10 +12,10 @@
 - [ ] 2.3 hash 一致性校验跑在 `npm run build` 验收：对比 `dist/index.html` 实际脚本 hash 与 CSP 声明，不一致即失败（防 dev-正常/生产-被拦的 footgun）
 - [ ] 2.4 确认 boot 与 store 用同一 key/规则；store 初始化不重复翻转已设 class（防二次闪烁）
 
-## 3. `:root`/`.dark` 约定翻转（D5）
+## 3. 主题约定确认（D5 — B 已标准化，C 无值搬移）
 
-- [ ] 3.1 把 B authored-inactive 的 `.light` 值搬进 `:root`（light），dark 值搬进 `.dark`（标准 shadcn 约定）；`<html>` 按偏好挂/去 `.dark`
-- [ ] 3.2 确认翻转后默认渲染正确：`.dark` 缺省时 `:root`(light) 生效、存在时 `.dark` 生效
+- [ ] 3.1 确认 B 已建立标准约定（`:root`=light / `.dark`=dark）；C 不动 token 值，只让 boot/store 按偏好挂/摘 `.dark`
+- [ ] 3.2 确认默认渲染：`.dark` 缺省时 `:root`(light) 生效、存在时 `.dark` 生效
 
 ## 4. 切换 UI
 
