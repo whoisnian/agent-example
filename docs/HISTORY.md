@@ -192,7 +192,7 @@ web 前端界面依旧需要优化：
 
 ### 前端优化
 ```md
-否使用 https://github.com/vercel/ai-elements 重构完整前端界面
+能否使用 https://github.com/vercel/ai-elements 重构完整前端界面
 如果 tailwind 升级到 v4 会有哪些问题
 先不考虑接入 ai-elements，当前目标是现代化整套设计系统
 新起一个 subagent 来依次 review 三个提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
@@ -200,4 +200,13 @@ web 前端界面依旧需要优化：
 1. 2026-06-14-migrate-design-system-base
 2. 2026-06-14-redesign-neutral-minimal
 3. 2026-06-14-add-dual-theme-toggle
+```
+
+### 2026-06-14-add-artifact-deletion
+```md
+增加任务逻辑删除功能及对应的前端按钮
+
+/opsx:apply
+/opsx:archive
+所有改动已合并至 master，准备对外公开。请检查并更新仓库内所有说明文档，并复制 ~/Pictures/screenshot_20260614_light.webp 和 ~/Pictures/screenshot_20260614_dark.webp 到仓库内作为 README.md 中的效果截图。
 ```
