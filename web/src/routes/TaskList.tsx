@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/tasks/StatusBadge";
 import { CostBadge } from "@/components/tasks/CostBadge";
+import { DeleteTaskButton } from "@/components/tasks/DeleteTaskButton";
 import { useTasksQuery } from "@/features/tasks/queries";
 import { TASK_STATUSES } from "@/features/tasks/types";
 
@@ -66,6 +67,7 @@ export function TaskList(): JSX.Element {
               <th className="py-2">Type</th>
               <th className="py-2">Status</th>
               <th className="py-2">Cost</th>
+              <th className="py-2 sr-only">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -83,6 +85,10 @@ export function TaskList(): JSX.Element {
                 </td>
                 <td className="py-2">
                   <CostBadge cost={t.cost} />
+                </td>
+                {/* Stop row-navigation when interacting with the delete control. */}
+                <td className="py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                  <DeleteTaskButton taskId={t.id} taskTitle={t.title} status={t.status} />
                 </td>
               </tr>
             ))}

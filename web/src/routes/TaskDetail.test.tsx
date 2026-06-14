@@ -518,4 +518,33 @@ describe("TaskDetail", () => {
     expect(screen.getByTestId("control-pause")).toBeDisabled();
     expect(screen.getByTestId("control-resume")).toBeDisabled();
   });
+
+  it("deleting from the header navigates back to the task list", async () => {
+    server.use(
+      http.delete("http://localhost/api/v1/tasks/:id", () =>
+        HttpResponse.json({
+          code: 0,
+          message: "ok",
+          data: { deleted: true, task_id: "task-1" },
+          trace_id: "t",
+        }),
+      ),
+    );
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={["/tasks/task-1"]}>
+          <Routes>
+            <Route path="/tasks/:id" element={<TaskDetail />} />
+            <Route path="/tasks" element={<div data-testid="task-list-stub" />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await screen.findByTestId("task-detail-page");
+
+    await userEvent.click(screen.getByTestId("task-delete"));
+    await userEvent.click(await screen.findByTestId("task-delete-confirm"));
+
+    expect(await screen.findByTestId("task-list-stub")).toBeInTheDocument();
+  });
 });

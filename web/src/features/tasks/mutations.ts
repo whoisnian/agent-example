@@ -2,13 +2,14 @@
  *  (`meta.silent`) so the page handles invalid_input / 409 inline. */
 import { useMutation, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { ApiError } from "@/services/http";
-import { controlTask, createTask, iterateTask, rollbackTask } from "./api";
+import { controlTask, createTask, deleteTask, iterateTask, rollbackTask } from "./api";
 import { taskKeys } from "./queries";
 import type {
   ControlRequest,
   ControlResponse,
   CreateTaskRequest,
   CreateTaskResponse,
+  DeleteTaskResponse,
   IterateTaskRequest,
   IterateTaskResponse,
   RollbackBranchResponse,
@@ -105,6 +106,20 @@ export function useControlTaskMutation(): UseMutationResult<
       void qc.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
       void qc.invalidateQueries({ queryKey: taskKeys.versions(taskId) });
       void qc.invalidateQueries({ queryKey: taskKeys.lists });
+    },
+  });
+}
+
+export function useDeleteTaskMutation(): UseMutationResult<DeleteTaskResponse, ApiError, string> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => deleteTask(taskId),
+    // Silent so the page owns delete UX (confirm / 409 active / 404 no-op).
+    meta: { silent: true },
+    onSuccess: (_data, taskId) => {
+      // Refresh TaskList + SideNav Recents; drop the now-deleted task's detail.
+      void qc.invalidateQueries({ queryKey: taskKeys.lists });
+      void qc.invalidateQueries({ queryKey: taskKeys.detail(taskId) });
     },
   });
 }

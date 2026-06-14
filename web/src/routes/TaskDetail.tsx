@@ -1,11 +1,12 @@
 import type { JSX, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/tasks/StatusBadge";
 import { CostBadge } from "@/components/tasks/CostBadge";
 import { ControlBar } from "@/components/tasks/ControlBar";
+import { DeleteTaskButton } from "@/components/tasks/DeleteTaskButton";
 import { ConversationTurn } from "@/components/tasks/ConversationTurn";
 import { EventLog } from "@/components/tasks/EventLog";
 import { TokenBar } from "@/components/costs/TokenBar";
@@ -20,22 +21,15 @@ import {
 } from "@/features/tasks/mutations";
 import {
   isActiveStatus,
-  type ActiveVersionConflict,
+  isConflictData,
   type ControlAction,
   type RollbackMode,
 } from "@/features/tasks/types";
 import { useTaskLive, liveRefetchInterval } from "@/features/tasks/use-task-live";
 
-function isConflictData(x: unknown): x is ActiveVersionConflict {
-  return (
-    typeof x === "object" &&
-    x !== null &&
-    typeof (x as Record<string, unknown>)["active_version_id"] === "string"
-  );
-}
-
 export function TaskDetail(): JSX.Element {
   const { id = "" } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const pushToast = useUiStore((s) => s.pushToast);
   const setSelectedVersionId = useUiStore((s) => s.setSelectedVersionId);
@@ -232,6 +226,15 @@ export function TaskDetail(): JSX.Element {
           <span className="text-sm text-muted-foreground">{loadedTask.task_type}</span>
           <CostBadge cost={detail.cost} />
           <ControlBar status={loadedTask.status} pending={control.isPending} onAction={onControl} />
+          <div className="ml-auto">
+            <DeleteTaskButton
+              taskId={id}
+              taskTitle={loadedTask.title}
+              status={loadedTask.status}
+              onDeleted={() => navigate("/tasks")}
+              withLabel
+            />
+          </div>
         </div>
         <div data-testid="task-cost-panel">
           {costQuery.data ? (

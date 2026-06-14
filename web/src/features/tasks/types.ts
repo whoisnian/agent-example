@@ -214,6 +214,22 @@ export interface ActiveVersionConflict {
   active_version_status: string;
 }
 
+/** Type guard for an `active_version_exists` error's `data` block. Shared by
+ *  the iterate/rollback (TaskDetail) and delete (TaskList/TaskDetail) paths. */
+export function isConflictData(x: unknown): x is ActiveVersionConflict {
+  return (
+    typeof x === "object" &&
+    x !== null &&
+    typeof (x as Record<string, unknown>)["active_version_id"] === "string"
+  );
+}
+
+/** 200 body of `DELETE /tasks/{id}` (add-task-deletion). */
+export interface DeleteTaskResponse {
+  deleted: boolean;
+  task_id: string;
+}
+
 /** `data` of a 400 `invalid_input` error (single field; `field:"body"` for
  *  malformed JSON). */
 export interface InvalidInputData {

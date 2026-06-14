@@ -5,6 +5,7 @@ import type {
   ControlResponse,
   CreateTaskRequest,
   CreateTaskResponse,
+  DeleteTaskResponse,
   EventPage,
   IterateTaskRequest,
   IterateTaskResponse,
@@ -108,6 +109,15 @@ export function controlTask(taskId: string, body: ControlRequest): Promise<Contr
     method: "POST",
     body: JSON.stringify(body),
     // 409 invalid_state / best_effort are surfaced in-page; suppress the
+    // transport toast (the mutation also sets meta.silent for the cache layer).
+    toastOnError: false,
+  });
+}
+
+export function deleteTask(taskId: string): Promise<DeleteTaskResponse> {
+  return apiFetch<DeleteTaskResponse>(`/api/v1/tasks/${taskId}`, {
+    method: "DELETE",
+    // 409 active_version_exists / 404 are surfaced in-page; suppress the
     // transport toast (the mutation also sets meta.silent for the cache layer).
     toastOnError: false,
   });
