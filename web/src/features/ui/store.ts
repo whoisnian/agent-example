@@ -49,8 +49,7 @@ export const useUiStore = create<UiState>()((set) => ({
     set((s) => ({ toasts: [...s.toasts, { ...t, id }] }));
     return id;
   },
-  dismissToast: (id) =>
-    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   clearToasts: () => set({ toasts: [] }),
 
   previewCollapsed: false,

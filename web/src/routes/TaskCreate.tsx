@@ -64,7 +64,11 @@ export function TaskCreate(): JSX.Element {
     mutation.mutate(body, {
       onSuccess: (data) => navigate(`/tasks/${data.task_id}`),
       onError: (err) => {
-        if (err instanceof ApiError && err.code === "invalid_input" && isInvalidInputData(err.data)) {
+        if (
+          err instanceof ApiError &&
+          err.code === "invalid_input" &&
+          isInvalidInputData(err.data)
+        ) {
           // Fields without an input of their own (e.g. "body") render form-level.
           const known = new Set(["prompt", "task_type", "params", "lane"]);
           const key = known.has(err.data.field) ? err.data.field : "";
@@ -120,7 +124,11 @@ export function TaskCreate(): JSX.Element {
           />
           <div className="flex items-center gap-2">
             {/* Task-type chips */}
-            <div className="flex flex-1 items-center gap-2" role="radiogroup" aria-label="Task type">
+            <div
+              className="flex flex-1 items-center gap-2"
+              role="radiogroup"
+              aria-label="Task type"
+            >
               {TASK_TYPES.map((t) => (
                 <button
                   key={t}
@@ -165,9 +173,7 @@ export function TaskCreate(): JSX.Element {
             </Button>
           </div>
         </div>
-        {err("prompt") ? (
-          <span className="text-xs text-destructive">{err("prompt")}</span>
-        ) : null}
+        {err("prompt") ? <span className="text-xs text-destructive">{err("prompt")}</span> : null}
         {err("task_type") ? (
           <span className="text-xs text-destructive">{err("task_type")}</span>
         ) : null}
@@ -200,9 +206,7 @@ export function TaskCreate(): JSX.Element {
                 value={lane}
                 onChange={(e) => setLane(e.target.value)}
               />
-              {err("lane") ? (
-                <span className="text-xs text-destructive">{err("lane")}</span>
-              ) : null}
+              {err("lane") ? <span className="text-xs text-destructive">{err("lane")}</span> : null}
             </div>
           </div>
         ) : null}

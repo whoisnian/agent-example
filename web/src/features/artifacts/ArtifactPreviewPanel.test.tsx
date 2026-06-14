@@ -7,10 +7,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { createQueryClient } from "@/services/query-client";
 import { server } from "@/test/mocks/server";
 import { useUiStore } from "@/features/ui/store";
-import {
-  ArtifactPreviewPanel,
-  TEXT_PREVIEW_CAP_BYTES,
-} from "./ArtifactPreviewPanel";
+import { ArtifactPreviewPanel, TEXT_PREVIEW_CAP_BYTES } from "./ArtifactPreviewPanel";
 
 function wrap(): JSX.Element {
   return (
@@ -52,7 +49,7 @@ afterEach(() => {
     configurable: true,
     value: realLocation,
   });
-   
+
   delete (navigator as any).clipboard;
   useUiStore.setState({
     toasts: [],
@@ -142,7 +139,9 @@ describe("ArtifactPreviewPanel", () => {
   it("copies the fully loaded text and confirms", async () => {
     const writeText = stubClipboard();
     server.use(
-      http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text("copy me")),
+      http.get("http://localhost/api/v1/artifacts/:id/download", () =>
+        HttpResponse.text("copy me"),
+      ),
     );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
@@ -157,7 +156,9 @@ describe("ArtifactPreviewPanel", () => {
     expect(writeText).toHaveBeenCalledWith("copy me");
     await waitFor(() =>
       expect(
-        useUiStore.getState().toasts.some((t) => t.level === "success" && /copied/i.test(t.message)),
+        useUiStore
+          .getState()
+          .toasts.some((t) => t.level === "success" && /copied/i.test(t.message)),
       ).toBe(true),
     );
   });
@@ -165,7 +166,9 @@ describe("ArtifactPreviewPanel", () => {
   it("refuses to copy truncated content (disabled with a reason)", async () => {
     stubClipboard();
     const big = "x".repeat(TEXT_PREVIEW_CAP_BYTES + 100);
-    server.use(http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text(big)));
+    server.use(
+      http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.text(big)),
+    );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
     await userEvent.click(
@@ -298,10 +301,7 @@ describe("ArtifactPreviewPanel", () => {
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
     const rows = within(list).getAllByTestId("artifact-row");
-    expect(rows.map((r) => r.getAttribute("data-artifact-id"))).toEqual([
-      "art-1",
-      "art-2",
-    ]);
+    expect(rows.map((r) => r.getAttribute("data-artifact-id"))).toEqual(["art-1", "art-2"]);
   });
 
   it("renders an empty state for an owned-but-empty version", async () => {
@@ -363,9 +363,9 @@ describe("ArtifactPreviewPanel", () => {
     );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
-    const download = within(
-      within(list).getAllByTestId("artifact-row")[0]!,
-    ).getByTestId("artifact-download");
+    const download = within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId(
+      "artifact-download",
+    );
 
     await userEvent.click(download);
     await waitFor(() => expect(useUiStore.getState().toasts).toHaveLength(1));
@@ -381,9 +381,9 @@ describe("ArtifactPreviewPanel", () => {
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
     // art-1 is text/markdown → text-like preview.
-    const selectBtn = within(
-      within(list).getAllByTestId("artifact-row")[0]!,
-    ).getByTestId("artifact-select");
+    const selectBtn = within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId(
+      "artifact-select",
+    );
     await userEvent.click(selectBtn);
 
     const body = await screen.findByTestId("artifact-preview-text");
@@ -399,31 +399,21 @@ describe("ArtifactPreviewPanel", () => {
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
     await userEvent.click(
-      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId(
-        "artifact-select",
-      ),
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
     );
-    expect(
-      await screen.findByTestId("artifact-preview-truncated"),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("artifact-preview-truncated")).toBeInTheDocument();
   });
 
   it("degrades to a single inline error when the text fetch fails (network)", async () => {
     server.use(
-      http.get("http://localhost/api/v1/artifacts/:id/download", () =>
-        HttpResponse.error(),
-      ),
+      http.get("http://localhost/api/v1/artifacts/:id/download", () => HttpResponse.error()),
     );
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
     await userEvent.click(
-      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId(
-        "artifact-select",
-      ),
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
     );
-    expect(
-      await screen.findByTestId("artifact-preview-error"),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("artifact-preview-error")).toBeInTheDocument();
     // The degrade path is inline only — no toast.
     expect(useUiStore.getState().toasts).toHaveLength(0);
   });
@@ -433,13 +423,9 @@ describe("ArtifactPreviewPanel", () => {
     const list = await screen.findByTestId("artifact-list");
     // art-2 has mime:null → binary branch, no inline preview, no presign needed.
     await userEvent.click(
-      within(within(list).getAllByTestId("artifact-row")[1]!).getByTestId(
-        "artifact-select",
-      ),
+      within(within(list).getAllByTestId("artifact-row")[1]!).getByTestId("artifact-select"),
     );
-    expect(
-      await screen.findByTestId("artifact-preview-binary"),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("artifact-preview-binary")).toBeInTheDocument();
   });
 
   it("previews an image artifact via <img> from a presigned URL", async () => {
@@ -482,9 +468,7 @@ describe("ArtifactPreviewPanel", () => {
     render(wrap());
     const list = await screen.findByTestId("artifact-list");
     await userEvent.click(
-      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId(
-        "artifact-select",
-      ),
+      within(within(list).getAllByTestId("artifact-row")[0]!).getByTestId("artifact-select"),
     );
     const imgWrap = await screen.findByTestId("artifact-preview-image");
     const img = within(imgWrap).getByRole("img");
@@ -539,8 +523,24 @@ describe("ArtifactPreviewPanel", () => {
           data: {
             version_id: String(params["id"]),
             artifacts: [
-              { id: "a1", kind: "file", path: "css/style.css", mime: "text/css", bytes: 10, sha256: null, created_at: "2026-05-26T00:00:00Z" },
-              { id: "a2", kind: "report", path: null, mime: null, bytes: null, sha256: null, created_at: "2026-05-26T00:00:00Z" },
+              {
+                id: "a1",
+                kind: "file",
+                path: "css/style.css",
+                mime: "text/css",
+                bytes: 10,
+                sha256: null,
+                created_at: "2026-05-26T00:00:00Z",
+              },
+              {
+                id: "a2",
+                kind: "report",
+                path: null,
+                mime: null,
+                bytes: null,
+                sha256: null,
+                created_at: "2026-05-26T00:00:00Z",
+              },
             ],
           },
           trace_id: "t",

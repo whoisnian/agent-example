@@ -220,9 +220,7 @@ export function TaskDetail(): JSX.Element {
 
   const versions = versionsQuery.data?.items ?? null;
   const byId = new Map((versions ?? []).map((v) => [v.id, v]));
-  const busyReason = isActive
-    ? "Task is busy — wait for the active version to finish"
-    : undefined;
+  const busyReason = isActive ? "Task is busy — wait for the active version to finish" : undefined;
 
   return (
     <section data-testid="task-detail-page" className="flex h-full min-h-0 flex-col">

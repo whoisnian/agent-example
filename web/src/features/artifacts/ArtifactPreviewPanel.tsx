@@ -200,8 +200,7 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
       onSuccess: ({ url }) => window.location.assign(url),
       // The mutation + transport are both silent, so this is the SINGLE error
       // surface (exactly one toast), never a double-toast.
-      onError: (err) =>
-        pushToast({ level: "error", message: `Download failed: ${err.message}` }),
+      onError: (err) => pushToast({ level: "error", message: `Download failed: ${err.message}` }),
     });
   };
 
@@ -305,9 +304,7 @@ function VersionArtifacts({ versionId }: { versionId: string }): JSX.Element {
               <div
                 className={cn(
                   "flex items-stretch gap-2 rounded-md pr-2 text-xs",
-                  a.id === selected?.id
-                    ? "bg-accent text-accent-foreground"
-                    : "hover:bg-accent/50",
+                  a.id === selected?.id ? "bg-accent text-accent-foreground" : "hover:bg-accent/50",
                 )}
               >
                 {/* Padding lives on the button so the selection hit area

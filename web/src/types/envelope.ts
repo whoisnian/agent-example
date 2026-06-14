@@ -29,12 +29,7 @@ export type RealtimeClientFrame =
   | { op: "unsubscribe"; topics: string[] }
   | { op: "ping" };
 
-export type ConnectionState =
-  | "idle"
-  | "connecting"
-  | "open"
-  | "reconnecting"
-  | "closed";
+export type ConnectionState = "idle" | "connecting" | "open" | "reconnecting" | "closed";
 
 /**
  * The known synthetic error codes emitted by `apiFetch` itself. The union is

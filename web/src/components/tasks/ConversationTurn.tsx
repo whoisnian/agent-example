@@ -3,13 +3,14 @@ import { FileArchive, FileText } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useUiStore } from "@/features/ui/store";
-import { useVersionQuery, useVersionEventsQuery, EVENTS_PAGE_LIMIT } from "@/features/tasks/queries";
+import {
+  useVersionQuery,
+  useVersionEventsQuery,
+  EVENTS_PAGE_LIMIT,
+} from "@/features/tasks/queries";
 import { isActiveStatus, type RollbackMode, type VersionNode } from "@/features/tasks/types";
 import { formatBytes } from "@/features/artifacts/format";
-import {
-  useArchivePresignMutation,
-  useVersionArtifactsQuery,
-} from "@/features/artifacts/queries";
+import { useArchivePresignMutation, useVersionArtifactsQuery } from "@/features/artifacts/queries";
 import type { ArtifactMeta } from "@/features/artifacts/types";
 import { StatusBadge } from "./StatusBadge";
 import { CostBadge } from "./CostBadge";
@@ -142,10 +143,7 @@ function HistoricalExecution({ versionId }: { versionId: string }): JSX.Element 
   }
   if (!events.data) {
     return (
-      <p
-        data-testid="execution-events-error"
-        className="self-start text-xs text-muted-foreground"
-      >
+      <p data-testid="execution-events-error" className="self-start text-xs text-muted-foreground">
         Execution log unavailable.
       </p>
     );
@@ -190,8 +188,7 @@ function TurnArtifacts({ version }: { version: VersionNode }): JSX.Element | nul
   const onDownloadZip = (): void => {
     archive.mutate(versionId, {
       onSuccess: ({ url }) => window.location.assign(url),
-      onError: (err) =>
-        pushToast({ level: "error", message: `Download failed: ${err.message}` }),
+      onError: (err) => pushToast({ level: "error", message: `Download failed: ${err.message}` }),
     });
   };
 

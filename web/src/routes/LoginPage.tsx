@@ -98,11 +98,7 @@ export function LoginPage(): JSX.Element {
                 autoComplete="current-password"
               />
             </div>
-            <Button
-              type="submit"
-              disabled={mutation.isPending}
-              data-testid="login-submit"
-            >
+            <Button type="submit" disabled={mutation.isPending} data-testid="login-submit">
               {mutation.isPending ? "Signing in…" : "Sign in"}
             </Button>
           </form>

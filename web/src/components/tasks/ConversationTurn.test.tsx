@@ -219,9 +219,7 @@ describe("ConversationTurn", () => {
 
   it("offers rollback on non-current turns only", async () => {
     emptyArtifacts();
-    const { rerender } = render(
-      wrap({ version: node("ver-2", 2), onRollback: vi.fn() }),
-    );
+    const { rerender } = render(wrap({ version: node("ver-2", 2), onRollback: vi.fn() }));
     expect(screen.getByTestId("rollback-control")).toBeInTheDocument();
 
     rerender(wrap({ version: node("ver-2", 2), isCurrent: true, onRollback: vi.fn() }));

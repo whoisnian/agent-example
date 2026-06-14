@@ -91,11 +91,15 @@ describe("useTaskLive", () => {
     await waitFor(() => expect(FakeWebSocket.instances.length).toBe(1));
     const sock = FakeWebSocket.instances[0]!;
     sock.openConn();
-    sock.deliver({ topic: "task:t1", kind: "status", seq: 1, ts: "2026-05-26T00:00:00Z", payload: {} });
+    sock.deliver({
+      topic: "task:t1",
+      kind: "status",
+      seq: 1,
+      ts: "2026-05-26T00:00:00Z",
+      payload: {},
+    });
 
-    await waitFor(() =>
-      expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.detail("t1") }),
-    );
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.detail("t1") }));
     // The list prefix refreshes too, so TaskList and the nav Recents follow.
     expect(spy).toHaveBeenCalledWith({ queryKey: taskKeys.lists });
   });

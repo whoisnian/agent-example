@@ -4,7 +4,15 @@ import type { EventItem } from "@/features/tasks/types";
 import { EventLog } from "./EventLog";
 
 function ev(id: number, kind: string, payload: unknown): EventItem {
-  return { id, version_id: "ver-1", run_id: "r", seq: id, kind, payload, created_at: "2026-05-26T00:00:00Z" };
+  return {
+    id,
+    version_id: "ver-1",
+    run_id: "r",
+    seq: id,
+    kind,
+    payload,
+    created_at: "2026-05-26T00:00:00Z",
+  };
 }
 
 describe("EventLog split-block rendering", () => {
@@ -39,7 +47,11 @@ describe("EventLog split-block rendering", () => {
 
   it("renders step progress inside the process card with title and summary", () => {
     render(
-      <EventLog events={[ev(1, "step", { verdict: "advance", title: "write css", summary: "added style.css" })]} />,
+      <EventLog
+        events={[
+          ev(1, "step", { verdict: "advance", title: "write css", summary: "added style.css" }),
+        ]}
+      />,
     );
     const process = screen.getByTestId("event-process");
     const row = within(process).getByTestId("event-row");
@@ -82,14 +94,20 @@ describe("EventLog split-block rendering", () => {
   });
 
   it("hides non-conversational kinds (title)", () => {
-    render(<EventLog events={[ev(1, "title", { title: "My task" }), ev(2, "log", { message: "hi" })]} />);
+    render(
+      <EventLog events={[ev(1, "title", { title: "My task" }), ev(2, "log", { message: "hi" })]} />,
+    );
     const rows = screen.getAllByTestId("event-row");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveAttribute("data-kind", "log");
   });
 
   it("renders an error as a destructive process row naming the code", () => {
-    render(<EventLog events={[ev(1, "error", { code: "deadline_exceeded", message: "ran too long" })]} />);
+    render(
+      <EventLog
+        events={[ev(1, "error", { code: "deadline_exceeded", message: "ran too long" })]}
+      />,
+    );
     const row = within(screen.getByTestId("event-process")).getByTestId("event-row");
     expect(row).toHaveAttribute("data-kind", "error");
     expect(row).toHaveTextContent("deadline_exceeded");

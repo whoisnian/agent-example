@@ -33,10 +33,7 @@ describe("PreviewColumn (right column shell)", () => {
     );
     act(() => useUiStore.getState().togglePreview());
     expect(useUiStore.getState().previewCollapsed).toBe(true);
-    expect(screen.getByTestId("preview-column")).toHaveAttribute(
-      "aria-hidden",
-      "true",
-    );
+    expect(screen.getByTestId("preview-column")).toHaveAttribute("aria-hidden", "true");
     expect(screen.getByTestId("preview-open")).toBeInTheDocument();
     expect(screen.queryByTestId("preview-backdrop")).toBeNull();
   });

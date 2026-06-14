@@ -12,7 +12,7 @@ interface State {
 
 function reportError(err: Error, info: ErrorInfo): void {
   // Centralized handler. Logs the structured triple; can be extended later.
-   
+
   console.error("[ErrorBoundary]", {
     message: err.message,
     stack: err.stack,

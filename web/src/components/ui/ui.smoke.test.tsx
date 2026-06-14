@@ -55,9 +55,7 @@ describe("ui primitives smoke", () => {
         <Input id="email" placeholder="you@example.com" />
       </div>,
     );
-    expect(screen.getByLabelText("Email")).toBe(
-      screen.getByPlaceholderText("you@example.com"),
-    );
+    expect(screen.getByLabelText("Email")).toBe(screen.getByPlaceholderText("you@example.com"));
   });
 
   it("Textarea renders as a textbox", () => {
