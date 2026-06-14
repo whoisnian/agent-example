@@ -248,7 +248,10 @@ func TestStructuralIntegrity(t *testing.T) {
 	// cost_events_run_kind_seq_key replaces the legacy cost_events_run_seq_key
 	// as of migration 0004_cost_events_kind_unique (add-cost-service).
 	wantIndexes := []string{
-		"tasks_tenant_user_status_idx",
+		// tasks_tenant_user_status_live_idx replaces the legacy
+		// tasks_tenant_user_status_idx as of 0011_tasks_soft_delete
+		// (add-task-deletion): a partial index over live (deleted_at IS NULL) rows.
+		"tasks_tenant_user_status_live_idx",
 		"task_versions_task_parent_idx",
 		"one_active_version_per_task",
 		"task_runs_status_heartbeat_idx",
@@ -276,6 +279,18 @@ func TestStructuralIntegrity(t *testing.T) {
 	).Scan(&legacy)
 	if err == nil {
 		t.Errorf("legacy index cost_events_run_seq_key still present after 0004_cost_events_kind_unique")
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("unexpected error checking legacy index: %v", err)
+	}
+
+	// The legacy listing index MUST be gone after 0011_tasks_soft_delete,
+	// replaced by the partial tasks_tenant_user_status_live_idx.
+	var legacyTasks int
+	err = conn.QueryRow(ctx,
+		`SELECT 1 FROM pg_indexes WHERE indexname = 'tasks_tenant_user_status_idx'`,
+	).Scan(&legacyTasks)
+	if err == nil {
+		t.Errorf("legacy index tasks_tenant_user_status_idx still present after 0011_tasks_soft_delete")
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("unexpected error checking legacy index: %v", err)
 	}
