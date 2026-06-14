@@ -11,7 +11,8 @@
 ## 主题与颜色
 
 - 主题走 shadcn 标准 **CSS 变量**，**CSS-first（Tailwind v4）**：`src/styles/globals.css` 用 `@import "tailwindcss"` + `@import "tw-animate-css"`，`@custom-variant dark (&:is(.dark *))` 复刻 class 暗色，`:root`/`.dark` 定义**完整 `oklch()` token**（变量本身即颜色，无 `hsl()` 包裹），`@theme inline` 暴露 `--color-*`/`--radius-*`/`--font-*`。**不覆盖** Tailwind 默认 `spacing`/`fontSize` scale。
-- **MVP 默认深色**放在 `:root`（`<html>` 不挂 `.dark`）；`.dark` 预留（当前镜像 `:root`）。
+- **视觉语言**：中性极简（Vercel/Geist 风）——近零彩度灰阶、单色 `--primary`（light 近黑 / dark 近白按钮）、低对比细边框、`--radius: 0.375rem`、system-ui 字体。唯一保留的强调 hue 是 `--ring`（蓝）以保焦点可见。语义色（destructive/success/warning）去饱和但满足 WCAG AA（filled 徽章 + 文本两用）。
+- **主题约定（标准 shadcn）**：`:root` = **light（MVP 默认**，`<html>` 不挂 `.dark` 即渲染浅色），`.dark` = dark。双主题切换（`add-dual-theme-toggle`）只加偏好 + 持久化 + FOUC-safe boot 来挂/摘 `.dark`，**无值搬移**（约定在此已是标准）。
 - **颜色纪律（plugin-independent）**：`eslint-plugin-tailwindcss` 已退役（v4 仅有长期停滞的 pre-release），其 `no-contradicting-classname` 矛盾检测**无替代**。护栏 = eslint `no-restricted-syntax`（拦 className 里的裸 hex `bg-[#...]` 与裸色函数 `bg-[oklch(...)]`/`rgb()`/`hsl()`）+ `npm run lint:colors`（`scripts/check-colors.mjs`：退役调色板类名 + CSS 裸色字面量，**放行** `globals.css` 的 `:root`/`.dark`/`@theme` token 定义块）。允许变量回退 arbitrary（如 `ring-[var(--color-ring)]`）。用语义 token 类：`bg-background`/`bg-card`/`text-foreground`/`text-muted-foreground`/`bg-primary`/`bg-destructive`/`border-border`/`bg-muted`/`bg-accent` 等。已退役旧调色板（`bg-bg`/`bg-surface`/`text-text`/`text-text-muted`/`text-danger`…）——勿再使用。
 
 ## 三栏外壳

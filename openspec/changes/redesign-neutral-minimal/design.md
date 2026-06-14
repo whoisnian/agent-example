@@ -20,14 +20,14 @@ B 把这套身份重做成 **Vercel/Geist 风中性极简**，且**同时产出 
 
 ## Decisions
 
-### D1 · 双调色板，默认仍深色，light 先 authored-inactive
-B 一次产出 dark + light 两套完整中性极简 OKLCH 值。但为守住 B 的"纯值层、零结构改动"非目标：**dark 集仍由 `:root` 承载为 MVP 默认**（`<html>` 不挂 `.dark`、不动 `index.html`），**light 集写在 `.light` 块、authored-inactive**（沿用本仓库原 `.dark` "defined for future use" 的既有惯例）。
-- **理由**：用户已确认要双主题；让 B 一次定义两套值，C 只接"机制"。把 `:root`/`.dark` 的**标准约定翻转**（shadcn 标准是 `:root`=light/`.dark`=dark）完全收进 C，B 就不必动 `index.html` 也不必 MODIFY "默认主题"场景——B 与 C 不在同一 spec 块上争用。
+### D1 · 双调色板，默认浅色，标准 shadcn 约定（用户决定）
+B 一次产出 light + dark 两套完整中性极简 OKLCH 值，采用**标准 shadcn 约定**：**light 集在 `:root`（MVP 默认）**，dark 集在 `.dark`。`<html>` 不挂 `.dark` 即渲染浅色，无 `index.html` 结构改动。
+- **决策来源**：用户在 B 视觉评审环节明确要默认浅色（"default light"）。这把"约定标准化"从 C 提前到 B——但代价极小（只是把 light 值放进 `:root`、dark 放进 `.dark`，仍是纯值/选择器变化，无组件/结构/testid 改动），且让 C 大幅简化。
 - **default-theme 过渡（A→B→C 一处说清）**：
-  - **A**：`:root`=dark（OKLCH），`.dark` 镜像；默认深色靠 `:root`，无需 `.dark`。
-  - **B**：`:root`=dark 中性极简（默认不变），`.light`=light 中性极简（authored-inactive）；不挂 class、不改结构。
-  - **C**：翻转到 shadcn 标准（`:root`=light、`.dark`=dark，把 `.light` 的值搬进 `:root`、dark 搬进 `.dark`），用 FOUC-safe boot 按偏好挂 `.dark`，并 MODIFY `CSS-Variable Theme Tokens` 的"Default theme resolves without a class toggle"场景。**只有 C 改这一场景**，无三方争用。
-- **承认的小代价**：C 会把 B 的 `.light` 值"搬位"到 `:root`——纯值搬移，无视觉返工。
+  - **A**：`:root`=dark（v3→v4 等价迁移的过渡态），`.dark` 镜像；默认深色。
+  - **B**：翻到标准 `:root`=light（默认浅色）/ `.dark`=dark；纯值 + 选择器归位，无结构改动。
+  - **C**：约定已标准，**无值搬移**；只加偏好 + 持久化 + FOUC-safe boot（按偏好挂/摘 `.dark`），并 MODIFY `CSS-Variable Theme Tokens` 的"默认主题"场景为"偏好驱动"。
+- **A 的归档场景仍满足**：A 的"Default theme resolves without a class toggle"说"默认由 `:root` 承载、无需 `.dark`"——B 把 `:root` 改成 light 后该陈述仍成立（默认=`:root`=light，无 `.dark`），故无需回改已归档的 A。
 
 ### D2 · `--primary` 近单色高对比
 中性极简里 primary 不再是品牌色：light 主题近黑、dark 主题近白（高对比中性）。primary 按钮变单色调；强调色（如果保留一个 accent 蓝）仅用于链接/焦点环/语义。

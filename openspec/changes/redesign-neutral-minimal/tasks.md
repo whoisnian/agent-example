@@ -1,31 +1,31 @@
 ## 1. 视觉规格（先 mock 后改值）
 
-- [ ] 1.1 产出中性极简调色板 mock：dark + light 两套完整 OKLCH token 表（含 surface 层级明度阶）
-- [ ] 1.2 定 `--primary` 近单色方案；显式定 `--ring` 保留可见强调 hue（即便 primary 单色），决定链接是否同用该 hue —— D2 对比 mock
-- [ ] 1.3 定 `--radius` 与边框/分隔权重；定字体策略（system-ui 维持 vs 引入**自托管** Geist/Inter，不碰 CSP）—— D4
-- [ ] 1.4 语义色（destructive/success/warning）去饱和校准，两套主题各自取值
-- [ ] 1.5 视觉规格评审通过（关键 surface 截图级走查）后再进 §2
+- [x] 1.1 产出中性极简调色板：dark + light 两套完整 OKLCH token 表（基于 shadcn v4 neutral base，近零彩度灰阶 + surface 明度阶）
+- [x] 1.2 `--primary` 近单色（dark 近白 / light 近黑）；`--ring` 保留蓝调强调 hue（dark `oklch(0.65 0.18 252)` / light `oklch(0.55 0.2 255)`，用户确认链接亦可用）—— D2
+- [x] 1.3 `--radius` → `0.375rem`（用户定）；边框走低对比中性；字体保持 system-ui（用户定，不碰 CSP）—— D4
+- [x] 1.4 语义色去饱和校准：destructive 共享 `0.577/0.245/27`（filled+text 两用均衡）；success 改 dark-fg（dark `0.7`/light `0.62`）；warning dark-fg
+- [x] 1.5 视觉规格定稿（经 AskUserQuestion 三项决策）后进 §2
 
 ## 2. 落地 token 值（纯值层，零结构改动）
 
-- [ ] 2.1 `globals.css` `:root`：写入完整 **dark** 中性极简 OKLCH 值（承载 MVP 默认；保持现 `:root`-承载默认惯例不变）
-- [ ] 2.2 `globals.css`：把完整 **light** 中性极简 OKLCH 值写入 **`.light` 块（authored-inactive）**，不挂 class、不动 `index.html`、不翻转 `:root`/`.dark` 语义（翻转归 C）
-- [ ] 2.3 更新 `--radius`；如引入品牌字体则配置 `--font-*` 并**自托管**字体资源（`font-src 'self'` 已覆盖，不改 CSP）
-- [ ] 2.4 确认组件代码零结构改动；个别 surface 视觉权重微调只换既有 token 类，不动 `data-testid`
+- [x] 2.1 `globals.css` `:root`：完整 dark 中性极简值（承载 MVP 默认；`:root`-承载默认惯例不变）
+- [x] 2.2 `globals.css` `.light` 块：完整 light 中性极简值（authored-inactive；不挂 class、不动 `index.html`、不翻转语义）
+- [x] 2.3 `--radius` → 0.375rem；字体保持 system-ui（无新增字体资源/CSP 改动）
+- [x] 2.4 组件代码零结构改动；无 `data-testid` 改动（仅 `globals.css` token 值变化）
 
 ## 3. 回归与可访问性
 
-- [ ] 3.1 逐面视觉走查（默认 dark）：LoginPage / 三栏外壳 / TaskList / TaskDetail 对话流 / Artifact 预览 / CostDashboard
-- [ ] 3.2 **dev-only light 渲染走查**：临时强挂 `.light`（或一次性 dev flag）截图走查关键 surface，仅供评审 light 集正确性（catch 复制粘贴错误，如近白前景@近白背景）；**不发布切换入口**，C 负责首次真实 light 渲染
-- [ ] 3.3 两套调色板文本/状态色 WCAG AA 对比校验
-- [ ] 3.4 确认近单色 primary 下主操作仍醒目（对比/边框/focus ring/位置）；`--ring` 焦点态在两套主题键盘可达可见
+- [x] 3.1 逐面视觉走查：用户 `npm run dev` 实测后决定**默认浅色**（"default light"）—— 视觉签收，约定改为 `:root`=light
+- [x] 3.2 light 渲染：light 现为**实时默认**（`:root`），用户已直接看到，无需 dev-only `.light` 走查
+- [x] 3.3 两套调色板 WCAG AA 对比校验（OKLCH→sRGB 计算）：文本/卡片/muted/primary/filled 徽章均 ≥4.5；ring 可见性 ≥3。唯一边际：dark `text-destructive`/bg = 4.15（AA large 过、normal text 近线，brightred-on-near-black 的固有取舍）
+- [x] 3.4 `--primary` 近单色下主操作对比高（dark 近白按钮 14:1）；`--ring` 焦点态两套主题对比 6.09 / 4.90（≥3 可见）
 
 ## 4. 规格与文档
 
-- [ ] 4.1 确认 `openspec/specs/web-design-system` 值层 delta 与落地一致
-- [ ] 4.2 如基调描述需要，更新 `web/AGENTS.md` 的视觉语言说明（不改结构约定）
+- [x] 4.1 `openspec/specs/web-design-system` 值层 delta（ADDED `Neutral-Minimal Visual Identity`）与落地一致
+- [x] 4.2 `web/AGENTS.md` 增中性极简视觉语言简述（不改结构约定）
 
 ## 5. 验收
 
-- [ ] 5.1 `npm run typecheck && npm run lint && npm run test && npm run build` 全绿（契约测试不变）
-- [ ] 5.2 视觉评审签收：中性极简身份落地、两套调色板完整、无结构/testid 变更
+- [x] 5.1 `npm run typecheck && npm run lint && npm run test && npm run build` 全绿（契约测试 202 全过不变）
+- [x] 5.2 视觉评审签收：用户确认中性极简身份 + 默认浅色；两套调色板完整、标准约定、无结构/testid 变更

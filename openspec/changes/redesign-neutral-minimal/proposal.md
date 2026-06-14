@@ -7,8 +7,8 @@
 ## What Changes
 
 - **调色板重选（中性极简）**：用中性灰阶替换靛蓝-深navy 身份。`--primary` 从品牌靛蓝（`#6366f1`）改为**近单色高对比**（浅色近黑 / 深色近白），强调色仅保留在链接/焦点/语义态。语义色（`destructive`/`success`/`warning`）保留但按中性极简基调去饱和校准。
-- **同时定义 light + dark 两套完整调色板**：`globals.css` 给出两套完整中性极简 OKLCH 值，**为 C 的切换铺路**（B 不接切换 UI）。为保持 B **纯值层、零结构改动**：dark 集仍由 `:root` 承载为 MVP 默认（不动 `index.html`、不挂 `.dark`），light 集**先 authored-inactive**（写在 `.light` 块，沿用本仓库"defined for future use"既有惯例），由 C 负责把 light 接活并完成 `:root`=light/`.dark`=dark 的标准约定翻转。
-- **默认外观**：MVP 默认仍为深色（由 `:root` 承载），**本 change 不引入切换入口、不翻转 `:root`/`.dark` 语义**（留给 C）。
+- **同时定义 light + dark 两套完整调色板**：`globals.css` 给出两套完整中性极简 OKLCH 值，采用**标准 shadcn 约定**：light 集在 `:root`（MVP 默认，`<html>` 不挂 `.dark` 即渲染浅色），dark 集在 `.dark`。C 只加切换机制（偏好 + 持久化 + FOUC boot 挂/摘 `.dark`），**无值搬移、无约定翻转**。
+- **默认外观**：MVP 默认为**浅色**（由 `:root` 承载，用户决定），**本 change 不引入切换入口**（留给 C）。
 - **形状与排版节奏**：重校 `--radius`、边框/分隔的对比与权重、表面层级（card/popover/muted/accent 的相对明度阶）；如引入品牌字体（Geist/Inter）**必须自托管**（`font-src 'self'` 已覆盖，B 不动 CSP），design 决定引入与否或保持 system-ui。所有 CSP 改动留在 C。
 - **逐面回归**：在三栏外壳、TaskDetail 对话流、Artifact 预览、CostDashboard、登录页上核对新视觉。
 

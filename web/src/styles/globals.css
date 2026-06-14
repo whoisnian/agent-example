@@ -9,65 +9,71 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * shadcn-standard CSS-variable theme. Under Tailwind v4 each token is a COMPLETE
- * color value in OKLCH (the variable itself is the color — no `hsl(var(--token))`
- * wrapper). Values are the mechanical OKLCH equivalents of the prior HSL palette,
- * so the appearance is visually equivalent to the v3 base. The MVP default
- * appearance is carried by :root (a dark palette); `.dark` mirrors it (toggling is
- * a no-op for MVP, defined for future use).
+ * Neutral-minimal (Vercel/Geist-style) theme. Under Tailwind v4 each token is a
+ * COMPLETE color value in OKLCH (the variable itself is the color — no
+ * `hsl(var(--token))` wrapper). Near-zero-chroma neutrals, monochrome primary
+ * (near-white button in dark / near-black in light), subtle low-contrast borders;
+ * the one retained accent hue is a restrained blue on `--ring` (focus) so focus
+ * visibility does not regress under the monochrome primary.
+ *
+ * Default-theme convention (standard shadcn): the LIGHT set is the active
+ * default, carried by :root (so the app renders light with no `.dark` class on
+ * <html>); the DARK set lives under `.dark`. The dual-theme toggle change (C)
+ * adds preference + persistence + FOUC-safe boot that mounts/removes `.dark` —
+ * no value reshuffle is left for C, the convention is already standard here.
  */
 :root {
-  --background: oklch(0.1739 0.0323 268.91);
-  --foreground: oklch(0.9275 0.0062 264.53);
-  --card: oklch(0.227 0.0316 272.9);
-  --card-foreground: oklch(0.9275 0.0062 264.53);
-  --popover: oklch(0.227 0.0316 272.9);
-  --popover-foreground: oklch(0.9275 0.0062 264.53);
-  --primary: oklch(0.5875 0.2039 277.36);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.2728 0.0418 272.64);
-  --secondary-foreground: oklch(0.9275 0.0062 264.53);
-  --muted: oklch(0.2728 0.0418 272.64);
-  --muted-foreground: oklch(0.71 0.0348 256.79);
-  --accent: oklch(0.2906 0.0457 272.57);
-  --accent-foreground: oklch(0.9275 0.0062 264.53);
-  --destructive: oklch(0.6356 0.2082 25.38);
-  --destructive-foreground: oklch(1 0 0);
-  --success: oklch(0.6902 0.1481 162.37);
-  --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.7697 0.1645 70.61);
-  --warning-foreground: oklch(1 0 0);
-  --border: oklch(0.3145 0.0413 270.88);
-  --input: oklch(0.3145 0.0413 270.88);
-  --ring: oklch(0.5875 0.2039 277.36);
-  --radius: 0.5rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.62 0.14 162);
+  --success-foreground: oklch(0.205 0 0);
+  --warning: oklch(0.7 0.14 70);
+  --warning-foreground: oklch(0.205 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.55 0.2 255);
+  --radius: 0.375rem;
 }
 
 .dark {
-  --background: oklch(0.1739 0.0323 268.91);
-  --foreground: oklch(0.9275 0.0062 264.53);
-  --card: oklch(0.227 0.0316 272.9);
-  --card-foreground: oklch(0.9275 0.0062 264.53);
-  --popover: oklch(0.227 0.0316 272.9);
-  --popover-foreground: oklch(0.9275 0.0062 264.53);
-  --primary: oklch(0.5875 0.2039 277.36);
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.2728 0.0418 272.64);
-  --secondary-foreground: oklch(0.9275 0.0062 264.53);
-  --muted: oklch(0.2728 0.0418 272.64);
-  --muted-foreground: oklch(0.71 0.0348 256.79);
-  --accent: oklch(0.2906 0.0457 272.57);
-  --accent-foreground: oklch(0.9275 0.0062 264.53);
-  --destructive: oklch(0.6356 0.2082 25.38);
-  --destructive-foreground: oklch(1 0 0);
-  --success: oklch(0.6902 0.1481 162.37);
-  --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.7697 0.1645 70.61);
-  --warning-foreground: oklch(1 0 0);
-  --border: oklch(0.3145 0.0413 270.88);
-  --input: oklch(0.3145 0.0413 270.88);
-  --ring: oklch(0.5875 0.2039 277.36);
-  --radius: 0.5rem;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.7 0.13 162);
+  --success-foreground: oklch(0.205 0 0);
+  --warning: oklch(0.77 0.13 75);
+  --warning-foreground: oklch(0.205 0 0);
+  --border: oklch(0.275 0 0);
+  --input: oklch(0.325 0 0);
+  --ring: oklch(0.65 0.18 252);
+  --radius: 0.375rem;
 }
 
 /*

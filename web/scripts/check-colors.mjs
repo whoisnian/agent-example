@@ -70,7 +70,7 @@ readFileSync(INDEX_HTML, "utf8")
   let inTokenBlock = false;
   let blockStartDepth = 0;
   lines.forEach((line, i) => {
-    const opensTokenBlock = /(^|\s)(:root|\.dark|@theme)\b/.test(line);
+    const opensTokenBlock = /(^|\s)(:root|\.dark|\.light|@theme)\b/.test(line);
     if (opensTokenBlock && line.includes("{")) {
       inTokenBlock = true;
       blockStartDepth = depth;
