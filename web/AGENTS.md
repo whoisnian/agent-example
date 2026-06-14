@@ -4,15 +4,15 @@
 
 ## 设计系统（shadcn/ui）
 
-- **组件基座**：shadcn/ui，源码 vendored 到 `src/components/ui/`（不是 npm 包）。按需手动添加，不批量拉取。`components.json` 保留偶尔用 CLI 追加单个组件的能力。
-- **vendoring 形态**：保持 **Tailwind-3 兼容**（cva + `tailwind-merge`，颜色 `hsl(var(--token))`，动画用 `tailwindcss-animate`）；不要拷入 Tailwind 4-only 语法（`@theme` 等）。仓库**不升级 Tailwind 4**（`eslint-plugin-tailwindcss@3` 仅支持 v3）。
-- **`cn()`**：`src/lib/cn.ts`（`clsx` + `tailwind-merge`）。已注册到 eslint `tailwindcss.callees`。
+- **组件基座**：shadcn/ui，源码 vendored 到 `src/components/ui/`（不是 npm 包）。按需手动添加，不批量拉取。`components.json` 保留偶尔用 CLI 追加单个组件的能力（`tailwind.config` 字段为 `""`——v4 无 JS config）。
+- **vendoring 形态**：**Tailwind 4**（cva + `tailwind-merge@3`，颜色为完整 `oklch()` token、用 `var(--color-*)`/`var(--token)` 引用，动画用 `tw-animate-css`）。构建走 `@tailwindcss/vite`（无 `postcss.config.js`/`autoprefixer`）。主题用 CSS-first `@theme`（见下）；**不要**再用 v3 的 `hsl(var(--token))` 包裹或 JS `tailwind.config.js`。
+- **`cn()`**：`src/lib/cn.ts`（`clsx` + `tailwind-merge`）。
 
 ## 主题与颜色
 
-- 主题走 shadcn 标准 **CSS 变量**：`src/styles/globals.css` 定义 `:root` 与 `.dark`（HSL 三元组）；`tailwind.config.js` 以 `theme.extend.colors` 映射 `hsl(var(--token))`，`darkMode:["class"]`，**不覆盖** Tailwind 默认 `spacing`/`fontSize` scale。
-- **MVP 默认深色**放在 `:root`（`<html>` 不挂 `.dark`）；`.dark` 预留未启用。
-- **颜色纪律**：禁裸 hex（eslint `no-restricted-syntax` 拦 `bg-[#...]`）；允许引用变量的 arbitrary 值（如 `ring-[hsl(var(--ring))]`）。用语义 token 类：`bg-background`/`bg-card`/`text-foreground`/`text-muted-foreground`/`bg-primary`/`bg-destructive`/`border-border`/`bg-muted`/`bg-accent` 等。已退役旧调色板（`bg-bg`/`bg-surface`/`text-text`/`text-text-muted`/`text-danger`…）——勿再使用。
+- 主题走 shadcn 标准 **CSS 变量**，**CSS-first（Tailwind v4）**：`src/styles/globals.css` 用 `@import "tailwindcss"` + `@import "tw-animate-css"`，`@custom-variant dark (&:is(.dark *))` 复刻 class 暗色，`:root`/`.dark` 定义**完整 `oklch()` token**（变量本身即颜色，无 `hsl()` 包裹），`@theme inline` 暴露 `--color-*`/`--radius-*`/`--font-*`。**不覆盖** Tailwind 默认 `spacing`/`fontSize` scale。
+- **MVP 默认深色**放在 `:root`（`<html>` 不挂 `.dark`）；`.dark` 预留（当前镜像 `:root`）。
+- **颜色纪律（plugin-independent）**：`eslint-plugin-tailwindcss` 已退役（v4 仅有长期停滞的 pre-release），其 `no-contradicting-classname` 矛盾检测**无替代**。护栏 = eslint `no-restricted-syntax`（拦 className 里的裸 hex `bg-[#...]` 与裸色函数 `bg-[oklch(...)]`/`rgb()`/`hsl()`）+ `npm run lint:colors`（`scripts/check-colors.mjs`：退役调色板类名 + CSS 裸色字面量，**放行** `globals.css` 的 `:root`/`.dark`/`@theme` token 定义块）。允许变量回退 arbitrary（如 `ring-[var(--color-ring)]`）。用语义 token 类：`bg-background`/`bg-card`/`text-foreground`/`text-muted-foreground`/`bg-primary`/`bg-destructive`/`border-border`/`bg-muted`/`bg-accent` 等。已退役旧调色板（`bg-bg`/`bg-surface`/`text-text`/`text-text-muted`/`text-danger`…）——勿再使用。
 
 ## 三栏外壳
 
