@@ -6,7 +6,7 @@
 - **职责**：任务 CRUD、状态机推进、版本管理、互斥校验、成本查询聚合、Outbox 投递、Realtime Gateway 与 Worker 编排
 - **目录规划**：见 [`../docs/ARCHITECTURE.md §3.2`](../docs/ARCHITECTURE.md)
 
-> MVP 骨架由 OpenSpec 变更 `init-api-scaffold` 引入；任务域 / 成本域 schema 由 `add-task-domain-schema` 引入。当前提供"能启动 / 能连 PG / 能连 RabbitMQ / 能优雅关停 / Outbox Relayer 可投递 / 业务表 schema 就绪"的最小可用骨架；尚未交付任何业务路由。
+> MVP 骨架由 OpenSpec 变更 `init-api-scaffold` 引入；任务域 / 成本域 schema 由 `add-task-domain-schema` 引入。在此之上已逐步交付完整业务面：任务写/读、事件消费与状态同步、成本结算与查询、任务控制（暂停/恢复/取消）、回滚、删除、产物下载代理、JWT 鉴权、实时网关。各端点的契约与对应变更见下文分节，演进轨迹见 [`../docs/HISTORY.md`](../docs/HISTORY.md)。
 
 ## 本地启动
 
@@ -159,7 +159,7 @@ sqlc 已基于 `queries/*.sql` 生成 CREATE + READ 路径的类型化代码至 
 
 要点：
 
-- **成本摘要**内嵌于列表 / 详情 / 版本节点，来自 `task_costs` 表。`amount_usd` 是保留 8 位小数的**十进制字符串**（如 `"0.62000000"`），避免 `float64` 丢精度；Cost Service 尚未实现时恒为 `"0.00000000"`，读取永不因成本缺失而失败。成本明细端点（`/cost`）属于 `add-task-cost-api`。
+- **成本摘要**内嵌于列表 / 详情 / 版本节点，来自 `task_costs` 表。`amount_usd` 是保留 8 位小数的**十进制字符串**（如 `"0.62000000"`），避免 `float64` 丢精度；尚无成本事件结算（如版本刚创建）的版本恒为 `"0.00000000"`，读取永不因成本缺失而失败。结算由 Cost Service 完成（`add-cost-service`，见下方"成本结算"节）；成本明细端点（`/cost`）属于 `add-task-cost-api`。
 - **事件游标**用全局 `task_events.id`；每个事件同时暴露 `id` 与 `seq` 供实时客户端对齐（详见提案 design D7 / Open Question #3）。
 - 同写端点，`tenant_id` / `user_id` 取自 `DEV_TENANT_ID` / `DEV_USER_ID`。
 

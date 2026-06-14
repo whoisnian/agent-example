@@ -7,6 +7,8 @@
 - **目录规划**：见 [`../docs/ARCHITECTURE.md §3.1`](../docs/ARCHITECTURE.md) 与 `openspec/changes/init-web-scaffold/design.md` D10
 
 > MVP 骨架由 OpenSpec 变更 `init-web-scaffold` 引入（应用外壳、路由、HTTP envelope 客户端、Zustand store、WebSocket 单例、vitest+msw 测试）。首批业务页面由 `add-web-tasks-pages` 引入（见下）。
+>
+> 之后前端经多轮 OpenSpec 变更演进至当前形态：登录页（`add-web-auth-login`）、成本视图（`add-web-cost-views`）、控制栏暂停/恢复/取消（`add-web-control-bar`）、回滚入口（`add-web-rollback-entry`）、产物视图（`add-web-artifacts-views`），以及 shadcn/ui 三栏外壳 + 对话流 + 富产物预览 + 明暗双主题（`refactor-web-shadcn-three-column` 等系列）。完整轨迹见 [`../docs/HISTORY.md`](../docs/HISTORY.md) 与 `openspec/changes/archive/`。下文"任务页面"小节记录的是 `add-web-tasks-pages` 当时的范围，部分"不在本次范围"项已在后续变更中落地。
 
 ## 任务页面（`add-web-tasks-pages`）
 
@@ -22,11 +24,11 @@
 
 - **数据层** 全在 `src/features/tasks/`：`types.ts`（API DTO 的 TS 镜像，`amount_usd` 恒为**字符串**，绝不 `Number()`）、`api.ts`（`apiFetch` 封装）、`queries.ts` / `mutations.ts`（React Query keys + hooks）。
 - **任务级互斥**：`task.status` 活跃（可达态 `pending`/`running`/`paused`）时禁用 Iterate 按钮；但**后端 409 才是真相之源** —— 迭代撞 `active_version_exists` 时弹出指明活跃版本的 toast 并刷新（不重试 409）。
-- **实时观测：WS 优先 + 轮询兜底**（design D2）。TaskDetail 通过 `realtimeClient` 订阅 `task:<id>` / `version:<cur>`，收到帧即失活相应 React Query 缓存；gap-fill 经 `onGap` 按**全局事件 `id`**（非 `seq`）走 `/events?after_id=` 回补（在 `main.tsx` 一次性注册）。**Realtime Gateway 服务端尚未实现**，故以 `refetchInterval`（函数式，每 tick 重读连接状态）在"任务活跃且 WS 未 open"时 ~3s 轮询，终态或 WS 连上即停 —— 网关上线后自动静默轮询，无需改页面。
+- **实时观测：WS 优先 + 轮询兜底**（design D2）。TaskDetail 通过 `realtimeClient` 订阅 `task:<id>` / `version:<cur>`，收到帧即失活相应 React Query 缓存；gap-fill 经 `onGap` 按**全局事件 `id`**（非 `seq`）走 `/events?after_id=` 回补（在 `main.tsx` 一次性注册）。WS 连上即走实时帧；作为兜底仍保留 `refetchInterval`（函数式，每 tick 重读连接状态），在"任务活跃且 WS 未 open"（如网关重启/断线重连窗口）时 ~3s 轮询，终态或 WS 连上即静默。Realtime Gateway 服务端已由 `add-realtime-gateway` 落地（见 `api/README.md` 的"实时网关"节）。
 - **404**：TaskDetail 对 `task_not_found` 渲染 not-found 态，不重试、不弹 toast（`useTaskQuery` 的 per-query `retry` + `meta.silent`）。
 - **`ApiError.data`**：`services/http.ts` 增量暴露错误 envelope 的 `data`，供表单读取 `invalid_input` 的 `{field, reason}` 与 409 的 `{active_version_id, ...}`。
 - **task_type** 取值（`code-gen` / `research`）镜像 worker `AgentRegistry`，非 API 强约束。
-- **不在本次范围**：CostDashboard（成本数据填充前恒为 0，待 `add-cost-service`）、react-flow 版本树可视化、控制/回滚动作。
+- **当时不在本次范围**：CostDashboard（待 `add-cost-service`）、版本树可视化、控制/回滚动作 —— 其中成本视图、控制栏、回滚入口均已在后续变更中落地（见本文件顶部说明）；版本树可视化随对话流重构被"按轮次回滚按钮"取代。
 
 ## 本地启动
 

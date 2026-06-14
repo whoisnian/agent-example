@@ -6,7 +6,7 @@ Worker 服务根目录。
 - **职责**：从 RabbitMQ 消费任务 → 调度 deep agent 执行 → 写 checkpoint / 上传 artifact → 发出 `task.events` / `cost.events`
 - **目录规划**：见 [`../docs/ARCHITECTURE.md §3.3`](../docs/ARCHITECTURE.md) 以及本仓库 `openspec/changes/init-worker-scaffold/design.md` D11
 
-> 当前实现：**MVP 脚手架**。Dispatcher 永远抛出 `AgentNotImplementedError`，真实 agent 由后续 OpenSpec 提案接入。
+> 当前实现：**MVP 可用**。`code-gen` / `research` 两个 agent 已落地（见下方 [Agents](#agents)），由 `ExecutionDispatcher` 按 `task_type` 路由；未注册的类型仍抛 `AgentNotImplementedError` → DLX。fake model 无需 API key 即可跑通 plan→execute→critic→checkpoint→event→artifact 闭环。
 
 ## 本地启动
 
