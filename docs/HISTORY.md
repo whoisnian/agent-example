@@ -189,3 +189,15 @@ web 前端界面依旧需要优化：
 
 /opsx:archive
 ```
+
+### 前端优化
+```md
+否使用 https://github.com/vercel/ai-elements 重构完整前端界面
+如果 tailwind 升级到 v4 会有哪些问题
+先不考虑接入 ai-elements，当前目标是现代化整套设计系统
+新起一个 subagent 来依次 review 三个提案，并整理改进意见到 suggestions.md，检查改进意见是否有效，优化当前提案
+
+1. 2026-06-14-migrate-design-system-base
+2. 2026-06-14-redesign-neutral-minimal
+3. 2026-06-14-add-dual-theme-toggle
+```
