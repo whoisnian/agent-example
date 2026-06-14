@@ -229,6 +229,12 @@ type Querier interface {
 	// The highest-step_seq checkpoint for a run, or zero rows if none. Workers
 	// use this on resume to find the resume point.
 	SelectLatestCheckpoint(ctx context.Context, runID pgtype.UUID) (TaskCheckpoint, error)
+	// add-task-deletion: soft-delete a task by stamping deleted_at. Guarded by
+	// `deleted_at IS NULL` so a second delete affects 0 rows (idempotent → the
+	// domain maps 0 rows to ErrTaskNotFound). Ownership + active-version checks
+	// are enforced by the caller via LockTaskForControl inside the same tx, so
+	// this exec is keyed by id alone.
+	SoftDeleteTask(ctx context.Context, id pgtype.UUID) (int64, error)
 	// Caller-scoped totals for /me/cost (no group_by branch). Aggregates
 	// cost_events directly so the time filter applies to occurred_at — settle-
 	// time would corrupt buckets when a backfill lands. Per-column FILTER

@@ -72,6 +72,7 @@ type Task struct {
 	CurrentVersion pgtype.UUID        `json:"current_version"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type TaskCheckpoint struct {

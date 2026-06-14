@@ -140,6 +140,11 @@ func (s *ReadService) GetTask(ctx context.Context, owner Owner, taskID uuid.UUID
 	if !owner.owns(t.TenantID, t.UserID) {
 		return TaskDetail{}, ErrTaskNotFound
 	}
+	// Soft-deleted tasks are invisible to owner-scoped reads (add-task-deletion);
+	// indistinguishable from missing/unowned.
+	if t.DeletedAt.Valid {
+		return TaskDetail{}, ErrTaskNotFound
+	}
 
 	detail := TaskDetail{
 		Task: TaskInfo{
@@ -297,6 +302,10 @@ func ownedTask(ctx context.Context, q sqlc.Querier, owner Owner, taskID uuid.UUI
 	if !owner.owns(t.TenantID, t.UserID) {
 		return sqlc.Task{}, ErrTaskNotFound
 	}
+	// Soft-deleted task hides from versions list + realtime OwnsTask (add-task-deletion).
+	if t.DeletedAt.Valid {
+		return sqlc.Task{}, ErrTaskNotFound
+	}
 	return t, nil
 }
 
@@ -347,6 +356,11 @@ func ownedVersion(ctx context.Context, q sqlc.Querier, owner Owner, versionID uu
 		return sqlc.TaskVersion{}, terr
 	}
 	if !owner.owns(t.TenantID, t.UserID) {
+		return sqlc.TaskVersion{}, ErrVersionNotFound
+	}
+	// Versions reachable through a soft-deleted task are not found (add-task-deletion);
+	// mapped to ErrVersionNotFound to match this probe's existing contract.
+	if t.DeletedAt.Valid {
 		return sqlc.TaskVersion{}, ErrVersionNotFound
 	}
 	return v, nil

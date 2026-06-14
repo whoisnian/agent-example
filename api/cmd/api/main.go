@@ -309,6 +309,17 @@ func runServer(args []string) int {
 		Metrics: metrics,
 	}
 
+	// Task-deletion wiring (add-task-deletion). Soft delete = a single
+	// owner-scoped task-table write; no outbox / MQ.
+	appDeleteSvc := apptask.NewDeleteService(
+		taskdomain.NewDeleteService(pool.Pool, queries),
+	)
+	taskDeleteHandlers := &httpapi.TaskDeleteHandlers{
+		App:     appDeleteSvc,
+		Logger:  logger,
+		Metrics: metrics,
+	}
+
 	// Artifacts-api wiring (add-artifact-download-proxy). Download URLs are
 	// API-signed local tokens (aud=artifact-download, shared JWT secret) and
 	// artifact bytes stream from OSS through the download proxy route — the
@@ -376,6 +387,7 @@ func runServer(args []string) int {
 		TaskReadHandlers:    taskReadHandlers,
 		TaskCostHandlers:    taskCostHandlers,
 		TaskControlHandlers: taskControlHandlers,
+		TaskDeleteHandlers:  taskDeleteHandlers,
 		ArtifactHandlers:    artifactHandlers,
 		WSGateway:           wsGateway,
 	})

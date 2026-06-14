@@ -27,6 +27,7 @@ type ServerDeps struct {
 	TaskReadHandlers    *TaskReadHandlers    // optional; nil disables the read routes
 	TaskCostHandlers    *TaskCostHandlers    // optional; nil disables the cost-read routes
 	TaskControlHandlers *TaskControlHandlers // optional; nil disables the control route
+	TaskDeleteHandlers  *TaskDeleteHandlers  // optional; nil disables the delete route
 	ArtifactHandlers    *ArtifactHandlers    // optional; nil disables the artifact-read routes
 	WSGateway           *wsgateway.Gateway   // optional; nil disables the /ws route
 }
@@ -64,7 +65,7 @@ func NewEngine(deps *ServerDeps) *gin.Engine {
 	// Business routes under /api/v1. Each handler set stays optional so tests
 	// can spin up an engine with only the write or only the read side; the v1
 	// group is created once and shared so both register on the same prefix.
-	if deps.AuthHandlers != nil || deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil || deps.TaskControlHandlers != nil || deps.ArtifactHandlers != nil || deps.WSGateway != nil {
+	if deps.AuthHandlers != nil || deps.TaskHandlers != nil || deps.TaskReadHandlers != nil || deps.TaskCostHandlers != nil || deps.TaskControlHandlers != nil || deps.TaskDeleteHandlers != nil || deps.ArtifactHandlers != nil || deps.WSGateway != nil {
 		v1 := e.Group("/api/v1")
 		if deps.AuthHandlers != nil {
 			deps.AuthHandlers.Register(v1)
@@ -80,6 +81,9 @@ func NewEngine(deps *ServerDeps) *gin.Engine {
 		}
 		if deps.TaskControlHandlers != nil {
 			deps.TaskControlHandlers.Register(v1)
+		}
+		if deps.TaskDeleteHandlers != nil {
+			deps.TaskDeleteHandlers.Register(v1)
 		}
 		if deps.ArtifactHandlers != nil {
 			deps.ArtifactHandlers.Register(v1)

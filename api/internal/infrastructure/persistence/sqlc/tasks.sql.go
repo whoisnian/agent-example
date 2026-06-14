@@ -16,6 +16,7 @@ SELECT COUNT(*)::bigint AS total
 FROM tasks
 WHERE tenant_id = $1
   AND user_id = $2
+  AND deleted_at IS NULL
   AND ($3::text IS NULL OR status = $3::text)
 `
 
@@ -41,7 +42,7 @@ INSERT INTO tasks (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7
 )
-RETURNING id, tenant_id, user_id, title, task_type, status, current_version, created_at, updated_at
+RETURNING id, tenant_id, user_id, title, task_type, status, current_version, created_at, updated_at, deleted_at
 `
 
 type CreateTaskParams struct {
@@ -77,12 +78,13 @@ func (q *Queries) CreateTask(ctx context.Context, arg CreateTaskParams) (Task, e
 		&i.CurrentVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getTaskByID = `-- name: GetTaskByID :one
-SELECT id, tenant_id, user_id, title, task_type, status, current_version, created_at, updated_at
+SELECT id, tenant_id, user_id, title, task_type, status, current_version, created_at, updated_at, deleted_at
 FROM tasks
 WHERE id = $1
 `
@@ -100,15 +102,17 @@ func (q *Queries) GetTaskByID(ctx context.Context, id pgtype.UUID) (Task, error)
 		&i.CurrentVersion,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const listTasks = `-- name: ListTasks :many
-SELECT id, tenant_id, user_id, title, task_type, status, current_version, created_at, updated_at
+SELECT id, tenant_id, user_id, title, task_type, status, current_version, created_at, updated_at, deleted_at
 FROM tasks
 WHERE tenant_id = $1
   AND user_id = $2
+  AND deleted_at IS NULL
   AND ($5::text IS NULL OR status = $5::text)
 ORDER BY created_at DESC, id DESC
 LIMIT $3 OFFSET $4
@@ -149,6 +153,7 @@ func (q *Queries) ListTasks(ctx context.Context, arg ListTasksParams) ([]Task, e
 			&i.CurrentVersion,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -223,6 +228,27 @@ func (q *Queries) LockTaskRow(ctx context.Context, id pgtype.UUID) (LockTaskRowR
 	var i LockTaskRowRow
 	err := row.Scan(&i.ID, &i.Status, &i.CurrentVersion)
 	return i, err
+}
+
+const softDeleteTask = `-- name: SoftDeleteTask :execrows
+UPDATE tasks
+SET deleted_at = now(),
+    updated_at = now()
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+// add-task-deletion: soft-delete a task by stamping deleted_at. Guarded by
+// `deleted_at IS NULL` so a second delete affects 0 rows (idempotent → the
+// domain maps 0 rows to ErrTaskNotFound). Ownership + active-version checks
+// are enforced by the caller via LockTaskForControl inside the same tx, so
+// this exec is keyed by id alone.
+func (q *Queries) SoftDeleteTask(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteTask, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const switchTaskCurrentVersion = `-- name: SwitchTaskCurrentVersion :exec

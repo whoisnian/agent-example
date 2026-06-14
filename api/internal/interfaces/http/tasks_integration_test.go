@@ -155,6 +155,9 @@ func newSuite(t *testing.T) *suite {
 	appControlSvc := apptask.NewControlService(
 		taskdomain.NewControlService(pool, queries, taskdomain.SystemClock{}),
 	)
+	appDeleteSvc := apptask.NewDeleteService(
+		taskdomain.NewDeleteService(pool, queries),
+	)
 
 	probes := httpapi.NewProbeRegistry(time.Second)
 	engine := httpapi.NewEngine(&httpapi.ServerDeps{
@@ -177,6 +180,11 @@ func newSuite(t *testing.T) *suite {
 		},
 		TaskControlHandlers: &httpapi.TaskControlHandlers{
 			App:     appControlSvc,
+			Logger:  logger,
+			Metrics: metrics,
+		},
+		TaskDeleteHandlers: &httpapi.TaskDeleteHandlers{
+			App:     appDeleteSvc,
 			Logger:  logger,
 			Metrics: metrics,
 		},

@@ -48,6 +48,7 @@ type Metrics struct {
 
 	// Task control metrics (add-task-control-api §"Observability")
 	TaskControlRequestsTotal *prometheus.CounterVec
+	TaskDeletedTotal         *prometheus.CounterVec
 
 	// Artifacts-api metrics (add-artifacts-api §D8, reworked by
 	// add-artifact-download-proxy). Presign is now a local signing operation;
@@ -214,6 +215,13 @@ func NewMetrics() *Metrics {
 			},
 			[]string{"action", "outcome"},
 		),
+		TaskDeletedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "task_deleted_total",
+				Help: "DELETE /tasks/{id} soft-delete requests. outcome ∈ {deleted,conflict,not_found,invalid}.",
+			},
+			[]string{"outcome"},
+		),
 		OSSPresignTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Name: "oss_presign_total",
@@ -311,6 +319,7 @@ func NewMetrics() *Metrics {
 		m.CostEventSettleDurationSeconds,
 		m.CostConsumerConnected,
 		m.TaskControlRequestsTotal,
+		m.TaskDeletedTotal,
 		m.OSSPresignTotal,
 		m.OSSDownloadTotal,
 		m.OSSDownloadBytes,

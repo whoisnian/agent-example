@@ -20,6 +20,7 @@ SELECT *
 FROM tasks
 WHERE tenant_id = $1
   AND user_id = $2
+  AND deleted_at IS NULL
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
 ORDER BY created_at DESC, id DESC
 LIMIT $3 OFFSET $4;
@@ -77,6 +78,7 @@ SELECT COUNT(*)::bigint AS total
 FROM tasks
 WHERE tenant_id = $1
   AND user_id = $2
+  AND deleted_at IS NULL
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text);
 
 -- name: UpdateTaskTitle :execrows
@@ -102,3 +104,15 @@ WHERE id = $1
   AND current_version = $3
   AND status NOT IN ('succeeded', 'failed', 'cancelled')
   AND status IS DISTINCT FROM $2;
+
+-- name: SoftDeleteTask :execrows
+-- add-task-deletion: soft-delete a task by stamping deleted_at. Guarded by
+-- `deleted_at IS NULL` so a second delete affects 0 rows (idempotent → the
+-- domain maps 0 rows to ErrTaskNotFound). Ownership + active-version checks
+-- are enforced by the caller via LockTaskForControl inside the same tx, so
+-- this exec is keyed by id alone.
+UPDATE tasks
+SET deleted_at = now(),
+    updated_at = now()
+WHERE id = $1
+  AND deleted_at IS NULL;
