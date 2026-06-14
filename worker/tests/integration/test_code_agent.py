@@ -160,8 +160,16 @@ async def test_code_agent_success_writes_artifact_and_checkpoints(
     agent = build_code_agent(FakeModelFactory(model=_script()), persistence, settings_for_agent)
     await agent.run(ctx, _msg(ctx))
 
-    # Plan + two step events, then the run-summary event after artifact rows.
-    assert [e["kind"] for e in events.events] == ["plan", "step", "step", "summary"]
+    # Plan, then step 1 (writes main.py) followed by its artifact event, then
+    # step 2 (no files), then the run-summary event. Artifact events are emitted
+    # per persisted row right after their step (insert-then-publish).
+    assert [e["kind"] for e in events.events] == [
+        "plan",
+        "step",
+        "artifact",
+        "step",
+        "summary",
+    ]
     assert events.events[-1]["payload"]["summary"] == "1. wrote main\n2. done"
     # Seqs are strictly increasing (step seqs are pre-reserved before their
     # checkpoints; the summary event continues the sequence).
